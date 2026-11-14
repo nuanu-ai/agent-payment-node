@@ -4,7 +4,7 @@ import { decodeFunctionData } from "viem";
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { evmAddressLock } from "../evm-address-ownership.js";
 import { StateStore } from "../state.js";
-import { admitOperation } from "../operation-index/admission.js";
+import { admitOperation, assertOwnClaimsAvailable } from "../operation-index/admission.js";
 import { evmClaim, namedProfileHash } from "../operation-index/adapters/family-claims.js";
 import { STARGATE_SEND_ABI } from "./abi.js";
 import { assertStargateV2RouteFinalityPolicy } from "./finality-policy.js";
@@ -31,6 +31,11 @@ export class FileStargateTokenJournal {
         await state.initialize();
         return await admitOperation(state, { family: "stargate_token", profileHash: namedProfileHash(operation.profile), operationId: operation.operationId,
             idempotencyHash: null, requestHash: null }, [evmClaim(STARGATE_TOKEN_SOURCE_CHAIN, address(operation.owner))], work);
+    }
+    async assertOwnClaims(operationId) {
+        const state = new StateStore(this.root);
+        await state.initialize();
+        await assertOwnClaimsAvailable(state, operationId);
     }
     async load(id) {
         try {

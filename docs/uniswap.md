@@ -19,7 +19,25 @@ commands such as `inventory` do not need it.
 `APN_ETHEREUM_ARCHIVE_RPC_URL` is optional. When it is set, state reads pinned
 to one exact block (`eth_getCode`, `eth_getStorageAt` and `eth_call` at a
 numeric tag or block hash) go to it after its chain id is checked; otherwise
-the primary serves them, which works for recent blocks on any full node.
+the primary serves them, which works for recent blocks on any full node. This
+holds for both families, including the token lane's batched reads. The token
+lane reads receipts from `APN_ETHEREUM_RECEIPT_RPC_URL` when it is set to
+another origin than the primary, else from the archive when that is set, else
+from the primary. A batch goes to one endpoint only; it is never sent to
+another one after a failure. With a token-lane primary pool, the primary
+stands in for a missing archive or receipt reader only after the pool has
+selected its provider; such a batch before that refuses with
+`APN_RPC_CONFIG` / `token_primary_not_selected` and probes nothing. A token
+lane state read the primary serves (`eth_call`, `eth_getCode`,
+`eth_getStorageAt`, `eth_getBalance` at a block the command read) is pinned
+to that block's hash (EIP-1898, `requireCanonical: true`), so a backend on
+another branch refuses it instead of answering other state. A block read by
+number keeps the first hash the primary answered; a later block's parent hash
+only names a block the command never read. If the primary answers two
+different hashes for one block, a read pinned there refuses with
+`APN_RPC_PROTOCOL` / `token_primary_block_hash_conflict` and is not sent.
+`eth_estimateGas` keeps the block number, since EIP-1898 does not define it
+there. Pinning changes no request count.
 Public endpoints that need no account or API key:
 
 ```sh
@@ -44,10 +62,37 @@ Optional settings:
 Both families need owner admission: the profile's active allowlist policy must
 admit both assets of the swap for the `swap` rail with the family's route or
 mechanism pin from `inventory`. Without it, `prepare` refuses with
-`swap_owner_admission_required`; a policy changed after `prepare` refuses with
-`swap_policy_drift`. The per-operation cap is checked at `prepare`; the daily
-cap is enforced by the shared usage ledger. Staging and foreground activation
-work as described in [Orca](orca.md#owner-admission).
+`swap_owner_admission_required`, and `next_actions` name
+`apn allowlist policy status --profile <profile>`; a policy changed after
+`prepare` refuses with `swap_policy_drift`. An active policy that does not admit one of the two
+assets refuses with the same reason: `prepare` for the native-input family,
+`quote` for the token-input family. Its `details` name the `side` (`source` or
+`destination`), the `chain`, the `asset` (`native` or the token address) and
+the `admissionGap`:
+
+| `admissionGap` | The active policy |
+| --- | --- |
+| `network_not_listed` | does not list Ethereum mainnet. |
+| `asset_not_listed` | does not list the asset. |
+| `swap_rail_not_admitted` | lists the asset without the `swap` rail. |
+| `swap_route_not_admitted` | admits the asset for `swap` with another route. |
+
+Its `next_actions` are `apn allowlist policy status --profile <profile>` and
+the family's `inventory`, which prints the route to admit.
+
+The per-operation cap is checked at `prepare` (the token-input family also
+checks it, with today's usage, at `quote`); the daily cap is enforced by the
+shared usage ledger when the approval reserves the input. Both refuse with
+`APN_OPERATION_BLOCKED` and the reasons the direct rail uses:
+
+| Reason | When | `details` |
+| --- | --- | --- |
+| `allowlist_per_transfer_cap_exceeded` | The amount is above the asset's per-transfer cap. For the output asset the amount is the minimum output. | `side`, `chain`, `asset`, `maximum_per_transfer_atomic`, `amount_atomic` |
+| `allowlist_daily_cap_exceeded` | Today's shared usage plus the input is above the daily cap. | `side`, `chain`, `asset`, `daily_limit_atomic`, `daily_usage_atomic`, `amount_atomic` |
+
+Lower the amount, wait for the next UTC day, or raise the cap in a new policy
+revision. Staging and foreground activation work as described in
+[Orca](orca.md#owner-admission).
 
 `--to` may name another address than the paying account. Either `swap`
 admission may pin `recipients`; the `--to` address must then be on each list
@@ -222,6 +267,26 @@ it checks the chain, the code pins, the exact allowance, the source balance,
 the fresh quote floor, the exact simulation, the gas cap, the native balance
 and the fee caps, and reads none of them twice. `execute` holds its one send
 slot before it writes an attempt marker, so no read can take it.
+
+### Status reads
+
+Once an effect's receipt block is safe, `status` reads the allowance at that
+block; for the swap it also reads both token balances at that block and the
+block before it. Without `APN_ETHEREUM_ARCHIVE_RPC_URL` the primary serves
+these reads. A pruning public primary keeps that state for only about 128
+blocks (about 25 minutes), so run `status` soon after the send, or set an
+archive endpoint before a later first `status`. When the primary answers one
+of these reads with a JSON-RPC error and the effect's block is more than 128
+blocks behind the safe head, `status` refuses with
+`APN_PROVIDER_CAPABILITY_UNAVAILABLE` / `uniswap_token_status_archive_required`
+(`details.blockNumber` is the effect's block, `details.safeBlockNumber` the
+safe head). Nothing is recorded, and `next_actions` say to set
+`APN_ETHEREUM_ARCHIVE_RPC_URL` and run
+`apn swap ethereum uniswap-token status --operation <id>` again. A refusal of
+a nearer block (for example a load-balanced backend that is behind) and any
+failure of a configured archive are reported as they are. Quote, prepare and
+the signing guard read only at a block they have just read from the primary,
+so they never need an archive.
 
 ### Recovery and cleanup
 

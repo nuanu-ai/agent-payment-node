@@ -196,6 +196,16 @@ Every attempt without a receipt has an exit that never signs, sends or delivers.
 - **`abandoned_unknown`**: when no proof decides, `apn operation abandon --operation <id>` after the deadline asks for
   TTY consent and ends the attempt, with both holds still charged.
 
+**Account guard.** Every non-terminal payment holds the payer's MegaETH account. A `prepared` payment that was never
+approved also lets go of it by itself once its 300-second deadline plus a 10-minute margin has passed by the machine
+clock: no command is needed, and `observe` later records it `failed_before_effect`. Approve is the hard guard. Before
+consent, again after it, and once more after it records `signing_started`, approve checks the account. A payment the
+clock released (the clock ran ahead and then went back inside its deadline) is admitted again as a new payment is:
+refused with `APN_OPERATION_BLOCKED` while another unresolved operation holds the account, writing nothing, so it stays
+released and every later approve is checked again; the other payment's approve is not blocked by it. Two payments on
+one account therefore cannot both sign. A refusal of the check after `signing_started` (nothing signed yet, no SIGN
+claim) ends the attempt at once as `failed_before_effect` (`never_signed`) and releases both holds.
+
 ### `retire-unsent`
 
 An expired attempt that kept its independent signing claim but has no send claim, sealed material or transaction hash

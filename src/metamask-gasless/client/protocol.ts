@@ -1,8 +1,9 @@
 import { readDataRecord, validateReadDiagnostic, type MetaMaskReadDiagnostic } from "./read-diagnostic.js";
 import { validateSubmitDiagnostic, type MetaMaskSubmitDiagnostic } from "./submit-diagnostic.js";
 import { validateObserveDiagnostic, type MetaMaskObserveDiagnostic } from "./observe-diagnostic.js";
+import { serverRequestQuery, serverRequestRead, type MetaMaskServerRequestQuery, type MetaMaskServerRequestRead } from "./server-request.js";
 import { isPlainRecord } from "../../canonical.js";
-import type { MetaMaskGaslessBinding, MetaMaskGaslessIntent, MetaMaskGaslessProfileIdentity,
+import type { MetaMaskGaslessBinding, MetaMaskGaslessProviderIntent, MetaMaskGaslessProfileIdentity,
   MetaMaskGaslessProviderObservation, MetaMaskGaslessQuote, MetaMaskGaslessUnsignedResult } from "../model.js";
 import { MM_PROVIDER_STATUSES } from "../model.js";
 import type { MetaMaskGaslessQuoteInput, MetaMaskGaslessUnsignedInput } from "../ports.js";
@@ -15,14 +16,16 @@ import { mmAddress, mmCanonicalAddress, mmChain, mmExact, mmHash, mmHex, mmIso, 
   mmUuid } from "../validation.js";
 
 export const MM_HELPER_VERSION = "apn.metamask-gasless-helper.v1" as const;
-export type HelperMode = "inspect" | "quote" | "buildUnsigned" | "submit" | "observe";
+export type HelperMode = "inspect" | "quote" | "buildUnsigned" | "submit" | "observe" | "readRequest";
 export type HelperRequest =
   | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "inspect"; readonly expected: MetaMaskGaslessProfileIdentity }
   | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "quote"; readonly input: MetaMaskGaslessQuoteInput }
   | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "buildUnsigned"; readonly input: MetaMaskGaslessUnsignedInput }
-  | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "submit" | "observe"; readonly intent: MetaMaskGaslessIntent };
+  | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "submit" | "observe"; readonly intent: MetaMaskGaslessProviderIntent }
+  /** A native transfer's server-wallet request, read by its exact id (client/server-request.ts). */
+  | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "readRequest"; readonly query: MetaMaskServerRequestQuery };
 export type HelperResult = MetaMaskGaslessBinding | MetaMaskGaslessQuote | MetaMaskGaslessUnsignedResult |
-  MetaMaskGaslessProviderObservation;
+  MetaMaskGaslessProviderObservation | MetaMaskServerRequestRead;
 export type HelperResponse = { readonly version: typeof MM_HELPER_VERSION; readonly ok: true; readonly result: HelperResult } |
   { readonly version: typeof MM_HELPER_VERSION; readonly ok: false; readonly failure: MetaMaskGaslessFailure;
     readonly diagnostic?: MetaMaskReadDiagnostic; readonly submitDiagnostic?: MetaMaskSubmitDiagnostic;
@@ -46,6 +49,10 @@ export function helperRequest(value: unknown): HelperRequest {
     const r = mmExact(value, ["version", "mode", "intent"], "mm_gasless_input");
     return { version: MM_HELPER_VERSION, mode: value.mode, intent: intent(r.intent) };
   }
+  if (value.mode === "readRequest") {
+    const r = mmExact(value, ["version", "mode", "query"], "mm_gasless_input");
+    return { version: MM_HELPER_VERSION, mode: "readRequest", query: serverRequestQuery(r.query) };
+  }
   return mmFail("mm_gasless_input");
 }
 
@@ -56,7 +63,7 @@ export function helperResponse(value: unknown, request: HelperRequest): HelperRe
     const readMode = request.mode === "inspect" || request.mode === "quote" ? request.mode : null;
     const hasDiagnostic = readMode !== null && Object.hasOwn(value, "diagnostic");
     const hasSubmitDiagnostic = request.mode === "submit" && Object.hasOwn(value, "submitDiagnostic");
-    const hasObserveDiagnostic = request.mode === "observe" && Object.hasOwn(value, "observeDiagnostic");
+    const hasObserveDiagnostic = (request.mode === "observe" || request.mode === "readRequest") && Object.hasOwn(value, "observeDiagnostic");
     const r = mmExact(value, ["version", "ok", "failure", ...(hasDiagnostic ? ["diagnostic"] : []), ...(hasSubmitDiagnostic ? ["submitDiagnostic"] : []),
       ...(hasObserveDiagnostic ? ["observeDiagnostic"] : [])], responseReason(request.mode));
     const f = mmExact(readMode === null ? r.failure : readDataRecord(r.failure), ["code", "reason"], responseReason(request.mode));
@@ -76,6 +83,7 @@ export function helperResponse(value: unknown, request: HelperRequest): HelperRe
   if (request.mode === "inspect") mmAssertProfileBinding(mmBinding(r.result, responseReason(request.mode)), request.expected);
   else if (request.mode === "quote") quoteOutput(r.result, request.input);
   else if (request.mode === "buildUnsigned") mmValidateUnsigned(r.result, request.input, responseReason(request.mode));
+  else if (request.mode === "readRequest") serverRequestRead(r.result, request.query);
   else observation(r.result, request.intent);
   return value as HelperResponse;
 }
@@ -132,7 +140,7 @@ function quoteOutput(value: unknown, input: MetaMaskGaslessQuoteInput): MetaMask
   return mmQuote(quote, { chainId: input.chainId, recipient: input.recipient, grossAtomic: gross,
     maxFeeAtomic: quote.feeAtomic, minReceivedAtomic: quote.netAtomic }, input.binding, quote.netAtomic, "mm_gasless_provider_unavailable");
 }
-function intent(value: unknown): MetaMaskGaslessIntent {
+function intent(value: unknown): MetaMaskGaslessProviderIntent {
   const keys = ["profile", "request", "binding", "token", "decimals", "deploymentEvidenceHash", "initialSnapshot", "quote",
     "requestId", "preparedAt", "expiresAt", "policyHash", "unsignedDelegation", "delegationHash", "signingDigest", "relayTo", "mode"];
   const i = mmExact(value, [...keys, ...(isPlainRecord(value) && Object.hasOwn(value, "preparedGrossAtomic") ? ["preparedGrossAtomic"] : [])], "mm_gasless_state_corrupt");
@@ -143,7 +151,7 @@ function intent(value: unknown): MetaMaskGaslessIntent {
   mmIso(i.preparedAt, "mm_gasless_state_corrupt"); mmIso(i.expiresAt, "mm_gasless_state_corrupt");
   if (request.fixedNet ? typeof i.preparedGrossAtomic !== "string" : Object.hasOwn(i, "preparedGrossAtomic")) mmFail("mm_gasless_state_corrupt");
   if (request.fixedNet) mmUint(i.preparedGrossAtomic, true, "mm_gasless_state_corrupt");
-  const quote = quoteResult(i.quote), typed = i as unknown as MetaMaskGaslessIntent;
+  const quote = quoteResult(i.quote), typed = i as unknown as MetaMaskGaslessProviderIntent;
   const deployment = mmRegistry(request.chainId);
   if (i.token !== deployment.row.token || i.deploymentEvidenceHash !== deployment.deploymentEvidenceHash) mmFail("mm_gasless_state_corrupt");
   mmQuote(quote, request, binding, quote.netAtomic, "mm_gasless_state_corrupt");
@@ -176,7 +184,7 @@ function chainState(value: unknown, feeMode?: "sponsored"): void {
   if (s.tokenDecimals !== 6 || !["empty", "pinned"].includes(String(s.designation))) mmFail("mm_gasless_state_corrupt");
   mmUint(s.usdcBalanceAtomic, false, "mm_gasless_state_corrupt"); mmUint(s.counterAtomic, false, "mm_gasless_state_corrupt");
 }
-function observation(value: unknown, intentValue: MetaMaskGaslessIntent): MetaMaskGaslessProviderObservation {
+function observation(value: unknown, intentValue: MetaMaskGaslessProviderIntent): MetaMaskGaslessProviderObservation {
   const o = mmExact(value, ["observedAt", "requestIdHash", "status", "txHash"], "mm_gasless_provider_unavailable");
   mmIso(o.observedAt, "mm_gasless_provider_unavailable"); mmHash(o.requestIdHash, "mm_gasless_provider_unavailable");
   if (!(MM_PROVIDER_STATUSES as readonly string[]).includes(String(o.status)) ||

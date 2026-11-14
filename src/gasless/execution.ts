@@ -1,6 +1,7 @@
 import { approvalCode } from "../approval-code.js";
 import type { GaslessAssetPolicy } from "./asset-policy.js";
 import { ApnError } from "../errors.js";
+import { assertOwnClaimsAvailable } from "../operation-index/admission.js";
 import type { WaitPort } from "../ports.js";
 import type { StateStore } from "../state.js";
 import { assertGaslessEstimate } from "./economics.js";
@@ -80,6 +81,9 @@ export class GaslessExecution {
       if (fees === null) {
         try { fees = await this.guard(op); } catch (error) { return await this.halt(op, error); }
       }
+      // The disclosure is the first step that leaves APN, and the index may have let an undisclosed transfer go by the
+      // clock: it re-takes its account first, and another unresolved operation on it refuses it (QA F03).
+      await assertOwnClaimsAvailable(this.state, op.operationId);
       op = await this.save(op, { state: "bootstrap_pending", bootstrap: { ...op.bootstrap,
         phase: "disclosure_started", disclosureAttempts: 1, disclosedAt: this.at() } });
       let estimate;

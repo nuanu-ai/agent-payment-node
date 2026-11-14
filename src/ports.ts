@@ -25,6 +25,7 @@ export interface NativeRequest {
     | "wallet.describe"
     | "wallet.ensure"
     | "wallet.import"
+    | "wallet.complete"
     | "directTransfer.approveAndSign"
     | "effectMaterial.get"
     | "directTransfer.signedMaterial.get"

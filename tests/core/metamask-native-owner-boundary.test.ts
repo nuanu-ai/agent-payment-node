@@ -11,6 +11,7 @@ import { OperationService } from "../../src/operation-service.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { parseCatalogArgv } from "../../src/command-catalog.js";
+import type { ProviderRequestReferencePort } from "../../src/provider-request-reference-store.js";
 
 const scope = Object.freeze({}) as MetaMaskNativeOwnedScope;
 const context = Object.freeze({}) as MetaMaskNativeOwnedContext;
@@ -23,11 +24,14 @@ test("public DTOs, clones and arbitrary empty objects cannot claim or assert for
 });
 const RECIPIENT="0x5555555555555555555555555555555555555555";
 const request=(change:Record<string,unknown>={})=>({profile:"mm-owned-test",chainId:1,recipient:RECIPIENT,amountAtomic:"2500",idempotencyKey:"native-0001",...change});
+/** Input is refused before any custody is reached: a reference store that is touched fails the test. */
+const unreachedReferences: ProviderRequestReferencePort = { ready: async () => assert.fail("custody reached"), seal: async () => assert.fail("custody reached"),
+  open: async () => assert.fail("custody reached") };
 test("the command rejects other chains, recipients and amounts before any state or provider read",async()=>{
-  for(const chainId of [0,8453,42161,NaN,Infinity,1.5]) await assert.rejects(()=>runMetaMaskNativeTransfer("/does-not-exist",request({chainId}) as never),/Ethereum, Optimism, Monad, Linea and Sei/);
+  for(const chainId of [0,8453,42161,NaN,Infinity,1.5]) await assert.rejects(()=>runMetaMaskNativeTransfer("/does-not-exist",request({chainId}) as never,unreachedReferences),/Ethereum, Optimism, Monad, Linea and Sei/);
   for(const recipient of ["0x0000000000000000000000000000000000000000","0x555","not-an-address","So11111111111111111111111111111111111111112"])
-    await assert.rejects(()=>runMetaMaskNativeTransfer("/does-not-exist",request({recipient}) as never),{code:"APN_INVALID_INPUT"});
-  for(const amountAtomic of ["0","01","1.5","-1","",`1${"0".repeat(78)}`]) await assert.rejects(()=>runMetaMaskNativeTransfer("/does-not-exist",request({amountAtomic}) as never),{code:"APN_INVALID_INPUT"});
+    await assert.rejects(()=>runMetaMaskNativeTransfer("/does-not-exist",request({recipient}) as never,unreachedReferences),{code:"APN_INVALID_INPUT"});
+  for(const amountAtomic of ["0","01","1.5","-1","",`1${"0".repeat(78)}`]) await assert.rejects(()=>runMetaMaskNativeTransfer("/does-not-exist",request({amountAtomic}) as never,unreachedReferences),{code:"APN_INVALID_INPUT"});
 });
 test("settlement and reserve do not accept forged operation identities or a quote DTO",async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),"apn-native-boundary-")));

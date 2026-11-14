@@ -8,13 +8,13 @@ import { OperationService } from "./operation-service.js";
 import { approvalCode } from "./approval-code.js";
 import { capabilityHash, LOCAL_PROVIDER_ID, markProviderProfileDrift } from "./provider-profile.js";
 import { assertDirectTerminalReceiptAuthority } from "./direct-terminal-receipt.js";
-import { providerDirectReceipt } from "./provider-direct-receipt.js";
-import { createProviderEffectReference, observeProviderDirectRequest, sameFrozenProviderProfile, } from "./provider-direct-recovery.js";
+import { coinbaseGaslessPolicyFailureReason, providerDirectReceipt } from "./provider-direct-receipt.js";
+import { createProviderEffectReference, observeProviderDirectRequest, providerEffectReferenceFor, readyProviderEffectReferences, sameFrozenProviderProfile } from "./provider-direct-recovery.js";
 import { ProviderDirectState } from "./provider-direct-state.js";
 import { providerDirectExecutionInput } from "./provider-direct-execution-input.js";
 import { BASE_RPC_CHAIN } from "./rpc-requirement.js";
 import { appendTransition, sealOperation } from "./state.js";
-import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, publicOperation, publicReceipt, } from "./transfer-policy.js";
+import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, publicOperation, publicReceipt } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { coinbaseGaslessPreconditionsMatch, prepareCoinbaseGasless, reobserveCoinbaseGasless } from "./coinbase-gasless-provider.js";
 import { requiredProviderBinding as requiredBinding, requiredProviderDirectProfile, requiredProviderDirectAdapter } from "./provider-direct-guards.js";
@@ -192,12 +192,15 @@ export class ProviderDirectTransferService {
             const binding = requiredBinding(operation);
             await this.operations.assertProviderAccountAvailable(binding.providerId, binding.accountBindingHash, operation.walletAddress, operation.operationId);
             await this.assertFrozenPreconditions(operation, binding);
+            // The wrapping secret that will seal the provider's request id is read before the owner is asked: a refusal
+            // comes before the approval code and changes nothing.
+            await readyProviderEffectReferences(this.context, binding);
             if (binding.coinbaseGasless !== undefined) {
                 try {
                     await new CoinbaseGaslessPolicy(this.context).assert(operation);
                 }
                 catch (error) {
-                    await this.failBeforeEffect(operation, "coinbase_gasless_policy_denied", error instanceof ApnError ? error : undefined);
+                    await this.failBeforeEffect(operation, coinbaseGaslessPolicyFailureReason(error), error instanceof ApnError ? error : undefined);
                 }
                 const approval = this.context.gasless?.approval;
                 if (approval === undefined)
@@ -241,7 +244,7 @@ export class ProviderDirectTransferService {
                     await new CoinbaseGaslessPolicy(this.context).reserve(operation);
                 }
                 catch (error) {
-                    await this.failBeforeEffect(operation, "coinbase_gasless_policy_denied", error instanceof ApnError ? error : undefined);
+                    await this.failBeforeEffect(operation, coinbaseGaslessPolicyFailureReason(error), error instanceof ApnError ? error : undefined);
                 }
             }
             operation = await this.durable.transition(operation, "started", false, "provider_effect_started", "durable_provider_no_replay");
@@ -298,7 +301,7 @@ export class ProviderDirectTransferService {
                 operation.providerEffect !== undefined && operation.transactionHash === undefined) {
                 const binding = requiredBinding(operation);
                 const adapter = this.requiredAdapter(binding);
-                const observed = await observeProviderDirectRequest(adapter, operation, waitSeconds);
+                const observed = await observeProviderDirectRequest(this.context, adapter, operation, waitSeconds);
                 if (observed.disposition === "unchanged")
                     return publicOperation(operation);
                 if (observed.disposition === "rejected") {
@@ -417,8 +420,12 @@ export class ProviderDirectTransferService {
                 ? { providerEffect: createProviderEffectReference(operation.operationId, "SUBMISSION_AMBIGUOUS") } : {}));
         if (result.disposition === "rejected")
             return publicOperation(await this.durable.transition(operation, "failed_provider_rejected", true, result.reason, "provider_terminal_no_transaction"));
-        if (result.disposition === "pending")
-            return publicOperation(await this.durable.transition(operation, "provider_pending", false, binding.executionMode === "delegated_session_transaction" ? "delegated_submission_ambiguous" : "provider_approval_pending", "provider_request_reference", { providerEffect: createProviderEffectReference(result.recoveryToken, result.providerState) }));
+        if (result.disposition === "pending") {
+            const providerEffect = await providerEffectReferenceFor(this.context, operation, binding, result.recoveryToken, result.providerState);
+            return publicOperation(await (providerEffect === null
+                ? this.durable.transition(operation, "ambiguous_effect", false, "provider_recovery_unavailable", "provider_effect_no_replay")
+                : this.durable.transition(operation, "provider_pending", false, binding.executionMode === "delegated_session_transaction" ? "delegated_submission_ambiguous" : "provider_approval_pending", "provider_request_reference", { providerEffect })));
+        }
         const acknowledged = await this.durable.transition(operation, "provider_acknowledged", false, "provider_transaction_identity_acknowledged", "provider_transaction_hash_only", { transactionHash: result.transactionHash });
         return publicOperation(await this.durable.inspectReceipt(acknowledged));
     }

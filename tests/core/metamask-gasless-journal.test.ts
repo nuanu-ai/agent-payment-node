@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { canonicalJson, hashObject, sha256 } from "../../src/canonical.js";
 import { mmImmutable, MM_HISTORY_LIMIT, MM_NONTERMINAL_HISTORY_LIMIT, MM_TERMINAL_HISTORY_LIMIT,
   type MetaMaskGaslessOperationRecord } from "../../src/metamask-gasless/operation-model.js";
+import { mmRequestIdHash } from "../../src/metamask-gasless/identity.js";
 import { mmFailure } from "../../src/metamask-gasless/reasons.js";
 import { MetaMaskGaslessOperationRepository } from "../../src/metamask-gasless/journal/repository.js";
 import { metaMaskGaslessReceipt, publicMetaMaskGaslessOperation,
@@ -41,7 +42,7 @@ function reseal<T extends Record<string, unknown>>(value: T): T {
 }
 
 function requestIdHash(operation: MetaMaskGaslessOperationRecord): string {
-  return hashObject({ purpose: "apn.metamask-gasless.request-id.v1", value: operation.intent.requestId });
+  return mmRequestIdHash(operation.intent);
 }
 
 function failedEffects(operation: MetaMaskGaslessOperationRecord): MetaMaskGaslessOperationRecord {

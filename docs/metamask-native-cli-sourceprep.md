@@ -66,7 +66,11 @@ apn wallet metamask native-transfer-observe --operation <operation-id>
    recipient. A failure refuses with one of the reasons below.
 2. **Quote and balances.** APN quotes the native fee under the owner's native fee cap and checks the wallet's native
    and USDC balances.
-3. **Consent.** In a genuine foreground terminal (stdin and stderr must both be TTYs), the screen shows the profile and
+3. **Consent.** First APN reads the login-Keychain wrapping secret that will seal the MetaMask request ID (see
+   [The sealed request reference](#the-sealed-request-reference)), or creates the first one if the state holds nothing
+   sealed. A secret that is missing over sealed state, or a Keychain that refuses, ends the transfer
+   `failed_before_effect` here, before consent and before any hand-off.
+   In a genuine foreground terminal (stdin and stderr must both be TTYs), the screen shows the profile and
    sender, the chain and USDC token, the recipient, the amount (atomic and decimal), the maximum full native fee, the
    Guard admission (recipient allowlisted, outflow limit), the quote hash and the operation ID. You type the approval
    code shown. Consent is valid for at most 60 seconds, or until the quote expires if that is sooner.
@@ -87,6 +91,106 @@ States: `prepared`, `effect_started`, `acknowledged` and `unknown` are non-termi
 asks for the exact acknowledgement and records `abandoned_unknown`. MetaMask may still have signed and broadcast the
 transfer. An operation that never handed off and whose consent window has passed closes as `failed_before_effect`
 instead.
+
+## The sealed request reference
+
+When MetaMask holds the transfer for the owner's MFA approval, the hand-off returns the MetaMask request ID that the
+approval waits on. APN keeps that ID encrypted. Right after the hand-off it seals the ID under the login-Keychain
+wrapping secret, with the same custody envelope as wallets and MetaMask x402 authorizations, in
+`metamask-native-request-references/<profile-hash>/<operation-id>.json`. Then it writes the journal, which keeps only
+the ID's hash (`providerRequestIdHash`, with `providerRequestId` null).
+
+Output never shows the ID of such a transfer:
+
+| Field | Value |
+| --- | --- |
+| `mfa_task.request_id_hash` | The hash of the request ID, in place of `mfa_task.request_id` |
+| `read_observation.request_id_hash` | The same hash, in place of `read_observation.request_id` |
+| `mfa_task.owner_action` and the next actions after `EXPIRED` or `DENIED` | Name "the MetaMask request of APN `<operation-id>`". The MetaMask request's own intent starts with `APN <operation-id>:`, so the owner finds it in MetaMask. |
+
+The hash is the one `provider_request_reference_hash` shows for a direct transfer:
+SHA-256 of `provider-effect-reference`, `metamask-agent-wallet` and the ID, joined by NUL bytes.
+
+APN opens the sealed ID only to read that request again: `native-transfer-observe`, `apn operation resume`, and the
+observation `apn operation abandon` runs first. The read in the next section gets the ID itself. If the ID cannot be
+opened, the read is refused and nothing is read or written:
+
+| Cause | Refusal |
+| --- | --- |
+| The sealed file is missing or damaged, belongs to another transfer, or was sealed under another secret | `APN_STATE_CORRUPT`, `details.reason: "provider_request_reference_unmatched"`, next action `apn operation status --operation <id>` |
+| The wrapping secret is missing | `APN_STATE_CORRUPT`, `details.reason: "wrapping_secret_missing"` and the step to restore the Keychain item |
+| The Keychain refuses | `APN_NATIVE_REJECTED` |
+
+The transfer keeps its state and its reserves. `native-transfer-status` and `apn operation status` never open the
+sealed ID and still answer. `apn operation abandon` still asks for consent after a refused observation.
+
+If the seal fails after the hand-off (the wrapping secret was read before consent, so only its write can fail), APN
+drops the ID, never keeps it in plaintext, and records everything else the hand-off returned, its transaction hash
+included. The journal then holds `providerRequestReason: "provider_request_reference_unsealed"` with no request, and the
+output shows `provider_request_reason`. A kept transaction hash is still observed on chain. Without one, observe reads
+nothing (`read_observation.reason: "provider_request_reference_unsealed"`) and the exit is
+`apn operation abandon` once the quote has expired.
+
+APN never deletes a sealed request reference, not even after its transfer ends. Each counts as sealed custody, so after
+the first native transfer that sealed a request ID a lost wrapping secret refuses every command that would create a new
+one with `wrapping_secret_missing`, including the next native transfer (before consent). The owner's options (restore
+the Keychain item, or move the request-reference directories aside when nothing else is sealed) and what each does to
+unresolved transfers are in the README section on the wrapping secret.
+
+Transfers saved by APN 0.5.106 or earlier keep the request ID itself in their journal. They load, observe and project
+exactly as before, need no wrapping secret, and a read never rewrites them. APN 0.5.106 and earlier cannot read a
+journal that holds `providerRequestIdHash` (`APN_STATE_CORRUPT`). Do not downgrade to 0.5.106 or earlier once such a
+transfer exists. A journal with no stored request stays readable by those releases.
+
+## Observing a pending MetaMask request
+
+When a transfer has a stored MetaMask request ID and no transaction hash, `native-transfer-observe` reads that request
+once. It never sends, signs or approves anything. A sealed request ID is opened first (see above).
+
+1. `mm auth status` confirms the signed-in project. Its SHA-256 must equal the project hash stored with the transfer.
+2. `mm wallet requests watch <request-id> --wallet-timeout 1` reads the request.
+3. `mm auth status` confirms the project again.
+
+`mm` 6.1.5 looks the request ID up in its own local request list (`pendingJobs` in `~/.metamask/wallets.json`) before it
+asks MetaMask. A new `mm login` starts that list empty. The watch then writes nothing to stdout and answers
+`REQUEST_NOT_FOUND` on stderr. APN records where the request was not found, never what happened to it:
+
+| `read_observation.reason` | Meaning |
+| --- | --- |
+| `metamask_request_not_in_local_state` | `mm`'s local request list does not hold this request ID (for example after a new `mm login`). The request itself may still exist. |
+| `metamask_request_not_found_on_server` | MetaMask's server answered not found for this request ID. |
+| `provider_request_not_found` | Another `REQUEST_NOT_FOUND` answer. |
+
+None of them is proof. The transfer stays `unknown`, its reserves stay charged, and APN never sends it again.
+
+**Server read.** After `metamask_request_not_in_local_state`, and only then, APN reads the request from MetaMask's
+server by its exact stored ID, between steps 2 and 3. The watch stays the first read, so every other answer is recorded
+as before. The read uses the sandboxed helper of the MetaMask gasless lane
+([gasless.md](gasless.md)): it uses `mm`'s own signed-in session from `~/.metamask`, and its network policy admits one
+GET of this request's status in the session's project only.
+
+- The session's project ID must hash to the project hash stored with the transfer. Another project refuses with
+  `metamask_session_project_changed` before anything is read.
+- The stored request ID must be a canonical UUID v4, the form `mm` gives its request IDs. Another form refuses with
+  `provider_request_binding_invalid`.
+- The answer must name this request ID, kind `transaction`, `tx.from` equal to the transfer's sender and `tx.chainId`
+  equal to its chain. A transaction hash, when present, must be 32 bytes of lowercase hex.
+
+A verified answer is recorded exactly as a `requests watch` answer of the same request: a transaction hash moves the
+transfer to receipt proof, `AWAITING_MFA` records the owner's approval task as a watch status does (its `expires_at`
+and `auth_method` are null), and `EXPIRED` or `DENIED` gives the same next actions as a watch. A 404 is recorded as
+`metamask_request_not_found_on_server`. A refused read keeps `metamask_request_not_in_local_state`.
+
+`read_observation.server_read` is present only when the server read ran:
+
+| Field | Value |
+| --- | --- |
+| `outcome` | `verified`, `not_found` or `refused` |
+| `response_hash` | SHA-256 of the server's answer bytes (`verified` only), otherwise `null` |
+| `reason` | Why a `refused` read read nothing: `metamask_session_project_changed`, `provider_request_binding_invalid`, `provider_request_identity_conflict`, an `mm_gasless_*` reason of the helper (for example `mm_gasless_session_expired` or `mm_gasless_provider_unavailable`), or `metamask_server_read_unclassified`; otherwise `null` |
+| `check` | The answer check that refused it (`response_request_id`, `response_kind`, `response_status`, `response_tx`, `response_hash`, `response_body`), otherwise `null` |
+
+While the read runs, `read_observation.stage` is `server_read`.
 
 ## Refusals and next steps
 
@@ -128,6 +232,9 @@ A native fee quote above the owner's native cap refuses with `native_fee_quote_a
   recipient and amount in the quote and no APN home path, so moving or renaming the APN home does not invalidate them.
   Version 1 journals keep loading: their stored home path is kept as written and never compared, and their quote keeps
   its fixed recipient and amount.
+- **Request reads.** The `REQUEST_NOT_FOUND` reasons and the server read change only the live
+  `native-transfer-observe` output. Journals keep their schema, and an MFA task the server read records keeps
+  `source: "watch"`.
 
 ## For contributors
 

@@ -20,7 +20,7 @@ import { cleanupStargateV2Token, executeStargateV2Token, FileStargateTokenJourna
   STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_TOKEN,
   type StargateTokenDestinationEvidence, type StargateTokenEnvelope, type StargateTokenExecutionPorts, type StargateTokenOperation } from "./token-execution.js";
 import { TtyStargateTokenApproval } from "./token-tty.js";
-import { scanStargateLogs, StargateDestinationScanStore, STARGATE_POLYGON_SCAN_WINDOW, type StargateScanCursor } from "./destination-scan.js";
+import { scanStargateLogs, stargateLogInScan, StargateDestinationScanStore, STARGATE_POLYGON_SCAN_WINDOW, type StargateScanCursor } from "./destination-scan.js";
 import type { StargateTokenUsageState } from "./token-model.js";
 import { legacyStargateStatusAfter, type LegacyChainRead, type LegacyStargateStatus } from "../legacy/stargate-v2/status.js";
 import { checkNeverLands } from "../evm-finalized-proof.js";
@@ -185,7 +185,7 @@ export async function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc,
   const oftTopics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: input.guid, toAddress: input.recipient } });
   const oftMatches: { log: Record<string, unknown>; amount: bigint }[] = [];
   for (const log of await scanStargateLogs(call, { address: STARGATE_TOKEN_DESTINATION_POOL, topics: oftTopics }, baselineNumber, head, STARGATE_POLYGON_SCAN_WINDOW, cursor)) { try { const event = decodeEventLog({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", topics: log.topics as [Hex, ...Hex[]], data: String(log.data) as Hex });
-    if (isAt(log, STARGATE_TOKEN_DESTINATION_POOL) && event.args.srcEid === 30111 && event.args.guid === input.guid && quantity(log.blockNumber) <= head &&
+    if (isAt(log, STARGATE_TOKEN_DESTINATION_POOL) && event.args.srcEid === 30111 && event.args.guid === input.guid && stargateLogInScan(quantity(log.blockNumber), baselineNumber, head) &&
       getAddress(event.args.toAddress) === input.recipient && event.args.amountReceivedLD.toString() === input.minimumAmountAtomic && await isCanonical(log)) oftMatches.push({ log, amount: event.args.amountReceivedLD });
   } catch { /* unrelated candidate */ } }
   if (oftMatches.length !== 1) return null;
@@ -208,6 +208,9 @@ export async function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc,
     const dropTopics = encodeEventTopics({ abi: LAYERZERO_EXECUTOR_ABI, eventName: "NativeDropApplied" }), oftBlock = quantity(oft.log.blockNumber);
     const fromReceipt = receiptLogs.filter(log => isAt(log, STARGATE_TOKEN_DESTINATION_EXECUTOR));
     // An Executor that applied the drop in an earlier transaction is found in the one window ending at the delivery block.
+    // A drop at or before the baseline block (a provider that ignores fromBlock, or a stale drop in the very block whose
+    // balance was the baseline) predates the operation, and one after the delivery block follows it, so neither is a
+    // candidate, even when no source packet nonce binds it.
     const candidates = fromReceipt.length > 0 ? fromReceipt : await scanStargateLogs(call, { address: STARGATE_TOKEN_DESTINATION_EXECUTOR, topics: [dropTopics[0]!] },
       oftBlock >= baselineNumber + STARGATE_POLYGON_SCAN_WINDOW ? oftBlock - STARGATE_POLYGON_SCAN_WINDOW + 1n : baselineNumber, oftBlock, STARGATE_POLYGON_SCAN_WINDOW, undefined, 1);
     const matches: { log: Record<string, unknown>; nonce: bigint }[] = [];
@@ -215,7 +218,8 @@ export async function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc,
       const nonce = packet?.nonceAtomic; if (isAt(log, STARGATE_TOKEN_DESTINATION_EXECUTOR) && event.origin.srcEid === 30111 &&
         event.origin.sender.toLowerCase() === pad(STARGATE_TOKEN_SOURCE_MESSAGING, { size: 32 }).toLowerCase() && (nonce === undefined || event.origin.nonce.toString() === nonce) &&
         event.dstEid === 30109 && getAddress(event.oapp) === STARGATE_TOKEN_DESTINATION_MESSAGING && event.params.length === 1 && event.success.length === 1 && event.success[0] === true &&
-        getAddress(event.params[0]!.receiver) === input.recipient && event.params[0]!.amount.toString() === input.nativeDropAtomic && await isCanonical(log)) matches.push({ log, nonce: event.origin.nonce });
+        getAddress(event.params[0]!.receiver) === input.recipient && event.params[0]!.amount.toString() === input.nativeDropAtomic &&
+        stargateLogInScan(quantity(log.blockNumber), baselineNumber, oftBlock) && await isCanonical(log)) matches.push({ log, nonce: event.origin.nonce });
     } catch { /* unrelated candidate */ } }
     if (matches.length !== 1 || !atOrBefore(matches[0]!.log, oft.log)) return null; const match = matches[0]!;
     nativeDrop = { executor: STARGATE_TOKEN_DESTINATION_EXECUTOR, nonceAtomic: match.nonce.toString(), success: true,

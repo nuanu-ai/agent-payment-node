@@ -3,13 +3,14 @@ import type { ClockPort, IdPort } from "../ports.js";
 import type { StateStore } from "../state.js";
 import { type MetaMaskGaslessRequest } from "./model.js";
 import { type MetaMaskGaslessOperationRecord } from "./operation-model.js";
-import type { MetaMaskGaslessProviderPort, MetaMaskGaslessRepositoryPort, MetaMaskGaslessRpcFactory } from "./ports.js";
+import type { MetaMaskGaslessProviderPort, MetaMaskGaslessRepositoryPort, MetaMaskGaslessRequestReferencePort, MetaMaskGaslessRpcFactory } from "./ports.js";
 export interface MetaMaskGaslessPreparationOptions {
     readonly state: StateStore;
     readonly records: MetaMaskGaslessRepositoryPort;
     readonly operations: OperationService;
     readonly rpcFor: MetaMaskGaslessRpcFactory;
     readonly provider: MetaMaskGaslessProviderPort;
+    readonly references: MetaMaskGaslessRequestReferencePort;
     readonly clock: ClockPort;
     readonly ids: IdPort;
 }

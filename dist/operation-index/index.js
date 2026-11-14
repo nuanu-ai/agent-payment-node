@@ -68,9 +68,19 @@ export class OperationIndex {
             return entry;
         });
     }
-    /** APN_OPERATION_BLOCKED when an unresolved operation holds a colliding claim; the details name the blocker. */
+    /**
+     * APN_OPERATION_BLOCKED when an unresolved operation holds a colliding claim; the details name the blocker. With
+     * `except` (the caller's own saved operation, checked before its approve or execute starts its effect) an entry the
+     * index let go while its record is still open is first admitted again (`readmitReleased`): the guard of an operation
+     * about to sign never rests on a wall-clock release, and a refused one writes nothing.
+     */
     async assertAvailable(wanted) {
-        await this.repairing(async () => { await this.reconciler.reconcile(); await this.check(wanted); });
+        await this.repairing(async () => {
+            await this.reconciler.reconcile();
+            if (wanted.except !== undefined)
+                await this.readmitReleased(wanted.except, wanted);
+            await this.check(wanted);
+        });
     }
     /** The unresolved operations holding one of `wanted.claims` that their family admits beside it; a blocker is skipped, not thrown. */
     async admittedBeside(wanted) {
@@ -169,6 +179,76 @@ export class OperationIndex {
                 await this.inspect(entry, null);
         }
         catch { /* Best effort by contract. */ }
+    }
+    /**
+     * The approve-time account guard of one saved operation, right before its own approve or execute starts the effect
+     * (its start marker or first signature). An entry that has held its claims since its admission is the operation the
+     * account was admitted for: nothing more is proven, as before this guard (two journals an older release wrote without
+     * admission keep their family's own owner lock and nonce check). An entry the index let go while its record is open
+     * is admitted again (`readmitReleased`) with the accounts its record names; its profile claim is held, never wanted.
+     * `tag` is the family's own coexistence rule and `waits` the quarantines its admission also waited for (the account's
+     * other profiles), as at admission.
+     */
+    async assertOwnClaimsAvailable(operationId, options = {}) {
+        await this.repairing(async () => {
+            await this.reconciler.reconcile();
+            const entry = await this.store.entry(operationId), adapter = entry === null ? undefined : this.adapter(entry);
+            const record = entry === null || adapter === undefined ? null : await adapter.load(this.root, entry.recordPath);
+            if (entry === null || adapter === undefined || record === null)
+                throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
+            if (entry.state !== "terminal" && entry.state !== "released")
+                return;
+            const held = adapter.claims(record);
+            if (held === null)
+                throw new ApnError("APN_STATE_CORRUPT", "The operation's accounts cannot be read.", { operationId });
+            await this.readmitReleased(operationId, { family: null, profileHash: entry.profileHash, claims: held.filter(claim => !claim.key.startsWith("profile:")),
+                ...(options.tag === undefined ? {} : { tag: options.tag }), ...(options.waits === undefined ? {} : { waits: options.waits }) });
+        });
+    }
+    /**
+     * The caller's own entry is admitted again, before its approve or execute starts the effect, when the index let it go
+     * while its record is open by its family's rule now: `terminal` (a never-started record let go by the wall clock past
+     * its deadline plus the unstarted margin, read again after the clock went back) or `released` (an owner-released
+     * quarantine whose record a widened reader reads again). As an admission is: refused without any write while another
+     * unresolved operation holds a colliding claim, so a refused entry stays released and every later attempt is checked
+     * again; otherwise its record's claims are written under the index lock. Any other entry already holds its claims, a
+     * record its family reads as terminal now is refused by its own approve, and a released record still unreadable stays
+     * released.
+     */
+    async readmitReleased(operationId, wanted) {
+        const entry = await this.store.entry(operationId);
+        if (entry === null || entry.state !== "terminal" && entry.state !== "released")
+            return;
+        const adapter = this.adapter(entry), name = nameOf(entry);
+        if (adapter === undefined || name === null)
+            return;
+        let record;
+        try {
+            record = await adapter.load(this.root, entry.recordPath);
+        }
+        catch (error) {
+            if (systemFailure(error) || entry.state === "terminal")
+                throw error;
+            return;
+        }
+        if (record === null)
+            return;
+        const derived = await this.reconciler.fromRecord(adapter, name, record);
+        if (derived?.state !== "active")
+            return;
+        // Everything the entry will hold is checked, not only what the caller names (a provider operation's wallet, a Circle
+        // route's other account): a refusal then writes nothing, and nothing it would hold collides once it is written.
+        const claims = normalizeClaims([...wanted.claims, ...derived.claims.filter(claim => !claim.key.startsWith("profile:"))]);
+        await this.claimUnderLock({ ...wanted, claims, except: operationId }, async () => {
+            const current = await this.store.entry(operationId);
+            // A collection may have reopened it meanwhile, under the same collision check (reopenIfFree): it holds its claims.
+            if (current?.state === "active")
+                return;
+            if (canonicalJson(current) !== canonicalJson(entry)) {
+                throw new ApnError("APN_STATE_BUSY", "The operation index changed concurrently; retry the operation.");
+            }
+            await this.reconciler.write(derived, true);
+        });
     }
     /** Optional fast path after a terminal write: the claims go now instead of at the next check that meets them. */
     async settle(operationId) {
@@ -323,6 +403,12 @@ export class OperationIndex {
         const derived = await this.reconciler.fromRecord(adapter, name, record);
         if (derived === null)
             return null;
+        // A released entry (owner-released quarantine, or a clock-released one met through settle) whose record is open again
+        // holds nothing until it is admitted again: never by a read, a refresh or another admission's collection alone.
+        if ((entry.state === "released" || entry.state === "terminal") && derived.state === "active") {
+            await this.reopenIfFree(entry, derived);
+            return null;
+        }
         const next = entry.state === "admitted" && derived.state === "active" ? entryOf({ ...derived, claims: [...derived.claims, ...entry.claims] }) : derived;
         if (entry.state !== "active" || derived.state !== "active")
             await this.reconciler.write(next, true);
@@ -335,6 +421,24 @@ export class OperationIndex {
         if (blocking.length > 0)
             return blockedBy(entry, adapter.state(record), blocking);
         return colliding.length === 0 ? null : { operationId: entry.operationId, family: entry.family, state: adapter.state(record), record };
+    }
+    /**
+     * A read, a refresh or another admission's collection that finds a released entry whose record is open again reopens it
+     * only as an admission would: under the index lock, when no other open entry holds a claim colliding with what it
+     * would hold (its own quarantines and every family's included). Otherwise it stays released and holds nothing, until
+     * its own guard admits it again (readmitReleased) or a later collection finds the account free.
+     */
+    async reopenIfFree(entry, derived) {
+        const wanted = this.wantedClaims({ family: null, profileHash: derived.profileHash,
+            claims: derived.claims.filter(claim => !claim.key.startsWith("profile:")) });
+        await this.store.ensureLockDirectory();
+        await this.state.withLocks([OPERATION_INDEX_LOCK], async () => {
+            if (canonicalJson(await this.store.entry(entry.operationId)) !== canonicalJson(entry))
+                return;
+            const held = (await this.openEntries()).some(other => other.operationId !== entry.operationId && collidingClaims(other.claims, wanted).length > 0);
+            if (!held)
+                await this.reconciler.write(derived, true);
+        });
     }
     /** After `work`: the admitted entry becomes the entry its record yields, keeping the admitted claims while unresolved. */
     async follow(operationId) {

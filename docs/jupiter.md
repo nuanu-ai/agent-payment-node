@@ -16,7 +16,11 @@ Jupiter V2 or Quantum path. For a swap that uses no off-chain API at all, see
 - **Local Solana wallet.** The profile needs a local Solana account
   (`apn wallet ensure-solana --profile <profile> --provider local --accept-risk true`,
   see [Solana](solana.md)). The payer and the recipient are always that
-  account.
+  account. Without one, `quote` and `prepare` refuse with
+  `APN_WALLET_POLICY_REQUIRED` / `jupiter_v1_local_wallet_required` before any
+  network read, and `next_actions` name that `ensure-solana` command. A wallet
+  whose first creation was interrupted (`jupiter_v1_local_wallet_incomplete`)
+  is restored by the same command.
 - **Solana RPC.** `APN_SOLANA_RPC_URL` is optional. When it is unset or empty,
   APN uses the anonymous public endpoint `https://api.mainnet-beta.solana.com`;
   no RPC account, signup or API key is required. An invalid non-empty value
@@ -340,7 +344,11 @@ permit a resend.
 
 | Reason or code | Meaning | What to do |
 | --- | --- | --- |
-| `jupiter_v1_owner_admission` | No exact active policy, the profile account differs, the two assets do not admit the same route, or the policy changed after `prepare`. | Activate a policy that admits SOL and USDC with the same pool route; quote again after a policy change. |
+| `jupiter_v1_local_wallet_required` (`APN_WALLET_POLICY_REQUIRED`) | The profile has no Solana wallet, or its Solana account is linked to a provider (`details.provider`). Nothing was read from the network. | Create the local wallet with the command in `next_actions`; a provider-linked profile cannot swap through Jupiter. |
+| `jupiter_v1_local_wallet_incomplete` (`APN_WALLET_POLICY_REQUIRED`) | The profile's local Solana wallet was left half-created: its encrypted key (`details.address`) exists without its public account record. Jupiter changes nothing. | Run the `ensure-solana` command in `next_actions`: it restores the public record from that same key and creates no new one. |
+| `jupiter_v1_owner_admission` | No exact active policy (`next_actions` name `apn allowlist policy status --profile <profile>`), the profile account differs, the two assets do not admit the same route, or the policy changed after `prepare`. | Activate a policy that admits SOL and USDC with the same pool route; quote again after a policy change. |
+| `swap_owner_admission_required` | The active policy does not list SOL or USDC, or lists it without the `swap` rail; `details.side`, `asset` and `admissionGap` name it. | Admit both assets for `swap` with a pool route from `inventory`. |
+| `allowlist_per_transfer_cap_exceeded`, `allowlist_daily_cap_exceeded` | The input (or, for USDC, the minimum output) is above the per-transfer cap, or today's shared usage plus it is above the daily cap. `details` give the side, the cap and the amounts. | Quote a smaller amount, wait for the next UTC day or raise the cap. |
 | `jupiter_v1_provider_pool_not_admitted` | Jupiter's best direct pool is not one the policy admits. | Try later or another amount, or admit that reviewed pool's route. |
 | `jupiter_v1_pool_left_quoted_tick_arrays` (`APN_REPREPARE_REQUIRED`) | The pool price left the tick arrays the quoted swap names. | Quote again. |
 | `jupiter_v1_approval_lifetime_window` | The RPC returned a blockhash outside the 100–151 block window at approval. Nothing was marked. | Run `approve` again. |

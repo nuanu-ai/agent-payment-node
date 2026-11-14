@@ -36,7 +36,8 @@ export function createJupiterV1Runtime(options:JupiterV1RuntimeOptions):GuardedS
  const {state,clock}=options,rpc=new JupiterV1BudgetedRpc(options.rpc),usage=new AssetUsageLedger(state.root),operations=new SwapOperationRepository(state.root),core=new GuardedSwapService(operations,usage),
  materials=new SavedJupiterV1MaterialStore(state.root),bindings=new JupiterV1ExecutionBindingStore(state.root),native=new JupiterV1LocalSigner(state.root,options.wrappingSecret),
  activePolicy=(profile:string)=>loadActiveAssetPolicyRegistry({state,clock},profile);
- const admission=new JupiterV1OwnerAdmission({account:profile=>native.publicOwner(profile),ownerBinding:profile=>native.publicOwner(profile)},activePolicy,usage,()=>clock.now());
+ // Admission reads the owner first: a missing or provider-linked Solana wallet refuses with that cause, never as corruption.
+ const admission=new JupiterV1OwnerAdmission({account:profile=>native.admissionOwner(profile),ownerBinding:profile=>native.admissionOwner(profile)},activePolicy,usage,()=>clock.now());
  const preconsent=new Map<string,JupiterV1PreconsentProof>();
  const sender=new JupiterV1SingleSender(core,materials,bindings,native,rpc,clock),execution=new JupiterV1ExecutionDriver({core,materials,bindings,admission,native,sender,rpc,clock,preconsent});
  const cached=new Map<string,GuardedSwapRuntime<JupiterV1QuoteRequest>>();

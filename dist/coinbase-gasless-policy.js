@@ -93,10 +93,29 @@ export class CoinbaseGaslessPolicy {
         const active = await this.assert(op);
         const binding = validateCoinbaseGaslessAllowlist(op);
         const lease = await this.usage.reserve({ ...identity(op), registry: active.registry, rail: "gasless",
-            mechanism: binding.mechanism, amountAtomic: op.amountAtomic, idempotencyKey: key(op.operationId), now: this.context.clock.now() });
+            mechanism: binding.mechanism, amountAtomic: op.amountAtomic, idempotencyKey: key(op.operationId), now: this.context.clock.now() })
+            .catch(async (error) => { throw await this.reservationRefusal(op, binding, error); });
         if (lease.reservationId !== binding.reservationId || lease.policyDigest !== binding.policyDigest || lease.state !== "reserved")
             corrupt();
         await this.assert(op);
+    }
+    /**
+     * The ledger refuses a new hold with its policy evaluation's own denial (`APN_OPERATION_BLOCKED`, no details) when
+     * another hold took the cap after this policy's check. When the ledger holds no hold of this operation, the policy is
+     * checked again with today's usage and its refusal is returned; anything else, a replay included, is unchanged.
+     */
+    async reservationRefusal(op, binding, error) {
+        if (!(error instanceof ApnError) || error.code !== "APN_OPERATION_BLOCKED" || error.details !== undefined)
+            return error;
+        try {
+            if (await this.usage.load(identity(op), binding.reservationId) !== null)
+                return error;
+            await this.assert(op);
+        }
+        catch (refusal) {
+            return refusal instanceof ApnError && refusal.code === "APN_ALLOWLIST_REFUSED" ? refusal : error;
+        }
+        return error;
     }
     /** Journal state wins after a crash. Uncertain provider effects retain the full reservation. */
     async reconcile(op, recoveringStarted = false) {

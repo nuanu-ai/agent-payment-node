@@ -115,6 +115,12 @@ export interface StargateNativeJournal {
   withOwnerLock<T>(owner: Address, work: () => Promise<T>): Promise<T>;
   /** Writes a new operation's owner claim to the operation index before `work` (its prepare body) reads anything. */
   admit<T>(operation: StargateAdmission, work: () => Promise<T>): Promise<T>;
+  /**
+   * The approve-time account guard right before the operation's first effect (QA F03): an index entry the wall clock let
+   * go while nothing was sent holds its claims again if the clock went back, and another unresolved operation on the
+   * account refuses it (OperationIndex.assertOwnClaimsAvailable).
+   */
+  assertOwnClaims(operationId: string): Promise<void>;
 }
 
 export class LocalStargateNativeSigner {
@@ -260,6 +266,11 @@ async function executeLocked(operationId: string, ports: StargateNativeExecution
   if (head === null || typeof head !== "object" || Array.isArray(head)) fail("APN_RPC_PROTOCOL", "source_head");
   if (!evmFrozenFeeAdmitted(rpcQuantity((head as Record<string, unknown>).baseFeePerGas), { maxFeePerGasWei: BigInt(operation.envelope.maxFeePerGasAtomic),
     maxPriorityFeePerGasWei: BigInt(operation.envelope.maxPriorityFeePerGasAtomic) })) fail("APN_REPREPARE_REQUIRED", "fee_spike");
+  // Nothing was marked yet, so the index may have let this operation go by the clock: after every network read it is
+  // admitted again, refused while another unresolved operation holds the account (QA F03). Only local steps follow (the
+  // hold, the custody signature, the marker); later, inside the signing step, a refusal would release the hold and the
+  // operation would have to be prepared again, so this is the last point a refusal leaves it as it was.
+  await journal.assertOwnClaims(operation.operationId);
   await ports.reserveUsage(operation);
   let raw: Hex;
   try {

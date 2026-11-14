@@ -12,12 +12,11 @@ import { signedDirectTransaction } from "./local-wallet-direct-signed.js";
 import { parseX402Create, parseX402Recovery, x402RecoveryBinding, publicAuthorization, type X402CustodyMethod } from "./local-wallet-native-x402-fields.js";
 import { x402Eip2612TypedData, x402Permit2TypedData } from "./x402-permit2-exact.js";
 import { assertWallet, ensureX402Live, effectSlot, requestProfile, protocol, rejected } from "./local-wallet-native-fields.js";
-import { constants } from "node:fs";
-import { lstat, open } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import { join, normalize, parse, resolve, sep } from "node:path";
 import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { domainHash, hashObject } from "./canonical.js";
+import { domainHash, exactKeys, hashObject } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import {
   EncryptedWalletStore,
@@ -30,6 +29,7 @@ import {
 } from "./encrypted-wallet-store.js";
 import { ApnError } from "./errors.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "./evm-asset.js";
+import { nonRegularFileLabel, nonRegularFileType, openExpectedRegularFile, type NonRegularFileType } from "./operator-file.js";
 import { evmNativeCustody, assertEvmNativeCustody } from "./evm-native-custody.js";
 import { parseEvmNativeIntent, snapshotEvmNativePayload } from "./evm-native-intent.js";
 import type { Hex } from "./model.js";
@@ -128,6 +128,7 @@ export class LocalWalletNative implements NativePort {
         case "wallet.ensure": return await this.ensureWallet(profile);
         case "wallet.import": return await this.importWallet(profile, payload);
         case "wallet.describe": return await this.describeWallet(profile);
+        case "wallet.complete": return await this.completeWallet(profile, payload);
         case "directTransfer.approveAndSign": return await this.approveAndSign(payload);
         case "effectMaterial.get": return await this.getEffect(payload);
         case "directTransfer.signedMaterial.get": return await signedDirectTransaction(this.state, payload, this.withWallet.bind(this));
@@ -156,13 +157,19 @@ export class LocalWalletNative implements NativePort {
       throw new ApnError("APN_STATE_SECURITY", "Wallet key file path must be canonical.");
     }
     let component = parse(keyFile).root;
+    let entry = await lstat(component).catch(keyFileAccessFailure);
     for (const part of keyFile.slice(component.length).split(sep).filter(Boolean)) {
       component = join(component, part);
-      if ((await lstat(component).catch(keyFileAccessFailure)).isSymbolicLink()) {
+      entry = await lstat(component).catch(keyFileAccessFailure);
+      if (entry.isSymbolicLink()) {
         throw new ApnError("APN_STATE_SECURITY", "Wallet key file path traverses a symbolic link.");
       }
     }
-    const handle = await open(keyFile, constants.O_RDONLY | constants.O_NOFOLLOW).catch(keyFileAccessFailure);
+    // A FIFO would block a reading open until some writer appeared; a device, socket or directory holds no key file.
+    const type = nonRegularFileType(entry);
+    if (type !== null) throw keyFileNotRegular(type);
+    const handle = await openExpectedRegularFile(keyFile, entry).catch(keyFileAccessFailure);
+    if (handle === null) throw new ApnError("APN_STATE_SECURITY", "Wallet key file changed during import.", { reason: "key_file_changed" });
     let bytes: Buffer = Buffer.alloc(0);
     try {
       const before = await handle.stat();
@@ -198,7 +205,12 @@ export class LocalWalletNative implements NativePort {
 
   private async describeWallet(profile: string): Promise<unknown> {
     const wallet = await this.state.loadWallet(this.state.profileHash(profile));
-    if (wallet === null) return { found: false };
+    if (wallet === null) {
+      // A sealed key without its public record (an incomplete wallet) still needs this secret to be completed: status
+      // proves it exists, as for a complete wallet, and decrypts nothing.
+      if (await this.state.loadEncryptedWalletEnvelope(profile) !== null) await this.wallets.assertWrappingSecretPresent();
+      return { found: false };
+    }
     const envelope = await this.state.loadEncryptedWalletEnvelope(profile);
     if (envelope === null) throw protocol("Public wallet has no custody envelope.");
     await assertEvmNativeCustody(this.state, profile, await evmNativeCustody(this.state, profile), walletEnvelopeIdentity(envelope, profile));
@@ -206,6 +218,19 @@ export class LocalWalletNative implements NativePort {
     await this.wallets.assertWrappingSecretPresent();
     return { found: true, profile: wallet.profile, address: wallet.address, createdAt: wallet.createdAt, bindingHash: wallet.bindingHash };
   }
+  /**
+   * `wallet ensure` of an incomplete wallet: the identity of the key an earlier create or import sealed, proven by
+   * decrypting it (its key derives the address). The address the caller read from the envelope must be that identity's.
+   * This never creates a key and writes nothing; the caller writes the public record.
+   */
+  private async completeWallet(profile: string, payload: Readonly<Record<string, unknown>>): Promise<unknown> {
+    if (!exactKeys(payload, ["profile", "address"]) || typeof payload.address !== "string") throw protocol("Wallet completion request is invalid.");
+    if (await this.state.loadEncryptedWalletEnvelope(profile) === null) throw rejected("APN_WALLET_NOT_FOUND", "No sealed wallet key exists for this profile.");
+    const identity = await this.wallets.sealedIdentity(profile);
+    if (identity.address !== payload.address) throw rejected("APN_WALLET_MISMATCH", "The sealed wallet key differs from the identity named for completion.");
+    return publicIdentity(identity);
+  }
+
   private async approveAndSign(payload: Readonly<Record<string, unknown>>): Promise<unknown> {
     const intent = payload.evm === undefined ? Object.freeze(parseDirectIntent(payload)) : parseEvmNativeIntent(payload);
     // Read-only historical shapes: the cleanup85 cancellation and the 0.5.41 Circle native rider never sign again.
@@ -388,4 +413,10 @@ function keyFileAccessFailure(error: unknown): never {
   if (code === "EACCES" || code === "EPERM") throw new ApnError("APN_INVALID_INPUT", "Wallet key file cannot be read by this user.");
   if (code === "ELOOP") throw new ApnError("APN_STATE_SECURITY", "Wallet key file path traverses a symbolic link.");
   throw error;
+}
+
+/** Refused from its `lstat`, before any open, so a FIFO never blocks the import; the message names no path. */
+function keyFileNotRegular(type: NonRegularFileType): ApnError {
+  return new ApnError("APN_STATE_SECURITY", `Wallet key file is ${nonRegularFileLabel(type)}, not a regular file; nothing was read from it.`,
+    { reason: "key_file_not_regular", file_type: type });
 }

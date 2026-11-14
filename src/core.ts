@@ -306,9 +306,9 @@ case "mega.funding.prepare": case "mega.funding.approve": case "mega.funding.sta
       case "wallet.permission.disable":
       case "wallet.permission.forget":
         return dataOutcome(await this.providerPermissions.execute(request), "provider_permission_binding");
-      case "wallet.metamask.native-transfer": return dataOutcome(await runMetaMaskNativeTransfer(this.context.state.root,request),"durable_public_state");
+      case "wallet.metamask.native-transfer": return dataOutcome(await runMetaMaskNativeTransfer(this.context.state.root,request,this.context.requireProviderRequestReferences()),"durable_public_state");
       case "wallet.metamask.native-transfer-status":
-      case "wallet.metamask.native-transfer-observe": return dataOutcome(await readMetaMaskNativeTransfer(this.context.state.root,request.operationId,request.command==="wallet.metamask.native-transfer-observe"),"durable_public_state");
+      case "wallet.metamask.native-transfer-observe": return dataOutcome(await readMetaMaskNativeTransfer(this.context.state.root,request.operationId,request.command==="wallet.metamask.native-transfer-observe",this.context.providerRequestReferences),"durable_public_state");
       case "wallet.status": {
         const providerStatus = await this.providerWallet.status(request.profile);
         return providerStatus === null

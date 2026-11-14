@@ -253,6 +253,11 @@ function forbiddenDependencies(): {
       submit: async () => { calls.metamaskProvider++; throw new Error("unexpected provider submit"); },
       observe: async () => { calls.metamaskProvider++; throw new Error("unexpected provider observation"); },
     },
+    references: {
+      ready: async () => { calls.metamaskProvider++; throw new Error("unexpected request reference readiness"); },
+      seal: async () => { calls.metamaskProvider++; throw new Error("unexpected request reference seal"); },
+      open: async () => { calls.metamaskProvider++; throw new Error("unexpected request reference open"); },
+    },
     approval: { confirm: async () => { calls.metamaskApproval++; return true; } },
   };
   return { calls, local, metamask };

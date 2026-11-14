@@ -3,7 +3,7 @@ import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
 import type { Address, Hex } from "./model.js";
 import type { X402SigningIntent, X402SigningPort, X402SigningResult } from "./provider-ports.js";
 import type { MetaMaskProcessResult, MetaMaskProcessRunnerPort } from "./metamask-process-runner.js";
-import { classifyMetaMaskPendingNotices, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
+import { classifyMetaMaskPendingNotices, metaMaskWatchMissReason, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
 
 type Exclusive = <T>(work: () => Promise<T>) => Promise<T>;
 
@@ -130,7 +130,8 @@ function parseSigningResult(result: MetaMaskProcessResult, expected: Address): X
 
 function parseWatchResult(result: MetaMaskProcessResult, recoveryToken: string): X402SigningResult {
   const parsed = parseMetaMaskProcessOutput(result.stdout);
-  if (parsed === null) return ambiguous("provider_response_malformed");
+  // A REQUEST_NOT_FOUND on stderr names where mm missed the request (its local list, or MetaMask's server): never proof.
+  if (parsed === null) return ambiguous(metaMaskWatchMissReason(result) ?? "provider_response_malformed");
   const pendingNotice = classifyMetaMaskPendingNotices(parsed.notices, recoveryToken);
   if (pendingNotice.disposition === "invalid") return ambiguous(pendingNotice.reason);
   const envelope = parsed.envelope;

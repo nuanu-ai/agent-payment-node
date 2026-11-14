@@ -75,6 +75,12 @@ export declare class JupiterV1LocalSigner {
     #private;
     static assertGenuine(value: JupiterV1LocalSigner, root: string): void;
     constructor(root: string, wrappingSecret: WrappingSecretPort);
+    /**
+     * The owner as admission sees it (quote, prepare and the checks before any marker). A profile with no Solana wallet, a
+     * provider-linked one, or a local one left half-created (envelope without its public record) is refused with that cause;
+     * every other disagreement stays corrupt, as in publicOwner.
+     */
+    admissionOwner(profile: string, expected?: string): Promise<import("../../direct-rail-ports.js").ChainAccount>;
     publicOwner(profile: string, expected?: string): Promise<import("../../direct-rail-ports.js").ChainAccount>;
     /** The intent is detached synchronously before the first await. No returned artifact alone authorizes signing. */
     approve(operationValue: SwapOperationRecord, materialValue: JupiterV1PreparedMaterial, admissionValue: JupiterV1OwnerBinding, freshValue: JupiterV1ResolvedMaterial): Promise<GuardedSwapApprovalArtifact>;

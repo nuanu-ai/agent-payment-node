@@ -12,6 +12,7 @@ import { assetAdmitsSwapMechanism } from "./route-admission.js";
 import { validateSwapQuote, type SwapQuoteInput, type SwapQuoteSnapshot } from "./quote.js";
 import { SwapOperationRepository } from "./repository.js";
 import { GuardedSwapService } from "./service.js";
+import { swapPolicyStatusCommand } from "./owner-admission.js";
 import type { SwapUnlandedProof } from "./unlanded.js";
 
 export const GUARDED_SWAP_APPROVAL_SCHEMA = "apn.guarded-swap-approval.v1" as const;
@@ -294,7 +295,8 @@ export class GuardedSwapRuntime<Request> {
   private now(): Date { const value = this.dependencies.clock.now(); instant(value); return value; }
   private async activePolicy(profile: string): Promise<AssetPolicyRegistry> {
     const policy = await this.dependencies.policy(profile);
-    if (policy === null) blocked("No active owner swap admission is installed for this profile.", "swap_owner_admission_required");
+    if (policy === null) throw new ApnError("APN_OPERATION_BLOCKED", "No active owner swap admission is installed for this profile.",
+      { reason: "swap_owner_admission_required", nextActions: [swapPolicyStatusCommand(profile)] });
     return immutableSnapshot(validateAssetPolicyRegistry(immutableSnapshot(policy)));
   }
   private async assertCurrentPolicy(operation: SwapOperationRecord): Promise<AssetPolicyRegistry> {

@@ -58,7 +58,14 @@ try {
    await state.writeOperation(sealOperation({...body,state:started.state,reason:started.reason,proofClass:started.proofClass,transitions:appendTransition(saved.transitions,started)}));
  }
  const owner=await import(moduleUrl('metamask-native-transfer-owner.js'));
- const run=(chainId,key)=>owner.runMetaMaskNativeTransfer(root,{profile,chainId,recipient:recipientInput,amountAtomic:amount,idempotencyKey:key});
+ // QA F26: a synthetic wrapping secret seals the MetaMask request id the hand-off returns; the Keychain is never touched.
+ const {EncryptedProviderRequestReferenceStore}=await import(moduleUrl('provider-request-reference-store.js'));
+ const {metaMaskNativeRequestIdHash,metaMaskNativeRequestReference}=await import(moduleUrl('metamask-native-journal.js'));
+ const references=new EncryptedProviderRequestReferenceStore({root},{async load(){return Buffer.alloc(32,7);},async create(){return Buffer.alloc(32,7);}});
+ const sealedRequest=async(journal,bytes)=>{assert.equal(journal.providerRequestId,null);assert.equal(journal.providerRequestIdHash,metaMaskNativeRequestIdHash('TEST-pending-request'));
+   assert.ok(!bytes.toString('utf8').includes('TEST-pending-request'),'the journal never names the request id');
+   assert.equal(await references.open(metaMaskNativeRequestReference(journal,journal.providerRequestIdHash)),'TEST-pending-request');};
+ const run=(chainId,key)=>owner.runMetaMaskNativeTransfer(root,{profile,chainId,recipient:recipientInput,amountAtomic:amount,idempotencyKey:key},references);
  if(['resolver-late','rpc-late'].includes(scenario)){
    // A deadline before the vendor child starts proves no hand-off: the marker closes as failed_before_effect (R4).
    await assert.rejects(()=>run(1,'native-test-static-0001'));
@@ -79,23 +86,23 @@ try {
  if(sent.length){const first=children.findIndex(a=>a[1]==='send-transaction');assert.equal(first,6,'three READs before consent and three in the one final guard before send');const payload=JSON.parse(sent[0][sent[0].indexOf('--payload')+1]);assert.equal(payload.nonce,'0x7');assert.equal(payload.gas,'0xfde8');assert.equal(payload.value,'0x0');assert.deepEqual(Object.keys(payload),['to','data','value','gas','nonce','maxFeePerGas','maxPriorityFeePerGas']);}
  const journalFile=join(root,'metamask-native-operations',result.operation_id+'.json'),bytes=await readFile(journalFile),journal=JSON.parse(bytes);
  assert.equal(journal.context.profile,profile);assert.equal(journal.context.quote.sender.toLowerCase(),payer);assert.equal(journal.effectAttempts,1);assert.ok(journal.diagnostic);assert.ok(!JSON.stringify(result).includes('TEST secret'));
- if(scenario==='send-refused'){assert.equal(journal.providerRequestId,'TEST-pending-request');assert.equal(result.diagnostic.providerCode,'policy');assert.equal(result.diagnostic.stage,'sdk_send');}
+ if(scenario==='send-refused'){await sealedRequest(journal,bytes);assert.equal(result.diagnostic.providerCode,'policy');assert.equal(result.diagnostic.stage,'sdk_send');}
  const count=children.length,replay=await run(1,'native-test-static-0001');assert.deepEqual(replay,result);assert.deepEqual(await readFile(journalFile),bytes);assert.equal((await readFile(log,'utf8')).trim().split('\n').length,count);
  const {AssetUsageLedger}=await import(moduleUrl('asset-usage-ledger.js'));const ledger=new AssetUsageLedger(root);assert.equal((await ledger.usage({account:address,chain:'eip155:1',asset:{kind:'native',identifier:null}},new Date())).amountAtomic,'13000000');assert.equal((await ledger.usage({account:address,chain:'eip155:1',asset:{kind:'token',identifier:token}},new Date())).amountAtomic,'1000');
  await assert.rejects(()=>run(1,'native-test-second-0002'));
  if(scenario==='send-refused'){
    // Abandonment observes once first: the stored request resolves to a confirmed receipt, so nothing is released.
    const approvals=[];
-   await assert.rejects(()=>owner.abandonMetaMaskNativeTransfer(root,result.operation_id,async i=>{approvals.push(i);},()=>new Date()),{code:'APN_OPERATION_BLOCKED'});
-   const closed=await owner.abandonMetaMaskNativeTransfer(root,result.operation_id,async i=>{approvals.push(i);},()=>new Date(Date.now()+120000));
+   await assert.rejects(()=>owner.abandonMetaMaskNativeTransfer(root,result.operation_id,async i=>{approvals.push(i);},()=>new Date(),references),{code:'APN_OPERATION_BLOCKED'});
+   const closed=await owner.abandonMetaMaskNativeTransfer(root,result.operation_id,async i=>{approvals.push(i);},()=>new Date(Date.now()+120000),references);
    assert.equal(closed.state,'confirmed');assert.equal(approvals.length,0);
  }
  if(scenario==='nonce-advanced'||custom){
    // The pending request is kept as returned; no owner guard re-reads the (advanced) nonce after the hand-off.
-   if(!custom){assert.equal(journal.providerRequestId,'TEST-pending-request');assert.equal(result.transaction_hash,null);assert.notEqual(result.diagnostic.stage,'post_handoff');}
+   if(!custom){await sealedRequest(journal,bytes);assert.equal(result.transaction_hash,null);assert.notEqual(result.diagnostic.stage,'post_handoff');}
    const nonceBefore=nonceReads,balanceBefore=guardBalances;
    mock.timers.enable({apis:['Date'],now:Date.now()});mock.timers.tick(61000);
-   const observed=await owner.readMetaMaskNativeTransfer(root,result.operation_id,true);assert.equal(observed.state,'confirmed');assert.equal(observed.transaction_hash,'0x'+'e'.repeat(64));assert.equal(observed.receipt.nativeFeeAtomic,'7500000');
+   const observed=await owner.readMetaMaskNativeTransfer(root,result.operation_id,true,references);assert.equal(observed.state,'confirmed');assert.equal(observed.transaction_hash,'0x'+'e'.repeat(64));assert.equal(observed.receipt.nativeFeeAtomic,'7500000');
    assert.equal(nonceReads,nonceBefore,'receipt reconciliation never reuses pre-send pending nonce');assert.equal(guardBalances,balanceBefore,'receipt reconciliation never requires old affordability');
    assert.equal((await ledger.usage({account:address,chain:'eip155:1',asset:{kind:'native',identifier:null}},new Date())).amountAtomic,'7500000');
    assert.equal((await ledger.usage({account:address,chain:'eip155:1',asset:{kind:'token',identifier:token}},new Date())).amountAtomic,'1000');

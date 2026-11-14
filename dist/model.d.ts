@@ -115,12 +115,26 @@ export interface ProviderDelegatedDirectBinding extends ProviderDirectBindingBas
     readonly coinbaseGasless?: never;
 }
 export type ProviderDirectBinding = ProviderAtomicDirectBinding | ProviderDelegatedDirectBinding;
-export interface ProviderEffectReference {
+/**
+ * The provider request a direct transfer waits on, kept in its operation record. Version 1 keeps the request id itself:
+ * every reference 0.5.106 or earlier wrote, and a delegated send's, whose id is the APN operation id. Version 2, which a
+ * later release writes for a provider's own request id (MetaMask Guard MFA, `operation recover-provider-request`), keeps
+ * only its hash; the id is sealed apart under the Keychain wrapping secret (provider-request-reference-store.ts).
+ */
+export interface PlainProviderEffectReference {
     readonly schemaVersion: "apn.provider-effect-reference.v1";
     readonly kind: "transaction";
     readonly recoveryToken: string;
     readonly providerState: string;
 }
+export interface SealedProviderEffectReference {
+    readonly schemaVersion: "apn.provider-effect-reference.v2";
+    readonly kind: "transaction";
+    /** providerRequestReferenceHash(providerId, id): the value `provider_request_reference_hash` shows. */
+    readonly recoveryTokenHash: string;
+    readonly providerState: string;
+}
+export type ProviderEffectReference = PlainProviderEffectReference | SealedProviderEffectReference;
 export interface Transition {
     readonly sequence: string;
     readonly at: string;

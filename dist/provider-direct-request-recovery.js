@@ -1,7 +1,7 @@
 import { sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { providerDirectReceipt } from "./provider-direct-receipt.js";
-import { canonicalProviderRecoveryToken, createProviderEffectReference, } from "./provider-direct-recovery.js";
+import { canonicalProviderRecoveryToken, providerEffectNames, sealProviderEffectReference } from "./provider-direct-recovery.js";
 import { appendTransition, sealOperation } from "./state.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
 const RECOVERABLE_REASONS = new Set([
@@ -30,7 +30,8 @@ export class ProviderDirectRequestRecoveryService {
             const operation = await this.requiredOperation(operationId);
             const existing = operation.providerEffect;
             if (existing !== undefined) {
-                if (existing.recoveryToken !== recoveryToken) {
+                // A sealed reference is compared by its hash; it is never opened here.
+                if (!providerEffectNames(providerId, existing, recoveryToken)) {
                     throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Provider request ID conflicts with the durable operation binding.");
                 }
                 return publicOperation(operation);
@@ -40,7 +41,7 @@ export class ProviderDirectRequestRecoveryService {
                 throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not eligible for provider-request recovery.");
             const duplicate = (await this.context.state.listAllOperations()).find((candidate) => candidate.operationId !== operationId &&
                 candidate.providerDirect?.providerId === providerId &&
-                candidate.providerEffect?.recoveryToken === recoveryToken);
+                candidate.providerEffect !== undefined && providerEffectNames(providerId, candidate.providerEffect, recoveryToken));
             if (duplicate !== undefined) {
                 throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Provider request ID is already bound to another operation.");
             }
@@ -62,10 +63,12 @@ export class ProviderDirectRequestRecoveryService {
             reason: "provider_request_reference_recovered",
             proofClass: "provider_request_reference",
         };
+        // The owner's request id is sealed before the record names it; the record keeps only its hash.
+        const providerEffect = await sealProviderEffectReference(this.context.requireProviderRequestReferences(), operation, recoveryToken, "RECOVERED");
         const { integrityHash: _previousIntegrityHash, ...base } = operation;
         const updated = sealOperation({
             ...base,
-            providerEffect: createProviderEffectReference(recoveryToken, "RECOVERED"),
+            providerEffect,
             state: transition.state,
             terminal: transition.terminal,
             reason: transition.reason,

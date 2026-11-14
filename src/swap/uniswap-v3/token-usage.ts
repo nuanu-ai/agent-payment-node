@@ -7,6 +7,8 @@ import { ApnError } from "../../errors.js";
 import type { ClockPort } from "../../ports.js";
 import type { StateStore } from "../../state.js";
 import { assetAdmitsSwapMechanism } from "../route-admission.js";
+import { evaluateSwapAssetAdmission, swapOwnerAdmissionRequired, swapPolicyStatusCommand, swapReservationRefusal,
+  type SwapAssetSide } from "../owner-admission.js";
 import type { UniswapTokenQuoteRequest } from "./token-builder.js";
 import type { UniswapTokenOperation } from "./token-operation.js";
 import type { UniswapTokenMaterial } from "./token-material.js";
@@ -20,14 +22,16 @@ export class UniswapTokenUsage {
 
   async admitQuote(request: UniswapTokenQuoteRequest, now: Date): Promise<string> {
     const active = await this.active(request.profile, request.account), identity = usageIdentity(request.account, request.sourceToken);
-    const current = await this.ledger.usage(identity, now);
-    const source = evaluateAssetPolicy(active.registry, { chain: identity.chain, asset: identity.asset, rail: "swap", amountAtomic: request.amountAtomic,
-      dailyUsageAtomic: current.amountAtomic, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-    const destination = evaluateAssetPolicy(active.registry, { chain: "eip155:1", asset: { kind: "token", identifier: request.outputToken },
-      rail: "swap", amountAtomic: request.minimumOutputAtomic, dailyUsageAtomic: "0",
-      asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-    if (!assetAdmitsSwapMechanism(source.asset, UNISWAP_TOKEN_MECHANISM_PIN) || !assetAdmitsSwapMechanism(destination.asset, UNISWAP_TOKEN_MECHANISM_PIN)) {
-      blocked("Token pair lacks the exact Uniswap mechanism admission.", "uniswap_token_policy_mechanism");
+    const current = await this.ledger.usage(identity, now), at = now.toISOString();
+    // A token the active policy does not list, admit for the swap rail or admit with this route refuses as
+    // swap_owner_admission_required and names the token, like the other guarded swap lanes at prepare; a cap names the cap.
+    const subject = (side: SwapAssetSide, token: string) => tokenSubject(request.profile, side, token);
+    const source = evaluateSwapAssetAdmission(active.registry, subject("source", request.sourceToken),
+      { amountAtomic: request.amountAtomic, dailyUsageAtomic: current.amountAtomic }, at);
+    const destination = evaluateSwapAssetAdmission(active.registry, subject("destination", request.outputToken),
+      { amountAtomic: request.minimumOutputAtomic, dailyUsageAtomic: "0" }, at);
+    for (const [side, token, admission] of [["source", request.sourceToken, source], ["destination", request.outputToken, destination]] as const) {
+      if (!assetAdmitsSwapMechanism(admission.asset, UNISWAP_TOKEN_MECHANISM_PIN)) throw swapOwnerAdmissionRequired(subject(side, token), "swap_route_not_admitted");
     }
     assertRecipientAdmitted({ admission: source, recipient: request.recipient });
     assertRecipientAdmitted({ admission: destination, recipient: request.recipient });
@@ -38,8 +42,14 @@ export class UniswapTokenUsage {
     const active = await this.active(op.profile, op.account);
     if (active.digest !== op.policyDigest) blocked("The active token swap policy changed.", "uniswap_token_policy_changed");
     pinned(active.registry, op.route, this.clock.now());
-    const lease = await this.ledger.reserve({ ...identityOf(op), registry: active.registry, rail: "swap", amountAtomic: op.route.amountIn,
-      idempotencyKey: usageKey(op.operationId), now: this.clock.now() });
+    const now = this.clock.now(), idempotencyKey = usageKey(op.operationId);
+    let lease: Awaited<ReturnType<AssetUsageLedger["reserve"]>>;
+    try { lease = await this.ledger.reserve({ ...identityOf(op), registry: active.registry, rail: "swap", amountAtomic: op.route.amountIn, idempotencyKey, now }); }
+    catch (error) {
+      // The shared daily usage decides at approval: a cap the reservation exceeds is named, nothing else changes.
+      throw await swapReservationRefusal(error, this.ledger, { policy: active.registry, subject: tokenSubject(op.profile, "source", op.route.inputToken),
+        account: op.account, amountAtomic: op.route.amountIn, idempotencyKey, now });
+    }
     this.assert(op, lease.reservationId, lease.policyDigest, lease.amountAtomic, lease.rail);
     return { reservationId: lease.reservationId, state: lease.state };
   }
@@ -48,8 +58,9 @@ export class UniswapTokenUsage {
     const active = await this.active(material.profile, material.account), now = this.clock.now(), identity = usageIdentity(material.account, material.route.inputToken);
     if (active.digest !== material.policyDigest) blocked("The active token swap policy changed.", "uniswap_token_policy_changed");
     const current = await this.ledger.usage(identity, now);
-    evaluateAssetPolicy(active.registry, { chain: identity.chain, asset: identity.asset, rail: "swap", amountAtomic: material.route.amountIn,
-      dailyUsageAtomic: current.amountAtomic, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
+    // At prepare today's usage may have grown since the quote: a cap the input now exceeds is named.
+    evaluateSwapAssetAdmission(active.registry, tokenSubject(material.profile, "source", material.route.inputToken),
+      { amountAtomic: material.route.amountIn, dailyUsageAtomic: current.amountAtomic }, now.toISOString());
     pinned(active.registry, material.route, now);
   }
 
@@ -109,7 +120,8 @@ export class UniswapTokenUsage {
 
   private async active(profile: string, account: string) {
     const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, profile);
-    if (active === null || active.accounts.evm !== account) blocked("An active owner token swap policy is required.", "swap_owner_admission_required");
+    if (active === null || active.accounts.evm !== account) throw new ApnError("APN_OPERATION_BLOCKED", "An active owner token swap policy is required.",
+      { reason: "swap_owner_admission_required", nextActions: [swapPolicyStatusCommand(profile)] });
     return active;
   }
   private assert(op: UniswapTokenOperation, id: string, policy: string, amount: string, rail: string) {
@@ -128,6 +140,9 @@ function pinned(registry: AssetPolicyRegistry, route: UniswapTokenRoute, now: Da
       amountAtomic, dailyUsageAtomic: "0", asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
     assertRecipientAdmitted({ admission, recipient: route.recipient });
   }
+}
+function tokenSubject(profile: string, side: SwapAssetSide, token: string) {
+  return { profile, side, inventory: "apn swap ethereum uniswap-token inventory", asset: { chain: "eip155:1", kind: "token" as const, identifier: token } };
 }
 function usageIdentity(account: string, token: string): AssetUsageIdentity { return { account, chain: "eip155:1", asset: { kind: "token", identifier: token } }; }
 function identityOf(op: UniswapTokenOperation) { return usageIdentity(op.account, op.route.inputToken); }

@@ -5,7 +5,7 @@ import { mkdtemp } from "node:fs/promises";
 import { encodeFunctionData, parseAbi } from "viem";
 import { mmPrivateHash, mmWalletIdentityHash } from "../../../src/metamask-gasless/identity.js";
 import { mmQuoteHash } from "../../../src/metamask-gasless/economics.js";
-import type { MetaMaskGaslessBinding, MetaMaskGaslessIntent, MetaMaskGaslessQuote,
+import type { MetaMaskGaslessBinding, MetaMaskGaslessProviderIntent, MetaMaskGaslessQuote,
   MetaMaskGaslessUnsignedResult } from "../../../src/metamask-gasless/model.js";
 import { MM_CHAINS, mmRegistry } from "../../../src/metamask-gasless/registry.js";
 import type { FetchExchange, FetchExchangeRequest, FetchExchangeResponse } from "../../../src/metamask-gasless/client/network.js";
@@ -111,7 +111,7 @@ export function expectedQuote(chainId: typeof MM_CHAINS[number]): MetaMaskGasles
   return { ...material, hash: mmQuoteHash(material) };
 }
 export function intent(binding: MetaMaskGaslessBinding, chainId: typeof MM_CHAINS[number], quote: MetaMaskGaslessQuote,
-  unsigned: MetaMaskGaslessUnsignedResult): MetaMaskGaslessIntent {
+  unsigned: MetaMaskGaslessUnsignedResult): MetaMaskGaslessProviderIntent {
   const row = mmRegistry(chainId).row;
   const state = { protocolCodeHashes: { manager: row.protocol.manager.codeHash, delegate: row.protocol.delegate.codeHash,
     limitedCalls: row.protocol.limitedCalls.codeHash, exactBatch: row.protocol.exactBatch.codeHash },

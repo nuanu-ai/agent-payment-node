@@ -3,7 +3,9 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
+import { ApnError } from "../../src/errors.js";
 import { gaslessReceipt } from "../../src/gasless/receipt.js";
+import { OperationIndex } from "../../src/operation-index/index.js";
 import { OperationService } from "../../src/operation-service.js";
 import { gaslessFixture } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -113,4 +115,18 @@ test("a receipt a released version wrote with an earlier proof class for the cur
   // Without that file, the receipt is derived from the operation (phase 4b, CORE-13).
   await rm(path);
   assert.deepEqual((await s.core.execute({ command: "receipt.get", operationId: id })).receipt, current);
+});
+
+test("QA F03: the bootstrap disclosure first re-takes the transfer's own account claim; a refusal discloses and sends nothing", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await gaslessFixture(temporary.root), { id } = await s.prepare();
+  // The guard (re-admission of a released entry, refused while another unresolved operation holds the account) refuses here.
+  const seen: string[] = [], refusal = new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this network and account is not terminal.");
+  t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string) => { seen.push(operationId); throw refusal; });
+  const refused = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error?.code, "APN_OPERATION_BLOCKED");
+  assert.deepEqual(seen, [id]);
+  const stored = await s.record(id);
+  assert.deepEqual([stored.bootstrap.disclosureAttempts, stored.userOperation.submissionAttempts, s.rpc.sends.length], [0, 0, 0]);
 });

@@ -23,12 +23,14 @@ const ETH_TERMS = {
     atLimitEffect: "",
     overEffect: "unattended x402 is gated by the USDC limit only, so this ETH excess does not block it",
 };
-/** Posture-aware funding advice: never suggests adding an asset that is at or above its owner limit. */
-export function walletFundingGuidance(usdcAtomic, ethAtomic, policy, postureActions) {
+/** Posture-aware funding advice: never suggests adding an asset that is at or above its owner limit. The balance re-read
+ * names the profile asked about, never the default one. */
+export function walletFundingGuidance(profile, usdcAtomic, ethAtomic, policy, postureActions) {
+    const rerun = `Re-run apn wallet balance --profile ${profile}`;
     if (policy === null) {
         return {
             funding_guidance: { action: UNCONFIGURED_ACTION, warning: WARNING },
-            next_actions: [...postureActions, "Fund with low value only", "Re-run apn wallet balance"],
+            next_actions: [...postureActions, "Fund with low value only", rerun],
         };
     }
     const usdc = assetAdvice(parseAtomic(usdcAtomic), policy.maxBalanceUsdcAtomic, USDC_TERMS);
@@ -38,7 +40,7 @@ export function walletFundingGuidance(usdcAtomic, ethAtomic, policy, postureActi
             : eth.fundable ? ["Fund only Base ETH for gas, with low value only"] : [];
     return {
         funding_guidance: { action: `${usdc.sentence} ${eth.sentence}`, warning: WARNING },
-        next_actions: [...postureActions, ...fundAction, "Re-run apn wallet balance"],
+        next_actions: [...postureActions, ...fundAction, rerun],
     };
 }
 /** `wallet balance --chain --asset` advice: the selected asset follows its posture; a token read also applies the rule to native gas. */

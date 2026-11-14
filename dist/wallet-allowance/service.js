@@ -4,7 +4,7 @@ import { canonicalJson, domainHash, sha256 } from "../canonical.js";
 import { EncryptedWalletStore, walletEnvelopeIdentity } from "../encrypted-wallet-store.js";
 import { ApnError } from "../errors.js";
 import { conflictDomainKey, evmConflictDomain } from "../operation-conflict-domain.js";
-import { admitOperation } from "../operation-index/admission.js";
+import { admitOperation, assertOwnClaimsAvailable } from "../operation-index/admission.js";
 import { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { x402ProofTag } from "../x402-network.js";
@@ -77,8 +77,12 @@ export class WalletAllowanceRevokeService {
     async execute(start) {
         let record = start;
         if (record.state === "prepared") {
+            // `prepared` is the only state the index lets go by the clock: before consent and again before the sealed bytes are
+            // kept, the revoke re-takes its account and another unresolved operation on it refuses it (QA F03).
+            await assertOwnClaimsAvailable(this.records, record.operationId);
             await this.ports.consent(record);
             const raw = await this.sign(record), transactionHash = await verifyRevokeRaw(record.terms, raw);
+            await assertOwnClaimsAvailable(this.records, record.operationId);
             record = await this.write(record.operationId, (current) => current.state === "prepared" && this.now().getTime() < Date.parse(current.terms.expiresAt), () => ({ state: "signed", at: this.now().toISOString(), reason: "owner_approved_and_sealed", signed: { rawTransaction: raw, transactionHash } }));
         }
         if (record.state === "submitted")

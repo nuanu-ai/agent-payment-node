@@ -140,7 +140,7 @@ test("wallet import rejects oversized, linked, duplicated, and non-checksummed i
   assert.equal(JSON.stringify(result).includes(KEY), false);
 });
 
-test("wallet import fails closed on Keychain error and partial envelope write", async (t) => {
+test("wallet import fails closed on Keychain error; a partial envelope write takes back only its own key", async (t) => {
   const f = await fixture(t);
   const broken: WrappingSecretPort = { async load() { return null; }, async create() { throw new Error("synthetic keychain unavailable"); } };
   assert.equal((await f.run(f.args(), broken)).ok, false);
@@ -150,8 +150,15 @@ test("wallet import fails closed on Keychain error and partial envelope write", 
   const store = new EncryptedWalletStore(state, wrapping);
   await store.importNew("imported", KEY, ADDRESS);
   const before = await readFile(join(f.root, "wallets", "imported.json"));
-  assert.equal((await f.run()).ok, false, "orphan envelope must block import retry");
-  assert.equal((await runCli(["wallet", "ensure", "--profile", "imported"], {},
-    { stateRoot: f.root, wrappingSecret: wrapping })).ok, false, "ensure must not repair orphan import");
+  const otherKey = `0x${"2".padStart(64, "0")}` as const, otherFile = join(dirname(f.keyFile), "other-key.env");
+  await writeFile(otherFile, `TEST_EVM_KEY=${otherKey}\n`, { mode: 0o600 });
+  const other = await f.run(f.args("imported", privateKeyToAccount(otherKey).address, otherFile));
+  assert.equal(other.error?.details?.reason, "incomplete_wallet_key_differs", "a different key never replaces the sealed one");
   assert.deepEqual(await readFile(join(f.root, "wallets", "imported.json")), before);
+  const completed = await f.run();
+  assert.equal(completed.ok, true, `the same key completes the stopped import: ${JSON.stringify(completed.error)}`);
+  assert.equal((completed.data as { address: string }).address, ADDRESS);
+  assert.deepEqual(await readFile(join(f.root, "wallets", "imported.json")), before, "completion rewrites no sealed key");
+  assert.equal((await runCli(["wallet", "ensure", "--profile", "imported"], {},
+    { stateRoot: f.root, wrappingSecret: wrapping })).ok, true);
 });

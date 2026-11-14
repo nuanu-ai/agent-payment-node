@@ -6,6 +6,7 @@ import { OperationService } from "./operation-service.js";
 import { RailOperationRepository } from "./rail-operation-repository.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { assertWalletLifecycleAvailable } from "./wallet-lifecycle-guard.js";
+import { assertNoIncompleteLocalWallet } from "./wallet-import-collision.js";
 import { X402_SOLANA_ALLOWLIST_CHAIN, X402_SOLANA_MECHANISM, X402_SOLANA_NETWORK } from "./x402-solana/constants.js";
 import { loadAllowlistInventory } from "./allowlist-inventory.js";
 export class ChainPolicyService {
@@ -63,6 +64,10 @@ export class ChainPolicyService {
         return await this.context.state.withLocks([`profile:${this.context.state.profileHash(profile)}`], async () => {
             await assertWalletLifecycleAvailable(this.context, this.context.state.profileHash(profile));
             await this.assertProfileOwner(profile, provider);
+            // A first provider-owned account (coinbase-awal) binds the profile to that provider.
+            if (provider !== "local" && (await this.context.chainAccounts?.account(profile, rail) ?? null) === null) {
+                await assertNoIncompleteLocalWallet(this.context.state, profile);
+            }
             return await this.adapter(rail, provider).ensureAccount(profile);
         });
     }

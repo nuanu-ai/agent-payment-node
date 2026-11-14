@@ -63,6 +63,10 @@ export class MemoryJournal implements StargateTokenJournal { value: StargateToke
   async withOwnerLock<T>(_owner: `0x${string}`, work: () => Promise<T>) { return await work(); }
   /** The in-memory journal has no operation index; the file journal's admission is covered by operation-index-families. */
   async admit<T>(_operation: unknown, work: () => Promise<T>) { return await work(); }
+  /** Every approve-time account guard asked of this journal, and how it answers (a refusal is set by the test). */
+  readonly guarded: string[] = [];
+  guard: (operationId: string) => Promise<void> = async () => undefined;
+  async assertOwnClaims(operationId: string): Promise<void> { this.guarded.push(operationId); await this.guard(operationId); }
 }
 export function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: number; legacy?: boolean; bridgeRevert?: boolean;
   residualAfterBridge?: boolean; advanceNonceOnSend?: boolean; preflightNonceDrift?: boolean; reserveError?: boolean; signErrorOnce?: boolean;

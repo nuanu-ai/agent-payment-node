@@ -8,7 +8,7 @@ export interface HydratedSdkState {
   readonly writes: () => number;
 }
 
-export async function hydrateSdkState(state: PrivateState): Promise<HydratedSdkState> {
+export async function hydrateSdkState(state: Pick<PrivateState, "sessionEnvelope" | "walletEnvelope">): Promise<HydratedSdkState> {
   const sdk = await agentBase();
   let writes = 0;
   const trap = () => { writes += 1; mmFail("mm_gasless_state_security"); };

@@ -355,11 +355,14 @@ function validDelegatedBinding(binding) {
         /^0x[0-9a-fA-F]{40}$/u.test(binding.delegationManager) &&
         Number.isSafeInteger(binding.permissionExpiresAtUnix) && binding.permissionExpiresAtUnix > 0;
 }
+/** Version 1 keeps the request id itself; version 2 only its hash, the id being sealed apart (model.ts). */
 function validateProviderEffectReference(reference) {
-    if (!isPlainRecord(reference) || !exactKeys(reference, ["schemaVersion", "kind", "recoveryToken", "providerState"]) ||
-        reference.schemaVersion !== "apn.provider-effect-reference.v1" || reference.kind !== "transaction" ||
-        typeof reference.recoveryToken !== "string" || !/^[A-Za-z0-9._:-]{1,256}$/u.test(reference.recoveryToken) ||
-        typeof reference.providerState !== "string" || !/^[A-Z_]{3,64}$/u.test(reference.providerState))
+    const value = reference, sealed = isPlainRecord(value) && value.schemaVersion === "apn.provider-effect-reference.v2";
+    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "kind", sealed ? "recoveryTokenHash" : "recoveryToken", "providerState"]) ||
+        (!sealed && value.schemaVersion !== "apn.provider-effect-reference.v1") || value.kind !== "transaction" ||
+        (sealed ? typeof value.recoveryTokenHash !== "string" || !/^[a-f0-9]{64}$/u.test(value.recoveryTokenHash)
+            : typeof value.recoveryToken !== "string" || !/^[A-Za-z0-9._:-]{1,256}$/u.test(value.recoveryToken)) ||
+        typeof value.providerState !== "string" || !/^[A-Z_]{3,64}$/u.test(value.providerState))
         stateCorrupt("Provider effect recovery reference is invalid.");
 }
 function withoutIntegrity(value) {

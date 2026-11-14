@@ -1,6 +1,6 @@
 import { hashObject, sha256 } from "../canonical.js";
 import { validateProviderProfile } from "../provider-profile.js";
-import type { MetaMaskGaslessBinding, MetaMaskGaslessProfileIdentity } from "./model.js";
+import type { MetaMaskGaslessBinding, MetaMaskGaslessIntent, MetaMaskGaslessProfileIdentity } from "./model.js";
 import { MM_ZERO_ADDRESS } from "./model.js";
 import { mmFail, type MetaMaskGaslessFailureReason } from "./reasons.js";
 import { mmAddress, mmCanonicalAddress, mmExact, mmHash, mmSame } from "./validation.js";
@@ -11,6 +11,14 @@ export function mmPrivateHash(kind: "project" | "wallet-id" | "wallet-reference"
     (kind === "wallet-reference") !== (referenceKind !== undefined)) mmFail("mm_gasless_identity");
   const purpose = `apn.metamask-gasless.${kind}.v1`;
   return referenceKind === undefined ? hashObject({ purpose, value }) : hashObject({ purpose, kind: referenceKind, value });
+}
+/**
+ * The hash that names the provider request in journals, receipts and output: kept as such by a record that seals the
+ * request id, derived from the id itself in a record an earlier release wrote. The two give the same value.
+ */
+export function mmRequestIdHash(intent: Pick<MetaMaskGaslessIntent, "requestId" | "requestIdHash">): string {
+  if (intent.requestIdHash !== undefined) return intent.requestIdHash;
+  return intent.requestId === undefined ? mmFail("mm_gasless_state_corrupt") : mmPrivateHash("request-id", intent.requestId);
 }
 export function mmProfileIdentity(value: unknown): MetaMaskGaslessProfileIdentity {
   const p = validateProviderProfile(value);

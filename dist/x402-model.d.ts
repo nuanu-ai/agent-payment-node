@@ -73,5 +73,19 @@ export interface InspectResult {
     };
     readonly candidates: readonly InspectCandidate[];
     readonly permit2?: Permit2OfferInspection;
+    /**
+     * Present only with `--payer` beside a selected network and token when the seller lists a Permit2 offer APN refuses:
+     * its reason and deciding field, as a whole-inspect refusal would name them; the candidates stay in `candidates`.
+     */
+    readonly permit2Refusal?: InspectPermit2Refusal;
+}
+/** A refused Permit2 offer, by the field that decided it; seller values follow the refusal rule (verbatim or hashed). */
+export interface InspectPermit2Refusal {
+    readonly reason: string;
+    readonly field?: string;
+    readonly sellerValue?: string;
+    readonly accepted?: string;
+    /** One line per refused Permit2 offer (at most 16), as in a refusal's `refused` detail. */
+    readonly refused?: readonly string[];
 }
 export {};

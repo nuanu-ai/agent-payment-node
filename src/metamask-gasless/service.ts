@@ -17,8 +17,8 @@ import type { MetaMaskGaslessOperationRecord } from "./operation-model.js";
 import { MetaMaskGaslessObservationService, type MetaMaskGaslessObserver, type MetaMaskGaslessProviderReadReport,
   type MetaMaskGaslessStep } from "./observation.js";
 import { metaMaskGaslessOwner } from "./owner.js";
-import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort,
-  MetaMaskGaslessRepositoryPort, MetaMaskGaslessRpcFactory } from "./ports.js";
+import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMaskGaslessRepositoryPort,
+  MetaMaskGaslessRequestReferencePort, MetaMaskGaslessRpcFactory } from "./ports.js";
 import { MetaMaskGaslessPreparation } from "./prepare.js";
 import { mmRegistry } from "./registry.js";
 import { mmFail } from "./reasons.js";
@@ -36,6 +36,8 @@ export interface MetaMaskGaslessDependencies {
   readonly rpcFor: MetaMaskGaslessRpcFactory;
   readonly observationRpcFor?: MetaMaskGaslessObservationRpcFactory;
   readonly provider: MetaMaskGaslessProviderPort;
+  /** The sealed provider request ids of operations whose journal keeps only the id's hash (journal/request-reference.ts). */
+  readonly references: MetaMaskGaslessRequestReferencePort;
   readonly approval?: MetaMaskGaslessApprovalPort;
   readonly records?: MetaMaskGaslessRepositoryPort;
   /** Foreground consent and the owner's wallet CLI, present only for `gasless transfer revoke`. */
@@ -94,7 +96,8 @@ export class MetaMaskGaslessService {
   async prepare(input: Parameters<MetaMaskGaslessPreparation["prepare"]>[0]) {
     const d = this.dependencies();
     const preparation = new MetaMaskGaslessPreparation({ state: this.context.state, records: this.records,
-      operations: this.operations, rpcFor: d.rpcFor, provider: d.provider, clock: this.context.clock, ids: this.context.ids });
+      operations: this.operations, rpcFor: d.rpcFor, provider: d.provider, references: d.references, clock: this.context.clock,
+      ids: this.context.ids });
     try {
       const op = await preparation.prepare(input);
       return { ...publicMetaMaskGaslessOperation(op), ...mmSiblingsOutput(await this.siblings(op)) };
@@ -211,12 +214,13 @@ export class MetaMaskGaslessService {
   }
   private execution(): MetaMaskGaslessExecution {
     const d = this.dependencies();
-    return new MetaMaskGaslessExecution(this.context.state, d.rpcFor, d.provider, this.context.clock, this.save, this.context.wait);
+    return new MetaMaskGaslessExecution(this.context.state, d.rpcFor, d.provider, d.references, this.context.clock, this.save,
+      this.context.wait);
   }
   /** Observation only; an owner-named RPC replaces the frozen endpoint for the read, never for approval or dispatch. */
   private observation(observer?: MetaMaskGaslessObserver): MetaMaskGaslessObservationService {
     const d = this.dependencies();
-    return new MetaMaskGaslessObservationService(this.context.state, d.rpcFor, d.provider,
+    return new MetaMaskGaslessObservationService(this.context.state, d.rpcFor, d.provider, d.references,
       new MetaMaskGaslessClock(this.context.clock), this.save, observer);
   }
   private readonly save = async (op: MetaMaskGaslessOperationRecord, patch: Partial<MetaMaskGaslessMutable>, at: string) => {

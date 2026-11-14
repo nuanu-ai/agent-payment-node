@@ -42,6 +42,13 @@ export declare class DirectAllowlistGate {
      * A reservation left by an interrupted approval is replayed, never duplicated.
      */
     reserve(subject: DirectAllowlistSubject, bindingValue: unknown): Promise<DirectAssetUsageLease>;
+    /**
+     * The ledger refuses a new reservation with its policy evaluation's own denial (`APN_OPERATION_BLOCKED`, no details)
+     * when another reservation took the asset's cap after this gate's evaluation. When the ledger holds no reservation of
+     * this operation, the owner policy is evaluated again with today's usage, and its refusal (a cap, for example
+     * `allowlist_daily_cap_exceeded`) is returned. Anything else, a replay or a crossed reservation included, is unchanged.
+     */
+    reservationRefusal(subject: DirectAllowlistSubject, bindingValue: unknown, error: unknown): Promise<unknown>;
     /** The prepared policy revision must still be the active one, for the same owner account. Reads no ledger state. */
     confirm(subject: DirectAllowlistSubject, bindingValue: unknown): Promise<ActiveAssetPolicy>;
     /** Move the ledger forward to the journal's state. Idempotent, so every resume can repair a lagging ledger. */

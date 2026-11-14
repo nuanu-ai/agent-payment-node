@@ -32,9 +32,15 @@ neither keyless sponsor accepts EIP-7702 there.
   and any permission granted, then asks for a six-character approval code typed in a foreground terminal. The code is
   derived from the full operation fingerprint, and for MetaMask also from the full operation ID, so it approves only
   that operation. MCP returns the exact CLI handoff and cannot satisfy the approval with injected automation.
-- One global idempotency key space and the profile guards cover direct transfers, x402, Solana/TRON, LI.FI and gasless
-  operations. Repeating an identical prepare returns the saved operation without another quote or signature; different
-  inputs under the same key are refused.
+- There is no single idempotency key space for every money family. A gasless transfer binds its key in APN's operation
+  index, together with the families that bind theirs there, for example direct transfers, x402 payments, Solana and
+  TRON transfers, and LI.FI and Relay routes. A key that one of them already holds is refused
+  (`APN_IDEMPOTENCY_CONFLICT`). Families with their own key journals are separate: a key first used by gasless USDT
+  ([Gasless USDT](gasless-usdt.md#prepare)), Stargate, a swap (the Uniswap token lane included), a MetaMask native
+  transfer, a Circle Base→Solana source or a NEAR 1Click source is not refused here. Gasless USDT
+  checks the other way only: its prepare refuses a key already held here. Repeating an identical prepare returns the saved operation without
+  another quote or signature; different inputs under the same key are refused.
+- The profile guards cover direct transfers, x402, Solana/TRON, LI.FI and gasless operations.
 - An approval never sends the same operation twice. A recorded signing, disclosure or send attempt is never repeated by
   approval replay, `operation resume` or any later command.
 - An operation from which nothing has left APN stops holding its address and profile ten minutes after its deadline,
@@ -43,6 +49,13 @@ neither keyless sponsor accepts EIP-7702 there.
   dispatch, disclosure or exposure marker, and for the Local wallet a signature that was never disclosed. Its own
   `approve` or `resume` still records it `failed_before_effect`. An operation whose signed effect may have left APN keeps
   its hold until a proof or the owner's abandonment.
+- That release reads the machine clock. Should the clock go back inside the deadline, `approve` and `resume` admit the
+  operation again after every network read, right before that first step (the Local disclosure marker, the MetaMask
+  dispatch marker, the Smart Account exposure marker; for Avalanche after the chain guard, before its hold and
+  signature), and refuse with `APN_OPERATION_BLOCKED` while another unresolved operation holds the address. A refusal
+  writes nothing and leaves the operation where it was, so a later attempt is checked again. A MetaMask transfer still
+  proceeds beside the address's dispatched MetaMask transfers and, as at prepare, waits for every profile bound to the
+  address. Only local steps can follow the check (a hold, a local signature, the marker write).
 - A saved operation is checked on every read only against its own fields and hashes. A later APN release that changes a
   protocol pin (for example after a Circle USDC or paymaster upgrade), an asset row or the gas-offer calibration never
   stops `status`, `resume`, `abandon` or another family's commands. Before any new signature, disclosure or send, the
@@ -470,6 +483,19 @@ and checks the policy again before the provider invocation. A revoked, expired, 
 prepared operation. An uncertain provider effect keeps the reservation until positive terminal settlement; a proven
 no-start releases it. Activating the policy does not send a transfer.
 
+**A failed policy check at approval.** The checks before and after the foreground decision and the usage reservation
+end the operation `failed_before_effect` before the provider runs. The saved reason names the cause:
+
+| Cause | Reason |
+| --- | --- |
+| The owner policy refuses (`APN_ALLOWLIST_REFUSED`), or another hold took the cap inside the ledger: the policy is checked again with today's usage and its refusal is returned | `coinbase_gasless_policy_denied` |
+| `APN_STATE_SECURITY`, `APN_STATE_CORRUPT`, `APN_STATE_BUSY` or `APN_INVALID_INPUT` from the state store, its locks, input validation or the usage ledger; `APN_OPERATION_BLOCKED` from the ledger within the caps, for example a replay conflict | `coinbase_gasless_policy_check_<error code in lower case>`, for example `coinbase_gasless_policy_check_apn_state_security` |
+| Any other error | `coinbase_gasless_policy_check_failed` |
+
+Records saved by 0.5.106 and earlier keep `coinbase_gasless_policy_denied` for every cause. A record saved with one of
+the new reasons is not fully readable by 0.5.106 and earlier: `operation status` reads it, but `receipt get` and the
+recovery of a receipt written just before a crash refuse it with `APN_STATE_CORRUPT`.
+
 ```sh
 export APN_BASE_RPC_URL='<https-base-rpc-url>'
 apn gasless balance --profile coinbase --chain 8453
@@ -804,6 +830,11 @@ refused the helper's result. `provider_status` is MetaMask's own job status toke
 in the submit diagnostic. Apart from `provider_status`, a short upper-case token, no provider text is included. A
 refused read never decides the outcome: the chain still proves it.
 
+The same helper also reads one MetaMask native transfer request by its exact ID (a `readRequest` helper mode), when
+`mm`'s local request list no longer holds it. It makes the same job status GET with the same answer checks. Its network
+policy admits only that one GET, and only for a signed-in project that hashes to the transfer's stored project hash.
+See [metamask-native-cli-sourceprep.md](metamask-native-cli-sourceprep.md#observing-a-pending-metamask-request).
+
 ### MFA and provider outcomes
 
 If MetaMask requires MFA, the operation reports `mm_gasless_provider_approval`. Confirm the existing transaction in
@@ -818,6 +849,38 @@ no signature exists, so the operation stays guarded until a proved outcome or ow
 Once MetaMask reports a closed status, a later failed provider read (such as an expired session) keeps that status and
 reason instead of replacing it with `mm_gasless_provider_unavailable`, `mm_gasless_session_expired` or
 `mm_gasless_session_unavailable`.
+
+### The sealed request reference
+
+MetaMask files the relay job, and the MFA approval it waits on, under a request UUID that APN chooses at prepare. APN
+keeps that UUID encrypted. Prepare seals it under the login-Keychain wrapping secret, with the same custody envelope as
+wallets and MetaMask x402 authorizations, in `metamask-gasless-request-references/<profile-hash>/<operation-id>.json`.
+Prepare reads the wrapping secret before any provider or chain read, and creates it if the state holds nothing sealed
+yet. A secret missing over sealed state (`APN_STATE_CORRUPT / wrapping_secret_missing`) or a refusing Keychain
+(`APN_NATIVE_REJECTED`) refuses prepare there: no provider or chain read runs and no operation exists. The operation
+journal keeps only the UUID's hash, and status, receipts and output show only that hash (`provider_request_id_hash`).
+
+APN opens the sealed UUID only to send the request and to read its job:
+
+- `approve` opens it before the approval screen. If it cannot be opened (the file is missing or damaged, it belongs to
+  another operation, it was sealed under another secret, or the Keychain refuses), approve refuses, nothing is sent,
+  and the operation stays `awaiting_approval` until its deadline ends it. A missing, damaged or foreign file is
+  `APN_STATE_CORRUPT / mm_gasless_state_corrupt`; a missing wrapping secret is `APN_STATE_CORRUPT /
+  wrapping_secret_missing` with the step to restore the Keychain item.
+- The dispatch opens it again just before the marker. The same failure there stops the operation before any effect.
+- `resume` opens it to read the job. If it cannot, `provider_job_read` reports a failed read and the chain is still
+  observed; the outcome still comes from the chain.
+- `operation abandon` observes first, as resume does. Status, receipts and `revoke` never open it.
+
+Operations prepared by APN 0.5.106 or earlier keep the UUID itself in their journal. They load, resume and project
+exactly as before, and reading them never rewrites them.
+
+APN never deletes a sealed request reference, not even after its operation ends, and a prepare interrupted between its
+seal and its journal leaves one that belongs to no operation. Each counts as sealed custody, so after the first gasless
+transfer a lost wrapping secret refuses every command that would create a new one with `wrapping_secret_missing`,
+including the next gasless prepare. The owner's options (restore the Keychain item, or move the request-reference
+directories aside when nothing else is sealed) and what each does to unresolved operations are in the README section on
+the wrapping secret.
 
 ### Recovery
 
@@ -997,9 +1060,9 @@ bodies. Unknown amounts remain unknown.
 
 ## State and upgrades
 
-The gasless journal, receipts and encrypted effects use separate files under the existing APN state directory; wallet
-and earlier operation formats are preserved. Reinstalling or upgrading must preserve that directory and its existing
-wrapping secret. Recover an unresolved operation with the same release that wrote it or a compatible newer one; an older
+The gasless journal, receipts, encrypted effects and sealed MetaMask request references use separate files under the
+existing APN state directory; wallet and earlier operation formats are preserved. Reinstalling or upgrading must
+preserve that directory and its existing wrapping secret. Recover an unresolved operation with the same release that wrote it or a compatible newer one; an older
 binary does not provide gasless recovery. Do not delete unresolved state or create a replacement payment to work around
 it. `apn operation status` and `apn operation resume` read the saved journal without running any other binary.
 
@@ -1050,6 +1113,10 @@ These notes matter only for operations prepared by older releases.
 - **Observation RPC.** `--observation-rpc-env` needs APN 0.5.12 or later for Local operations and 0.5.16 or later for
   MetaMask Agent and Smart Account operations. Readers from 0.5.11 and earlier reject records containing the
   `observation_source` field, so do not downgrade below 0.5.12 once an operation has been observed this way.
+- **MetaMask request reference.** Readers from 0.5.106 and earlier reject a MetaMask Agent operation prepared by a later
+  release, whose journal keeps `requestIdHash` in place of `requestId`. Do not downgrade to 0.5.106 or earlier once
+  such an operation exists. Operations prepared by 0.5.106 or earlier keep their plaintext `requestId` and are never
+  migrated.
 - **Smart Account verify answers.** Readers from 0.5.105 and earlier reject a record that holds a refused verify answer
   (`provider_verify`), so do not downgrade below 0.5.106 once one is saved. Operations prepared with the one-address pin
   load and resolve unchanged.

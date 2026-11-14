@@ -92,7 +92,9 @@ the profile policy (`wallet policy set`). APN never fills in a missing cap, acco
 **Prepare, approve, recover.** A `prepare` command freezes one exact effect (chain, asset, amount, recipient, fee budget)
 under an idempotency key and signs nothing. An `approve`/`execute` command re-checks the frozen facts and the active policy,
 shows the exact terms in a foreground terminal and asks for a typed code before signing. Every send is behind a durable
-marker; an ambiguous send is only observed afterwards, never repeated. `operation status`, `operation resume`,
+marker, and an ambiguous send is observed before anything else. Whether recovery can then pass the same signed bytes
+to the network again depends on the family. A local EVM transfer can, under exact conditions; it never signs a second
+transaction ([conditions](docs/evm-assets.md#safety-and-recovery)). `operation status`, `operation resume`,
 `operation abandon` and `receipt get` take a saved operation of any family and run that family's own code; a family
 whose recovery or exit is a separate command (Circle, x402 merchant, Permit2, Relay, GasZip funding, Uniswap token,
 Stargate token cleanup) answers with it.
@@ -159,7 +161,11 @@ work for native coins (`--asset native`) and every listed token on the eleven di
 Solana and TRON have their own `-solana`/`-tron` commands ([Solana](docs/solana.md), [TRON](docs/tron.md)).
 
 If a transfer stalls, `operation resume --operation <id> --rpc-url <url>` performs only the next legal transition
-(`--observe-only true` inspects an already submitted local EVM transfer without custody access; Solana and TRON refuse it: their plain resume never resends a possibly broadcast transfer, but sends an approved, never-sent one for the first time). `operation abandon` lets the
+(`--observe-only true` inspects an already submitted local EVM transfer without custody access; Solana and TRON refuse it: their plain resume never resends a possibly broadcast transfer, but sends an approved, never-sent one for the first time).
+A plain resume of a local EVM transfer sends a signature APN never dispatched, once. After a dispatch it can pass the
+same signed transaction to the RPC again, only when the RPC holds neither a receipt nor the transaction for the saved
+hash and the sender's finalized nonce is not past the frozen nonce. The hash and nonce are the same, so at most one copy
+can be included; APN never signs a second transfer. `operation abandon` lets the
 owner close an eligible operation whose outcome cannot be proven, after accepting the unresolved risk in the terminal.
 A saved record APN can no longer read blocks only the accounts it names; `operation abandon` releases those claims after
 the same terminal consent and leaves the file and any usage-ledger reservation as they are, so the amount stays charged.
@@ -218,8 +224,24 @@ tokens, seed phrases or private keys.
 - **MetaMask Agent Wallet** (`@metamask/agent-wallet@6.1.5`, Guard server wallet): direct transfers and x402 use the same
   operation contract; Guard MFA returns `provider_pending` and `operation resume --wait-seconds` watches only that request.
   `operation recover-provider-request` binds an independently known request to an ambiguous transfer without replaying it.
+  The request ID of a direct transfer is sealed under the login-Keychain wrapping secret in
+  `provider-direct-request-references/<profile-hash>/<operation-id>.json`, and the operation record keeps only its hash
+  (provider effect reference `apn.provider-effect-reference.v2`, `recoveryTokenHash`); output shows that hash as
+  `provider_request_reference_hash`, as before. Approve reads the wrapping secret before the owner is asked, so a secret
+  missing over sealed state or a refusing Keychain leaves the transfer `awaiting_approval`, with no approval code asked
+  and nothing sent. Resume opens the sealed ID before it watches the request; an ID that cannot be opened refuses that
+  resume precisely (`APN_STATE_CORRUPT` with `provider_request_reference_unmatched` or `wrapping_secret_missing`, or
+  `APN_NATIVE_REJECTED`) and changes nothing. Records written by 0.5.106 and earlier keep their plaintext reference
+  (`v1`) and are never migrated; 0.5.106 and earlier cannot read a `v2` reference, so do not downgrade once one exists.
+  A delegated Smart Account send keeps its `v1` reference: its ID is the APN operation ID.
+  A watch that `mm` answers with `REQUEST_NOT_FOUND` records where it missed the request, never an outcome:
+  `metamask_request_not_in_local_state` (its local request list, emptied by a new `mm login`),
+  `metamask_request_not_found_on_server`, or `provider_request_not_found`.
 - **MetaMask Smart Account**: APN keeps one encrypted session account and the ERC-7715 grant; each transfer derives one
   exact child delegation after foreground approval. `wallet permission list|sync|disable|forget` manage the binding.
+  `sync`, `disable` and `forget` take `--expected-revision`, the `revision` that `wallet permission list` shows; a stale
+  one is refused with `APN_PROFILE_REVISION_CONFLICT` (`details.current_revision`), and the next actions are that list
+  command and the same command again with the revision it shows, never a new `wallet connect`.
   A consent that stops in the browser names where in `error.details`: `consent_step` is the page's last step
   (`provider_choice`, the wallet method whose call or answer stopped it, or `owner_match` when a sync selects another
   account), and when that wallet call itself threw, `provider_error_code` and `provider_error_message` are the
@@ -521,16 +543,57 @@ macOS may show its unlock prompt; the command then waits up to 15 seconds (the `
 profile's locks, so another command for the same profile waits its five seconds and fails with `APN_STATE_BUSY`.
 
 APN creates a wrapping secret only for a state root that holds nothing encrypted. While the secret is missing and any
-record sealed under it exists (a wallet envelope, a Solana or TRON key, a smart-account permission, a profile policy or
-saved signed material), a command that would create one (`wallet ensure` or `wallet import` for any profile,
-`wallet ensure-solana`, `wallet ensure-tron`, a first `wallet policy set`, or the first sealed record of a provider
-payment) fails with the same reason and restore step instead of minting a secret that would orphan those records and
-collide with the restored item.
+record sealed under it exists (a wallet envelope, a Solana or TRON key, a smart-account permission, a profile policy,
+saved signed material or a MetaMask gasless, native or direct request reference), a command that would create one
+(`wallet ensure` or `wallet import` for any profile, `wallet ensure-solana`, `wallet ensure-tron`, a first
+`wallet policy set`, or the first sealed record of a provider payment, such as a MetaMask gasless prepare, a MetaMask
+native transfer or a MetaMask direct transfer approve) fails with the same reason and restore step instead of minting a
+secret that would orphan those records and collide with the restored item.
+
+APN never deletes a sealed MetaMask request reference (`metamask-gasless-request-references/`,
+`metamask-native-request-references/`, `provider-direct-request-references/`), not even after its operation ends. A
+gasless prepare interrupted between its seal and its journal also leaves one that belongs to no operation. Each counts
+as sealed custody. So after the first MetaMask gasless, native or direct transfer that sealed a request ID, a lost
+wrapping secret makes every command listed above refuse with `APN_STATE_CORRUPT` / `wrapping_secret_missing`, also in a
+state root that holds no local wallet, where APN used to create a new secret. This fails closed. The owner has two
+options:
+
+1. Restore the login Keychain item from a backup of the login Keychain (the restore step). Every sealed record opens
+   again and nothing else changes.
+2. When the item is lost for good and the state holds nothing else sealed (no local wallet, chain key, policy,
+   permission or saved signed material), move the three request-reference directories out of the APN state root and keep
+   them. The next command creates a new wrapping secret. The moved references open only under the old item, which can no
+   longer be restored beside the new one: both share the Keychain name. A resolved operation never opens its reference
+   again and is not affected. An unresolved one keeps its state and status: a MetaMask native observe or direct resume
+   refuses with `provider_request_reference_unmatched`, a gasless approve refuses until its deadline ends it, and a
+   gasless resume reports a failed provider read and still observes the chain. Its exit is
+   `apn operation abandon --operation <operation-id>` once its window has passed. When other sealed records exist,
+   moving the references does not help: only option 1 does.
 
 `apn doctor keychain` reports the same two failures and also decrypts the wallet, so a secret that exists but does not
 unwrap it fails with `APN_STATE_CORRUPT` without that reason. Its successful answers carry `wrapping_secret: "present"`;
 without a wallet it answers `status: "absent"` with `wrapping_secret: "present"` or `"missing"`, and for a missing secret
 it suggests `apn wallet ensure` only when nothing encrypted exists, otherwise the restore step.
+
+`wallet ensure` and `wallet import` seal the key in `wallets/<profile>.json` first and write the public record
+(`wallets/<profile-hash>/wallet.json`) after it. A run interrupted between the two leaves an incomplete wallet:
+`wallet status` answers `status: "incomplete"` with `reason: "sealed_key_without_public_record"` and one next action,
+`apn wallet ensure --profile <profile>`, for the profile asked about (an absent wallet's next action names it too). That
+command completes the wallet from the sealed key alone. It decrypts the envelope once, under the same locks as a first
+`wallet ensure`, the key must derive the address the envelope records, and then it writes the public record and local
+profile a first run would have written. It creates no key and mints no wrapping secret; a missing secret fails with
+`wrapping_secret_missing` and the restore step, which `wallet status` also reports for such a wallet. A retried
+`wallet import` into that profile completes it the same way only when the key file holds that very key; any other key
+is refused with `APN_PROFILE_DRIFT` and `details.reason: "incomplete_wallet_key_differs"`, since an import never replaces
+a sealed key. Until it is completed, a first provider binding of that profile (`wallet connect` with any provider, or
+`wallet ensure-solana --provider coinbase-awal`) is refused before any provider contact, consent or write, with
+`APN_PROFILE_DRIFT`, the same reason and the same one next action; another profile's scan of local wallets that meets
+its empty record directory fails with `APN_STATE_CORRUPT` and that reason too.
+
+`wallet import --key-file` reads only an owner-only (mode 0600), single-link regular file of at most 64 KiB, reached
+without symbolic links. A FIFO, device, socket or directory is refused at once from its `lstat`, before any open, with
+`APN_STATE_SECURITY`, `details.reason: "key_file_not_regular"` and `details.file_type`; nothing waits for a writer and no
+key is written. The open itself is non-blocking and must reach the same regular file.
 
 Foreground approval requires stdin and stderr attached to real TTYs and an exact operation-bound code within 60 seconds;
 a timeout or interruption writes nothing. It is a human-confirmation boundary, not protection against a compromised user

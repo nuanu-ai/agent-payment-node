@@ -4,15 +4,22 @@ const RESTORE_WRAPPING_SECRET = "Restore the login Keychain item ai.nuanu.apn.wr
     "backup of the login Keychain; nothing APN encrypted under it can be unwrapped without it.";
 /**
  * Every directory whose entries a custody store sealed under the wrapping secret: the 13 stores of
- * tests/core/custody-envelope-cases.ts. `wallets/` is checked apart: its subdirectories are public records.
+ * tests/core/custody-envelope-cases.ts (the 0.5.45 formats), and the MetaMask gasless, MetaMask native and provider
+ * direct request references that releases after 0.5.106 seal (metamask-gasless/journal/request-reference.ts and
+ * provider-request-reference-store.ts). `wallets/` is checked apart: its subdirectories are public records.
  */
 const SEALED_DIRECTORIES = [
     "policies", "provider-authorizations", "smart-account-effects", "smart-account-x402-materials",
     "smart-account-gasless-materials", "smart-account-permissions", "chain-wallets", "circle-v2-evm-funding-effects",
-    "bridge-effects", "uniswap-execution-effects", "merchant-material", "gasless-effects",
+    "bridge-effects", "uniswap-execution-effects", "merchant-material", "gasless-effects", "metamask-gasless-request-references",
+    "metamask-native-request-references", "provider-direct-request-references",
 ];
 function wrappingSecretMissing(message) {
     return new ApnError("APN_STATE_CORRUPT", message, { reason: "wrapping_secret_missing", nextActions: [RESTORE_WRAPPING_SECRET] });
+}
+/** A sealed record whose login-Keychain wrapping secret is gone: only restoring the item can open it again. */
+export function sealedRecordWrappingSecretMissing(message) {
+    return wrappingSecretMissing(message);
 }
 /**
  * A local wallet whose login-Keychain wrapping secret is gone. Wallet status, ensure and doctor refuse it with this

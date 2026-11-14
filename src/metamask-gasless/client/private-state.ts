@@ -29,7 +29,11 @@ export interface PrivateState {
 
 type Expected = MetaMaskGaslessProfileIdentity | MetaMaskGaslessBinding;
 
-export async function readPrivateState(homeDirectory: string, expected: Expected, now: Date): Promise<PrivateState> {
+/** mm's signed-in session and wallet state, read and validated as `readPrivateState` reads them, before any wallet binding. */
+export type PrivateSession = Pick<PrivateState, "sessionEnvelope" | "walletEnvelope" | "session" | "walletState" | "token" | "projectId" |
+  "generationHash">;
+
+export async function readPrivateSession(homeDirectory: string, now: Date): Promise<PrivateSession> {
   if (typeof homeDirectory !== "string" || homeDirectory.length < 1 || homeDirectory.length > 4096 ||
     !isAbsolute(homeDirectory) || resolve(homeDirectory) !== homeDirectory || !(now instanceof Date) ||
     !Number.isSafeInteger(now.getTime())) mmFail("mm_gasless_state_security");
@@ -43,7 +47,12 @@ export async function readPrivateState(homeDirectory: string, expected: Expected
   if (firstSession.hash !== secondSession.hash || firstWallet.hash !== secondWallet.hash) mmFail("mm_gasless_state_busy");
   const sessionEnvelope = parseObject(secondSession.bytes), walletEnvelope = parseObject(secondWallet.bytes);
   const session = validateSession(sessionEnvelope, now), walletState = validateWallet(walletEnvelope);
-  const projectId = session.projectId as string, token = session.cliToken as string;
+  return { sessionEnvelope, walletEnvelope, session, walletState, token: session.cliToken as string, projectId: session.projectId as string,
+    generationHash: sha(`${secondSession.hash}\0${secondWallet.hash}`) };
+}
+
+export async function readPrivateState(homeDirectory: string, expected: Expected, now: Date): Promise<PrivateState> {
+  const { sessionEnvelope, walletEnvelope, session, walletState, token, projectId, generationHash } = await readPrivateSession(homeDirectory, now);
   const selected = walletState.selectedWallet as Record<string, unknown>;
   const ref = selected.ref as Record<string, unknown>;
   const referenceKind = Object.keys(ref)[0] as "id" | "name" | "address";
@@ -60,8 +69,7 @@ export async function readPrivateState(homeDirectory: string, expected: Expected
     projectHash: mmPrivateHash("project", projectId), walletReferenceHash: mmPrivateHash("wallet-reference", reference, referenceKind),
     walletIdHash: mmWalletIdentityHash(address), namespace: "eip155", mode: "server", environment: "prod" });
   if ("providerId" in expected) mmAssertSameBinding(binding, expected);
-  return { sessionEnvelope, walletEnvelope, session, walletState, token, projectId, address,
-    binding, generationHash: sha(`${secondSession.hash}\0${secondWallet.hash}`) };
+  return { sessionEnvelope, walletEnvelope, session, walletState, token, projectId, address, binding, generationHash };
 }
 
 function validateSession(envelope: Record<string, unknown>, now: Date): Record<string, unknown> {

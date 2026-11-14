@@ -23,6 +23,7 @@ import { BASE_RPC_CHAIN } from "./rpc-requirement.js";
 import { canonicalIdempotencyKey } from "./transfer-policy.js";
 import { canonicalProfile, publicProvenance, validateBalance } from "./wallet-policy.js";
 import { assertWalletLifecycleAvailable, walletLifecycleMutable } from "./wallet-lifecycle-guard.js";
+import { assertNoIncompleteLocalWallet } from "./wallet-import-collision.js";
 import { OperationService } from "./operation-service.js";
 
 export class ProviderWalletService {
@@ -36,6 +37,7 @@ export class ProviderWalletService {
       await assertWalletLifecycleAvailable(this.context, profileHash);
       const repository = this.context.requireProfileRepository();
       let existing = await repository.load(profileHash);
+      if (existing === null) await assertNoIncompleteLocalWallet(this.context.state, profile);
       if (existing !== null) {
         if (existing.provider_id !== request.providerId) {
           throw new ApnError("APN_PROFILE_DRIFT", "The APN profile is already bound to a different provider.");
@@ -249,7 +251,7 @@ export class ProviderWalletService {
             action: `Manually send only Base USDC to ${bound.public_address}, then perform a separate balance read.`,
             warning: "This guidance performs no onramp, transfer, top-up or funding action and proves no finality, sufficiency or spending authority.",
           },
-          next_actions: ["Fund manually only if intended", "Re-run apn wallet balance"],
+          next_actions: ["Fund manually only if intended", `Re-run apn wallet balance --profile ${profile}`],
         } : {
           next_actions: [rebindCommand],
         }),

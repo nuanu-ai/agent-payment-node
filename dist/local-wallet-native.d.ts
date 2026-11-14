@@ -27,6 +27,12 @@ export declare class LocalWalletNative implements NativePort {
     private ensureWallet;
     private importWallet;
     private describeWallet;
+    /**
+     * `wallet ensure` of an incomplete wallet: the identity of the key an earlier create or import sealed, proven by
+     * decrypting it (its key derives the address). The address the caller read from the envelope must be that identity's.
+     * This never creates a key and writes nothing; the caller writes the public record.
+     */
+    private completeWallet;
     private approveAndSign;
     private getEffect;
     private approveX402;

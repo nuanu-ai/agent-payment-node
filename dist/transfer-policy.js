@@ -1,5 +1,5 @@
 import { encodeFunctionData, getAddress, keccak256, parseTransaction, recoverTransactionAddress } from "viem";
-import { exactKeys, isPlainRecord, sha256 } from "./canonical.js";
+import { exactKeys, isPlainRecord } from "./canonical.js";
 import { containsRawControlCharacters, createCliHandoff } from "./cli-handoff.js";
 import { BASE_USDC, CHAIN_CAIP2, CHAIN_ID, TRANSFER_TOPIC, USDC_DECIMALS } from "./constants.js";
 import { ApnError, assertInput } from "./errors.js";
@@ -10,6 +10,7 @@ import { publicEvmActualFee } from "./evm-direct-actual-fee.js";
 import { multiplyAtomic, parseAtomic } from "./money.js";
 import { canonicalAddress, validateBalance } from "./wallet-policy.js";
 import { publicDirectAllowlist } from "./direct-allowlist-gate.js";
+import { providerEffectReferenceHash } from "./provider-direct-recovery.js";
 const HASH = /^[a-f0-9]{64}$/;
 const HEX = /^0x(?:[0-9a-fA-F]{2})+$/;
 const TRANSFER_ABI = [{
@@ -173,7 +174,8 @@ export function publicOperation(operation) {
         ...(operation.transactionHash === undefined ? {} : { transaction_hash: operation.transactionHash }),
         ...(operation.rawTransactionHash === undefined ? {} : { raw_transaction_hash: operation.rawTransactionHash }),
         ...(operation.providerEffect === undefined ? {} : {
-            provider_request_reference_hash: sha256(`provider-effect-reference\0${operation.providerDirect?.providerId ?? "unknown"}\0${operation.providerEffect.recoveryToken}`),
+            // A sealed reference keeps exactly this hash; an earlier release's reference derives it from the id it keeps.
+            provider_request_reference_hash: providerEffectReferenceHash(operation.providerDirect?.providerId ?? "unknown", operation.providerEffect),
             provider_request_kind: operation.providerEffect.kind,
         }),
         ...(operation.providerDirect === undefined ? {} : {

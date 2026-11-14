@@ -2,6 +2,8 @@ import { assertCoinbaseObservationRequest } from "../../src/coinbase-gasless-obs
 import { bindArgv } from "../../src/command-binder.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { chmod } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { encodeAbiParameters, encodeFunctionData, getAddress, keccak256, parseAbi, parseAbiParameters } from "viem";
 import { COINBASE_ACCOUNT_CODE_HASH, COINBASE_ACCOUNT_IMPLEMENTATION, COINBASE_ACCOUNT_IMPLEMENTATION_CODE_HASH,
@@ -11,7 +13,7 @@ import { ApnError } from "../../src/errors.js";
 import type { Address, Hex, OperationRecord } from "../../src/model.js";
 import type { RpcPort } from "../../src/ports.js";
 import { appendTransition, sealOperation, validateOperation } from "../../src/state-integrity.js";
-import { providerDirectReceipt, recoverProviderTerminalOperation } from "../../src/provider-direct-receipt.js";
+import { coinbaseGaslessPolicyFailureReason, providerDirectReceipt, recoverProviderTerminalOperation } from "../../src/provider-direct-receipt.js";
 import { validateEvmOperationWrite } from "../../src/evm-operation-write.js";
 import { ApnCore } from "../../src/core.js";
 import { AwalProcessAdapter, AWAL_PROVIDER_ID, type AwalProcessRunnerPort } from "../../src/awal-process-adapter.js";
@@ -221,6 +223,7 @@ test("Coinbase policy pin is frozen at prepare, rechecked on saved replay and af
   assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).error?.code,
     "APN_ALLOWLIST_REFUSED");
   assert.equal((await s.state.findOperation(id))?.state, "failed_before_effect");
+  assert.equal((await s.state.findOperation(id))?.reason, "coinbase_gasless_policy_denied");
   assert.equal(s.providerCalls(), 0);
 });
 
@@ -234,6 +237,7 @@ test("policy expiry during the foreground Coinbase decision blocks before reserv
   const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
   assert.equal(result.error?.code, "APN_ALLOWLIST_REFUSED");
   assert.equal((await s.state.findOperation(id))?.state, "failed_before_effect");
+  assert.equal((await s.state.findOperation(id))?.reason, "coinbase_gasless_policy_denied");
   assert.equal(s.providerCalls(), 0);
   const lease = await new AssetUsageLedger(s.root).load({ account: SENDER, chain: "eip155:8453",
     asset: { kind: "token", identifier: BASE_USDC } }, prepared.providerDirect!.coinbaseGasless!.allowlist!.reservationId);
@@ -255,6 +259,87 @@ test("Coinbase approval reserves shared gasless usage before provider invocation
   assert.equal(s.providerCalls(), 1);
   assert.equal((await s.state.findOperation(id))?.state, "failed_before_effect");
   assert.equal((await ledger.load(identity, binding.reservationId))?.state, "failed_before_effect");
+});
+
+test("a Coinbase usage-ledger state failure at approval is saved under its own cause before AWAL, and its receipt reads", async t => {
+  const s = await policyFixture(t);
+  await activateCoinbasePolicy(s.root, "coinbase-policy");
+  assert.equal((await s.core.execute(s.request("ledger-state-failure"))).ok, true);
+  const id = s.state.operationId("coinbase-policy", "ledger-state-failure");
+  const prepared = (await s.state.findOperation(id))!;
+  // Prepare created the ledger directory. Opened to the group during the owner decision, every later ledger read refuses.
+  const usage = join(s.root, "asset-usage");
+  s.onApproval(async () => { await chmod(usage, 0o750); });
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  await chmod(usage, 0o700);
+  assert.equal(result.error?.code, "APN_STATE_SECURITY");
+  const ended = (await s.state.findOperation(id))!;
+  assert.equal(ended.state, "failed_before_effect");
+  assert.equal(ended.reason, "coinbase_gasless_policy_check_apn_state_security");
+  assert.equal(ended.proofClass, "durable_pre_effect_failure");
+  assert.equal(s.providerCalls(), 0);
+  assert.equal(await new AssetUsageLedger(s.root).load({ account: SENDER, chain: "eip155:8453",
+    asset: { kind: "token", identifier: BASE_USDC } }, prepared.providerDirect!.coinbaseGasless!.allowlist!.reservationId), null);
+  const receipt = await s.core.execute({ command: "receipt.get", operationId: id });
+  assert.equal(receipt.ok, true, JSON.stringify(receipt.error));
+  assert.equal((receipt.receipt as { reason: string }).reason, "coinbase_gasless_policy_check_apn_state_security");
+});
+
+test("a Coinbase pre-effect stop saved under a new cause recovers from a crash between its receipt and operation writes", async t => {
+  const s = await policyFixture(t);
+  await activateCoinbasePolicy(s.root, "coinbase-policy");
+  assert.equal((await s.core.execute(s.request("orphan-new-reason"))).ok, true);
+  const id = s.state.operationId("coinbase-policy", "orphan-new-reason");
+  const prepared = (await s.state.findOperation(id))!;
+  const ended = (reason: string) => {
+    const { integrityHash: _previous, ...base } = prepared;
+    return sealOperation({ ...base, state: "failed_before_effect", terminal: true, reason, proofClass: "durable_pre_effect_failure",
+      transitions: appendTransition(prepared.transitions, { at: POLICY_NOW.toISOString(), state: "failed_before_effect", terminal: true,
+        reason, proofClass: "durable_pre_effect_failure" }) });
+  };
+  // The classifier only answers reasons orphan recovery accepts; a reason outside the closed list stays corrupt.
+  const answers = [new ApnError("APN_ALLOWLIST_REFUSED", "denied", { reason: "coinbase_allowlist_changed" }),
+    ...(["APN_STATE_SECURITY", "APN_STATE_CORRUPT", "APN_STATE_BUSY", "APN_INVALID_INPUT", "APN_OPERATION_BLOCKED",
+      "APN_PROFILE_DRIFT", "APN_RPC_AMBIGUOUS", "APN_INTERNAL"] as const).map((code) => new ApnError(code, code)), new Error("EIO")];
+  assert.deepEqual(answers.map(coinbaseGaslessPolicyFailureReason), ["coinbase_gasless_policy_denied",
+    "coinbase_gasless_policy_check_apn_state_security", "coinbase_gasless_policy_check_apn_state_corrupt",
+    "coinbase_gasless_policy_check_apn_state_busy", "coinbase_gasless_policy_check_apn_invalid_input",
+    "coinbase_gasless_policy_check_apn_operation_blocked", "coinbase_gasless_policy_check_failed",
+    "coinbase_gasless_policy_check_failed", "coinbase_gasless_policy_check_failed", "coinbase_gasless_policy_check_failed"]);
+  for (const reason of new Set(answers.map(coinbaseGaslessPolicyFailureReason))) {
+    assert.deepEqual(recoverProviderTerminalOperation(prepared, providerDirectReceipt(ended(reason))), ended(reason), reason);
+  }
+  assert.throws(() => recoverProviderTerminalOperation(prepared, providerDirectReceipt(ended("coinbase_gasless_policy_check_apn_internal"))),
+    { code: "APN_STATE_CORRUPT" });
+  // The process stopped after the terminal receipt and before the operation write: the next reader completes the record.
+  const terminal = ended("coinbase_gasless_policy_check_apn_state_busy");
+  await s.state.writeReceipt(prepared.profileHash, providerDirectReceipt(terminal));
+  const receipt = await s.core.execute({ command: "receipt.get", operationId: id });
+  assert.equal(receipt.ok, true, JSON.stringify(receipt.error));
+  assert.equal((receipt.receipt as { reason: string }).reason, "coinbase_gasless_policy_check_apn_state_busy");
+  assert.deepEqual(await s.state.findOperation(id), terminal);
+  assert.equal(s.providerCalls(), 0);
+});
+
+test("a Coinbase daily cap another hold took inside the ledger is the policy's denial, before AWAL", async t => {
+  const s = await policyFixture(t);
+  await activateCoinbasePolicy(s.root, "coinbase-policy", { per: "1000", daily: "1500" });
+  assert.equal((await s.core.execute(s.request("ledger-cap-race"))).ok, true);
+  const id = s.state.operationId("coinbase-policy", "ledger-cap-race");
+  // Both policy checks saw no other usage; the ledger answers under its bucket lock, after a competing hold of 1000.
+  const original = AssetUsageLedger.prototype.reserve;
+  const mock = t.mock.method(AssetUsageLedger.prototype, "reserve", async function (this: AssetUsageLedger, input: Parameters<typeof original>[0]) {
+    if (input.idempotencyKey === `apn.coinbase-gasless:${id}`) await original.call(this, { ...input, idempotencyKey: "competing-gasless-hold-0001" });
+    return await original.call(this, input);
+  });
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  mock.mock.restore();
+  assert.equal(result.error?.code, "APN_ALLOWLIST_REFUSED"); assert.equal(result.error?.details?.reason, "coinbase_allowlist_caps_or_asset");
+  const ended = (await s.state.findOperation(id))!;
+  assert.equal(ended.state, "failed_before_effect"); assert.equal(ended.reason, "coinbase_gasless_policy_denied");
+  assert.equal(s.providerCalls(), 0);
+  assert.equal((await new AssetUsageLedger(s.root).usage({ account: SENDER, chain: "eip155:8453",
+    asset: { kind: "token", identifier: BASE_USDC } }, POLICY_NOW)).amountAtomic, "1000");
 });
 
 test("an uncertain Coinbase provider result retains one usage reservation and never invokes AWAL twice", async t => {

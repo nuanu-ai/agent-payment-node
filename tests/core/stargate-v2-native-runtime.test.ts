@@ -82,6 +82,43 @@ test("destination observer parses only the pinned safe OFTReceived log over the 
   assert.equal(filter.address, DESTINATION); assert.equal(filter.fromBlock, "0x10"); assert.equal(filter.toBlock, "0x20");
 });
 
+test("destination observer skips an OFTReceived outside baseline..safe head from an RPC that ignores the block bounds", async () => {
+  const topics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: GUID, toAddress: OWNER } });
+  const data = encodeAbiParameters(parseAbiParameters("uint32 srcEid,uint256 amountReceivedLD"), [30101, 9n]);
+  let head = 0x20n, logBlock = 0x28n; const filters: any[] = [], blockTags: string[] = [];
+  const rpc = { call: async (method: string, params: readonly any[]) => {
+    if (method === "eth_getBlockByNumber") { const tag = String(params[0]); blockTags.push(tag);
+      return tag === "safe" ? { number: `0x${head.toString(16)}`, hash: BLOCK } : { number: tag, hash: BLOCK }; }
+    // This provider answers every filter with the delivery log, whatever fromBlock and toBlock ask for.
+    if (method === "eth_getLogs") { filters.push(params[0]); return [{ address: DESTINATION, topics, data, transactionHash: DEST_TX,
+      logIndex: "0x2", blockNumber: `0x${logBlock.toString(16)}`, blockHash: BLOCK }]; }
+    if (method === "eth_getBalance") return "0x1";
+    throw new Error(`unexpected ${method}`);
+  } };
+  const input = { sourceTransactionHash: TX, guid: GUID, recipient: OWNER, sourceEid: 30101 as const, destinationPool: DESTINATION,
+    minimumAmountAtomic: "9", balanceBeforeAtomic: "1", fromBlockNumberAtomic: "16", fromBlockHash: BLOCK, finalityTag: "safe" as const };
+  // Block 40 above safe head 32: no delivery proof, only the corroborating balance read at the safe head.
+  const early = await observeStargateDestination(rpc as any, input);
+  assert.equal(early?.mode, "balance_delta"); assert.equal(early?.blockNumberAtomic, "32");
+  assert.deepEqual([filters[0].fromBlock, filters[0].toBlock], ["0x10", "0x20"]);
+  assert.equal(blockTags.includes("0x28"), false);
+  // Block 8 below the frozen baseline 16 predates the operation.
+  logBlock = 0x8n;
+  assert.equal((await observeStargateDestination(rpc as any, input))?.mode, "balance_delta");
+  // Block 16 is the baseline itself: its balance was read before the send was signed, so a log there predates it too.
+  logBlock = 0x10n;
+  assert.equal((await observeStargateDestination(rpc as any, input))?.mode, "balance_delta");
+  // Block 17, the first block after the baseline, can hold the delivery.
+  logBlock = 0x11n;
+  const first = await observeStargateDestination(rpc as any, input);
+  assert.equal(first?.mode, "oft_received"); assert.equal(first?.blockNumberAtomic, "17");
+  // Once the safe head passes block 40, the same log is the proof.
+  logBlock = 0x28n; head = 0x30n;
+  const late = await observeStargateDestination(rpc as any, input);
+  assert.equal(late?.mode, "oft_received"); assert.equal(late?.blockNumberAtomic, "40");
+  assert.equal(late?.mode === "oft_received" ? late.destinationTransactionHash : undefined, DEST_TX);
+});
+
 test("StargateNativeService status is a true local read with no RPC call or journal transition", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const state = new StateStore(temporary.root); await state.initialize();
   const service = new StargateNativeService(state, { load: async () => Buffer.alloc(32) } as any,

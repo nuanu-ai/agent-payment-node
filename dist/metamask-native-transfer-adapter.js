@@ -6,7 +6,8 @@ import { ApnError } from "./errors.js";
 import { NodeMetaMaskProcessRunner, takeMetaMaskNativeProcessFailureIdentifiers, takeMetaMaskNativeProcessFailureDiagnostic } from "./metamask-process-runner.js";
 import { metaMaskCommand } from "./metamask-command.js";
 import { resolveMetaMaskBin } from "./metamask-package.js";
-import { parseMetaMaskProcessOutput, classifyMetaMaskPendingNotices, metaMaskMfaNotice } from "./metamask-process-output.js";
+import { parseMetaMaskProcessOutput, classifyMetaMaskPendingNotices, metaMaskMfaNotice, metaMaskWatchMissReason } from "./metamask-process-output.js";
+import { readMetaMaskNativeServerRequest } from "./metamask-native-request-server-read.js";
 import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
 import { METAMASK_NATIVE_CHAINS, metaMaskNativeQuoteTransfer, validateMetaMaskNativeFeeQuote } from "./metamask-native-fee-evidence.js";
 import { claimMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedContextCurrent } from "./metamask-native-transfer-owner.js";
@@ -253,9 +254,11 @@ function readDiagnostic(value) {
 /**
  * Normal status READ only (three vendor processes): the session project before, the watch, the project after. The owner
  * supplies the request id and project hash from its authentic journal; a service hint is never chain evidence, so no
- * policy is read around it.
+ * policy is read around it. When the watch answers that mm's own local request list no longer holds the request (a
+ * new `mm login` starts that list empty) and the owner supplies the transfer's sender and chain, the request is read
+ * once from MetaMask's server instead, inside the same project bracket; that read never sends, signs or approves.
  */
-export async function readMetaMaskNativeRequest(requestId, vendorProjectHash) {
+export async function readMetaMaskNativeRequest(requestId, vendorProjectHash, binding) {
     const observation = { stage: "input", guard_step: null, request_id: null, watch_returned: false,
         before_guard_verified: false, after_guard_verified: false, request_identity_verified: false, provider_status: null,
         transaction_hash: null, chain_id: null, response_hash: null, reason: null, error_code: null, diagnostic: null };
@@ -288,6 +291,11 @@ export async function readMetaMaskNativeRequest(requestId, vendorProjectHash) {
         finally {
             result.stdout.fill(0);
         }
+        // The precise trigger only: mm itself said its local list does not hold this very request. No other answer is retried.
+        if (binding !== undefined && hint.disposition === "unknown" && hint.reason === "metamask_request_not_in_local_state") {
+            observation.stage = "server_read";
+            hint = await serverRequestHint(requestId, vendorProjectHash, binding, observation, hint);
+        }
         observation.stage = "after_guard";
         observation.guard_step = "project_after";
         if (await project(runner) !== vendorProjectHash)
@@ -310,8 +318,9 @@ export async function readMetaMaskNativeRequest(requestId, vendorProjectHash) {
 function requestHint(result, requestId, observation) {
     const parsed = parseMetaMaskProcessOutput(result.stdout);
     const unknown = (reason) => ({ disposition: "unknown", reason, requestId });
+    // Nothing on stdout because the watch answered REQUEST_NOT_FOUND on stderr: where mm missed it, never what it did.
     if (parsed === null)
-        return unknown("provider_response_malformed");
+        return unknown(metaMaskWatchMissReason(result) ?? "provider_response_malformed");
     const notice = classifyMetaMaskPendingNotices(parsed.notices, requestId);
     if (notice.disposition === "invalid")
         return unknown("provider_request_identity_conflict");
@@ -327,7 +336,26 @@ function requestHint(result, requestId, observation) {
     }
     if (!isPlainRecord(data) || !isPlainRecord(data.request) || !isPlainRecord(data.status))
         return unknown("provider_request_evidence_missing");
-    const request = data.request, status = data.status;
+    return jobHint(data.request, data.status, result.exitCode === 0 && parsed.envelope?.ok === true, requestId, observation, mfa());
+}
+/**
+ * The server's own record of the request, read when mm's local list lost it. A verified answer is classified by
+ * `jobHint` exactly as a watch's `request` and `status` of this very request; a 404 stays unknown, and a refused read
+ * keeps the watch's own reason.
+ */
+async function serverRequestHint(requestId, projectHash, binding, observation, missed) {
+    const answer = await readMetaMaskNativeServerRequest(requestId, projectHash, binding);
+    observation.server_read = Object.freeze({ outcome: answer.outcome, response_hash: answer.outcome === "verified" ? answer.responseHash : null,
+        reason: answer.outcome === "refused" ? answer.reason : null, check: answer.outcome === "refused" ? answer.check : null });
+    if (answer.outcome === "not_found")
+        return { disposition: "unknown", reason: "metamask_request_not_found_on_server", requestId };
+    if (answer.outcome === "refused")
+        return missed;
+    return jobHint({ pollingId: requestId, kind: "transaction", namespace: "evm", chainId: binding.chainId }, { status: answer.status, ...(answer.transactionHash === null ? {} : { txHash: answer.transactionHash }) }, true, requestId, observation, { expiresAt: null, authMethod: null, evidenceHash: answer.responseHash });
+}
+/** One provider record of the request (a watch's `request` and `status`): its identity, chain, hash and status. */
+function jobHint(request, status, settled, requestId, observation, mfa) {
+    const unknown = (reason) => ({ disposition: "unknown", reason, requestId });
     if (request.pollingId !== requestId || request.kind !== "transaction" || !isMetaMaskEvmNamespace(request.namespace))
         return unknown("provider_request_identity_conflict");
     const chainId = request.chainId;
@@ -346,13 +374,13 @@ function requestHint(result, requestId, observation) {
     const states = ["EVALUATING", "AWAITING_MFA", "SIGNING", "BROADCASTING", "CONFIRMED", "FAILED", "EXPIRED", "DENIED", "APPROVED", "SIGNED", "CANCELLED"];
     observation.provider_status = typeof status.status === "string" && states.includes(status.status)
         ? status.status : typeof status.status === "string" ? "unrecognized" : null;
-    if (result.exitCode !== 0 || parsed.envelope?.ok !== true)
+    if (!settled)
         return { disposition: "unknown", reason: "provider_request_outcome_unknown", requestId, ...chainHint,
             ...(transactionHash === undefined ? {} : { transactionHash }) };
     if (transactionHash !== undefined)
         return { disposition: "acknowledged", transactionHash, requestId, ...chainHint };
     if (typeof status.status === "string" && EFFECT_STATES.has(status.status))
-        return { disposition: "pending", requestId, ...chainHint, ...(status.status === "AWAITING_MFA" ? { mfa: mfa() } : {}) };
+        return { disposition: "pending", requestId, ...chainHint, ...(status.status === "AWAITING_MFA" ? { mfa } : {}) };
     return { disposition: "unknown", reason: "provider_request_outcome_unknown", requestId, ...chainHint };
 }
 function submissionHint(result, expectedPayer) {

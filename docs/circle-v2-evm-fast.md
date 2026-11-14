@@ -89,7 +89,9 @@ Every `prepare` input is explicit and required; there is no default profile, ben
   `--min-mint-atomic` at most gross minus that cap. Prepare reads Circle's current Fast fee rate; the quoted issuer fee
   (rounded up) must fit `--max-issuer-fee-atomic` and leave at least `--min-mint-atomic`, otherwise it refuses
   (`funding_fee_cap_or_net_floor`).
-- `--idempotency-key`: 8 to 128 safe ASCII characters, in the global payment key space.
+- `--idempotency-key`: 8 to 128 safe ASCII characters. It is bound in APN's operation index, which this route shares
+  with other families such as direct transfers, x402 and gasless USDC transfers; a key one of them holds is refused.
+  It is not a key space for every family: families with their own key journals, such as gasless USDT, are separate.
 
 `approve-source`, `approve-mint` and `cleanup` need foreground physical TTY consent; the consent screen shows both
 profiles and wallets, the beneficiary, gross, maximum issuer fee, minimum net mint, the native gas capacities and the

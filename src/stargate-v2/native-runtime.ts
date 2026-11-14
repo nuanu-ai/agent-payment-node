@@ -13,7 +13,7 @@ import { executeStargateV2NativeEth, FileStargateNativeJournal, LocalStargateNat
   type StargateNativeOperation } from "./native-execution.js";
 import { TtyStargateNativeApproval } from "./native-tty.js";
 import { StargateNativeUsage } from "./native-usage.js";
-import { scanStargateLogs, StargateDestinationScanStore, STARGATE_UNICHAIN_SCAN_WINDOW, type StargateScanCursor } from "./destination-scan.js";
+import { scanStargateLogs, stargateLogInScan, StargateDestinationScanStore, STARGATE_UNICHAIN_SCAN_WINDOW, type StargateScanCursor } from "./destination-scan.js";
 import { legacyStargateStatusAfter, type LegacyChainRead, type LegacyStargateStatus } from "../legacy/stargate-v2/status.js";
 import { stargateFundsRefusal } from "./funds.js";
 
@@ -232,12 +232,16 @@ export async function observeStargateDestination(rpc: Pick<StargateJsonRpc, "cal
     baseline = record(await rpc.call("eth_getBlockByNumber", [baselineTag, false])), topic = encodeEventTopics({ abi: STARGATE_SEND_ABI,
     eventName: "OFTReceived", args: { guid: input.guid, toAddress: input.recipient } });
   if (hash(baseline.hash) !== input.fromBlockHash) throw new ApnError("APN_RPC_PROTOCOL", "Stargate destination baseline is no longer canonical.");
+  const baselineNumber = BigInt(input.fromBlockNumberAtomic), head = quantity(finalityHead.number);
   const raw = await scanStargateLogs((method, params) => rpc.call(method, params), { address: DESTINATION_POOL, topics: topic },
-    BigInt(input.fromBlockNumberAtomic), quantity(finalityHead.number), STARGATE_UNICHAIN_SCAN_WINDOW, cursor);
+    baselineNumber, head, STARGATE_UNICHAIN_SCAN_WINDOW, cursor);
   for (const value of raw) {
     const log = record(value);
     try {
       if (getAddress(String(log.address)) !== DESTINATION_POOL) continue;
+      // An RPC that ignores the block bounds can answer a log at or before the baseline block or above the safe head; a
+      // log above the head is no proof until a later observe sees it at or below the safe head, exactly as in the token path.
+      if (!stargateLogInScan(quantity(log.blockNumber), baselineNumber, head)) continue;
       const event = decodeEventLog({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", topics: (log.topics as Hex[]) as [Hex, ...Hex[]], data: String(log.data) as Hex });
       const canonical = record(await rpc.call("eth_getBlockByNumber", [log.blockNumber, false])); if (hash(canonical.hash) !== hash(log.blockHash)) continue;
       if (event.args.srcEid === input.sourceEid && event.args.guid === input.guid && getAddress(event.args.toAddress) === input.recipient &&

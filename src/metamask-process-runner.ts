@@ -4,7 +4,8 @@ import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { ApnError } from "./errors.js";
 import { isPlainRecord, sha256 } from "./canonical.js";
-import { classifyMetaMaskPendingNotices, metaMaskMfaNotice, parseMetaMaskProcessOutput, type MetaMaskMfaNotice } from "./metamask-process-output.js";
+import { classifyMetaMaskPendingNotices, metaMaskMfaNotice, metaMaskRequestNotFound, parseMetaMaskProcessOutput, type MetaMaskMfaNotice,
+  type MetaMaskRequestNotFound } from "./metamask-process-output.js";
 import { metaMaskJsonAnswer, observeMetaMaskProcess, type MetaMaskProcessObservation } from "./metamask-process-observation.js";
 import type { Hex } from "./model.js";
 import {
@@ -128,6 +129,11 @@ export interface MetaMaskProcessResult {
   readonly nativeDiagnostic?: MetaMaskNativeDiagnostic;
   /** Taken from both streams before they are zeroed; the caller decides whether to show it. */
   readonly observation?: MetaMaskProcessObservation;
+  /**
+   * `wallet requests watch <id>` only: where its REQUEST_NOT_FOUND answer on stderr says the request was not found
+   * (metamask-process-output.ts). Absent for every other command and answer. A fact about mm's lookup, never an outcome.
+   */
+  readonly requestNotFound?: MetaMaskRequestNotFound;
 }
 
 export interface MetaMaskProcessRunnerPort {
@@ -203,6 +209,13 @@ export class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
           const providerCode=code==="POLICY_VIOLATION"||code==="POLICY_REJECTED"?"policy":code==="MFA_REQUIRED"?"mfa":code==="UNAUTHORIZED"||code==="AUTH_REQUIRED"?"auth":code==="INSUFFICIENT_FUNDS"?"funds":code==="RATE_LIMITED"?"rate_limit":"other";return {stderrClass:"json_error",providerCode};
         }catch{return {stderrClass:"unclassified",providerCode:"other"};}finally{bytes.fill(0);}
       };
+      // The watched id, for a `wallet requests watch <id>` child only: its stderr answer may say where mm missed the request.
+      const watchedId=argv[3],watched=argv[0]==="wallet"&&argv[1]==="requests"&&argv[2]==="watch"?watchedId:undefined;
+      const requestNotFound=():MetaMaskRequestNotFound|undefined=>{
+        if(watched===undefined||stderrSize===0||stderrOverflow)return undefined;
+        const bytes=Buffer.concat(stderrChunks);try {return metaMaskRequestNotFound(metaMaskJsonAnswer(bytes.toString("utf8")),watched);}
+        catch{return undefined;}finally{bytes.fill(0);}
+      };
       const observe=(outcome:MetaMaskProcessObservation["outcome"],exitCode:number|null,signal:MetaMaskNativeDiagnostic["signal"]):MetaMaskProcessObservation=>{
         const out=Buffer.concat(chunks),err=Buffer.concat(stderrChunks);
         try {return observeMetaMaskProcess({outcome,exitCode,signal,durationMs:Math.min(86400000,Math.max(0,Math.floor(performance.now()-started))),stdout:{bytes:out,total:size},stderr:{bytes:err,total:stderrSize}});}
@@ -257,9 +270,10 @@ export class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
         const stdout = Buffer.concat(chunks);
         const signal=["SIGTERM","SIGKILL","SIGINT","SIGHUP","SIGABRT","SIGSEGV","SIGPIPE"].includes(rawSignal??"")?rawSignal as MetaMaskNativeDiagnostic["signal"]:null;
         const stderr=stderrObservation(),nativeDiagnostic=diagnostic(stage,signal!==null?"signal":code===0?"ok":"exit",code,signal,stderr.stderrClass,stderr.providerCode);
-        const observation=observe(signal!==null?"signal":"exit",code,signal);
+        const observation=observe(signal!==null?"signal":"exit",code,signal),miss=requestNotFound();
         zero();
-        resolveResult({ exitCode: code ?? 1, stdout, ...(absoluteDeadline === undefined ? {} : { nativeDiagnostic }), observation });
+        resolveResult({ exitCode: code ?? 1, stdout, ...(absoluteDeadline === undefined ? {} : { nativeDiagnostic }), observation,
+          ...(miss === undefined ? {} : { requestNotFound: miss }) });
       };
       const timeout = setTimeout(() => {
         fail(providerUnavailable("The MetaMask Agent Wallet process timed out safely."), true);

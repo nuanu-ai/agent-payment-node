@@ -17,6 +17,12 @@ type Call = (method: string, params: readonly unknown[]) => Promise<unknown>;
 export declare class StargateDestinationScanStore extends SecureStateStore {
     cursor(operationId: string, scope: "token-oft" | "native-oft"): StargateScanCursor;
 }
+/** A provider may ignore the requested `fromBlock`/`toBlock` and answer a log outside the scan. A log above the
+ * finality head is not final yet. The frozen baseline is the block whose balance APN read before the send was signed,
+ * so a log in that block or earlier predates the operation: a real delivery or native drop is always after it. None of
+ * these is a delivery candidate; both destination paths skip such a log the same way they skip a row from another
+ * emitter. The scan itself still starts at the baseline, so this skips no block a delivery can be in. */
+export declare function stargateLogInScan(blockNumber: bigint, baseline: bigint, head: bigint): boolean;
 /**
  * Filtered `eth_getLogs` in bounded windows from `max(from, cursor)` up to the finality head `to` (BRDG-30). Returns the
  * first window's logs that match the indexed filter (the caller validates them), or none after at most `maxWindows`

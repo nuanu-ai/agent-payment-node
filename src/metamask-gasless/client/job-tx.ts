@@ -1,6 +1,5 @@
 import { exactKeys, isPlainRecord } from "../../canonical.js";
 import type { ErrorDetail } from "../../errors.js";
-import type { MetaMaskGaslessIntent } from "../model.js";
 import { mmFail, type MetaMaskGaslessFailureReason } from "../reasons.js";
 import { readDataRecord } from "./read-diagnostic.js";
 
@@ -32,7 +31,10 @@ const READABLE: readonly string[] = ["number", "decimal_string", "hex_string", "
 const KEYS = ["tx", "from", "chainId", "chainIdMatches"] as const;
 const NONE = { from: null, chainId: null, chainIdMatches: null } as const;
 
-export function jobTx(value: unknown, intent: Pick<MetaMaskGaslessIntent, "binding" | "request">): MetaMaskJobTx {
+/** The bound sender and chain a job answer is compared with: a gasless intent, or a native transfer's server request read. */
+export interface MetaMaskJobBinding { readonly binding: { readonly address: string }; readonly request: { readonly chainId: number } }
+
+export function jobTx(value: unknown, intent: MetaMaskJobBinding): MetaMaskJobTx {
   if (value === undefined) return { tx: "absent", ...NONE };
   if (value === null) return { tx: "null", ...NONE };
   if (!isPlainRecord(value)) return { tx: "other", ...NONE };
@@ -40,7 +42,7 @@ export function jobTx(value: unknown, intent: Pick<MetaMaskGaslessIntent, "bindi
   return { tx: "object", from: fromForm(value.from, intent), chainId: chain.form,
     chainIdMatches: chain.id === undefined ? null : chain.id === intent.request.chainId };
 }
-function fromForm(value: unknown, intent: Pick<MetaMaskGaslessIntent, "binding">): JobTxFrom {
+function fromForm(value: unknown, intent: Pick<MetaMaskJobBinding, "binding">): JobTxFrom {
   // The same comparison as the check in client/service.ts, so `owner` says exactly that `from` passed it.
   if (String(value).toLowerCase() === intent.binding.address) return "owner";
   if (value === undefined) return "absent";

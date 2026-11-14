@@ -12,7 +12,7 @@ import { LAYERZERO_ENDPOINT_V2_ABI, LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, 
 import { StargateJsonRpc, confirmedStargateSourceReceipt } from "./native-runtime.js";
 import { cleanupStargateV2Token, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, reconcileStargateV2TokenUsage, stargateV2TokenCanonicalReceipt, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MECHANISM, LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_TOKEN } from "./token-execution.js";
 import { TtyStargateTokenApproval } from "./token-tty.js";
-import { scanStargateLogs, StargateDestinationScanStore, STARGATE_POLYGON_SCAN_WINDOW } from "./destination-scan.js";
+import { scanStargateLogs, stargateLogInScan, StargateDestinationScanStore, STARGATE_POLYGON_SCAN_WINDOW } from "./destination-scan.js";
 import { legacyStargateStatusAfter } from "../legacy/stargate-v2/status.js";
 import { checkNeverLands } from "../evm-finalized-proof.js";
 import { readEvmReceiptFeeFields } from "../evm-direct-actual-fee.js";
@@ -270,7 +270,7 @@ export async function observeStargateTokenDestination(rpc, input, tokenAt, curso
     for (const log of await scanStargateLogs(call, { address: STARGATE_TOKEN_DESTINATION_POOL, topics: oftTopics }, baselineNumber, head, STARGATE_POLYGON_SCAN_WINDOW, cursor)) {
         try {
             const event = decodeEventLog({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", topics: log.topics, data: String(log.data) });
-            if (isAt(log, STARGATE_TOKEN_DESTINATION_POOL) && event.args.srcEid === 30111 && event.args.guid === input.guid && quantity(log.blockNumber) <= head &&
+            if (isAt(log, STARGATE_TOKEN_DESTINATION_POOL) && event.args.srcEid === 30111 && event.args.guid === input.guid && stargateLogInScan(quantity(log.blockNumber), baselineNumber, head) &&
                 getAddress(event.args.toAddress) === input.recipient && event.args.amountReceivedLD.toString() === input.minimumAmountAtomic && await isCanonical(log))
                 oftMatches.push({ log, amount: event.args.amountReceivedLD });
         }
@@ -307,6 +307,9 @@ export async function observeStargateTokenDestination(rpc, input, tokenAt, curso
         const dropTopics = encodeEventTopics({ abi: LAYERZERO_EXECUTOR_ABI, eventName: "NativeDropApplied" }), oftBlock = quantity(oft.log.blockNumber);
         const fromReceipt = receiptLogs.filter(log => isAt(log, STARGATE_TOKEN_DESTINATION_EXECUTOR));
         // An Executor that applied the drop in an earlier transaction is found in the one window ending at the delivery block.
+        // A drop at or before the baseline block (a provider that ignores fromBlock, or a stale drop in the very block whose
+        // balance was the baseline) predates the operation, and one after the delivery block follows it, so neither is a
+        // candidate, even when no source packet nonce binds it.
         const candidates = fromReceipt.length > 0 ? fromReceipt : await scanStargateLogs(call, { address: STARGATE_TOKEN_DESTINATION_EXECUTOR, topics: [dropTopics[0]] }, oftBlock >= baselineNumber + STARGATE_POLYGON_SCAN_WINDOW ? oftBlock - STARGATE_POLYGON_SCAN_WINDOW + 1n : baselineNumber, oftBlock, STARGATE_POLYGON_SCAN_WINDOW, undefined, 1);
         const matches = [];
         for (const log of candidates) {
@@ -316,7 +319,8 @@ export async function observeStargateTokenDestination(rpc, input, tokenAt, curso
                 if (isAt(log, STARGATE_TOKEN_DESTINATION_EXECUTOR) && event.origin.srcEid === 30111 &&
                     event.origin.sender.toLowerCase() === pad(STARGATE_TOKEN_SOURCE_MESSAGING, { size: 32 }).toLowerCase() && (nonce === undefined || event.origin.nonce.toString() === nonce) &&
                     event.dstEid === 30109 && getAddress(event.oapp) === STARGATE_TOKEN_DESTINATION_MESSAGING && event.params.length === 1 && event.success.length === 1 && event.success[0] === true &&
-                    getAddress(event.params[0].receiver) === input.recipient && event.params[0].amount.toString() === input.nativeDropAtomic && await isCanonical(log))
+                    getAddress(event.params[0].receiver) === input.recipient && event.params[0].amount.toString() === input.nativeDropAtomic &&
+                    stargateLogInScan(quantity(log.blockNumber), baselineNumber, oftBlock) && await isCanonical(log))
                     matches.push({ log, nonce: event.origin.nonce });
             }
             catch { /* unrelated candidate */ }

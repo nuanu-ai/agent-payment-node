@@ -81,7 +81,7 @@ export class RailOperationLifecycle {
                         await this.assertCurrentRailPolicy(latest);
                     }
                     catch (error) {
-                        await this.move(latest, "failed_before_effect", "pre_sign_owner_or_policy_changed", "durable_pre_effect");
+                        await this.move(latest, "failed_before_effect", railStopReason("pre_sign", error), "durable_pre_effect");
                         throw error;
                     }
                     if (adapter.sealRevalidated === undefined)
@@ -146,8 +146,8 @@ export class RailOperationLifecycle {
             try {
                 await this.assertCurrentRailPolicy(latest);
             }
-            catch {
-                return { done: await this.move(latest, "failed_before_effect", "never_submitted_frozen_effect_no_longer_valid", "durable_pre_effect") };
+            catch (error) {
+                return { done: await this.move(latest, "failed_before_effect", railStopReason("pre_send", error), "durable_pre_effect") };
             }
             // The intent is durable before adapter.submit can make even one physical send attempt.
             return { submitting: await this.move(latest, "submitting", "submission_intent_persisted", "effect_outcome_unknown") };
@@ -364,7 +364,7 @@ export class RailOperationLifecycle {
             await this.policies.assertPrincipal(policy, operation.operationId, operation.prepared.amountAtomic);
         }
         catch (error) {
-            await this.move(operation, "failed_before_effect", "chain_policy_refused_at_approval", "durable_pre_effect");
+            await this.move(operation, "failed_before_effect", railStopReason("chain_policy", error), "durable_pre_effect");
             throw error;
         }
         try {
@@ -373,8 +373,11 @@ export class RailOperationLifecycle {
             }
             return await this.allowlist.reserve(railAllowlistSubject(operation), operation.allowlist);
         }
-        catch (error) {
-            await this.move(operation, "failed_before_effect", "allowlist_refused_at_approval", "durable_pre_effect");
+        catch (caught) {
+            // A cap another reservation took inside the ledger is the owner policy's refusal, as the gate words it.
+            const error = operation.allowlist === undefined ? caught
+                : await this.allowlist.reservationRefusal(railAllowlistSubject(operation), operation.allowlist, caught);
+            await this.move(operation, "failed_before_effect", railStopReason("usage_reservation", error), "durable_pre_effect");
             throw error;
         }
     }
@@ -385,6 +388,34 @@ export class RailOperationLifecycle {
         }
         return operation;
     }
+}
+/** Owner, chain-policy and allowlist refusals of the frozen transfer, in the codes those services refuse with. */
+function ownerPolicyRefusal(error) {
+    return ["APN_PROFILE_DRIFT", "APN_WALLET_POLICY_REQUIRED", "APN_ALLOWLIST_REFUSED", "APN_OPERATION_BLOCKED"].includes(error.code);
+}
+/** The owner's answer on the approval screen, or a refusal of the frozen transfer by its policies or by the chain. */
+function approvalRefusal(error) {
+    return error.code === "APN_NATIVE_REJECTED" || ownerPolicyRefusal(error) || railEffectProvenUnsendable(error);
+}
+/** Each pre-effect stop that catches every error: the refusal that keeps the step's reason, and the prefix for the rest. */
+const RAIL_STOPS = {
+    approval: { refused: approvalRefusal, refusal: "approval_or_pre_effect_validation_refused", prefix: "approval_or_pre_effect_validation" },
+    chain_policy: { refused: ownerPolicyRefusal, refusal: "chain_policy_refused_at_approval", prefix: "chain_policy_check" },
+    usage_reservation: { refused: (error) => error.code === "APN_ALLOWLIST_REFUSED", refusal: "allowlist_refused_at_approval", prefix: "usage_reservation" },
+    pre_sign: { refused: (error) => ownerPolicyRefusal(error) || error.code === "APN_REPREPARE_REQUIRED",
+        refusal: "pre_sign_owner_or_policy_changed", prefix: "pre_sign_policy_check" },
+    pre_send: { refused: railEffectProvenUnsendable, refusal: "never_submitted_frozen_effect_no_longer_valid", prefix: "pre_send_policy_check" },
+};
+/**
+ * The saved cause of a stop before any effect. The step's own refusal keeps its reason; any other APN error, such as a
+ * state or ledger failure (`APN_STATE_SECURITY`), is `<prefix>_<code in lower case>`, as the Stargate token rail names
+ * it, and a non-APN error is `<prefix>_failed`. The stop itself is the same. Records written before keep their reason.
+ */
+export function railStopReason(step, error) {
+    const stop = RAIL_STOPS[step];
+    if (!(error instanceof ApnError))
+        return `${stop.prefix}_failed`;
+    return stop.refused(error) ? stop.refusal : `${stop.prefix}_${error.code.toLowerCase()}`;
 }
 /** Expiry, funding, fee, owner-policy or custody refusals prove the frozen effect must not be sent; RPC failures prove nothing. */
 function railEffectProvenUnsendable(error) {

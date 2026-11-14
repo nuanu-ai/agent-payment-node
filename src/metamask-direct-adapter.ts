@@ -4,7 +4,7 @@ import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
 import type { Address, Hex } from "./model.js";
 import type { DirectExecutionPort } from "./provider-ports.js";
 import type { MetaMaskProcessResult, MetaMaskProcessRunnerPort } from "./metamask-process-runner.js";
-import { classifyMetaMaskPendingNotices, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
+import { classifyMetaMaskPendingNotices, metaMaskWatchMissReason, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
 
 type DirectResult = Awaited<ReturnType<NonNullable<DirectExecutionPort["execute"]>>>;
 type ObserveResult = Awaited<ReturnType<NonNullable<DirectExecutionPort["observe"]>>>;
@@ -129,7 +129,8 @@ function parseTransferResult(result: MetaMaskProcessResult, expected: Address): 
 
 function parseWatchResult(result: MetaMaskProcessResult, recoveryToken: string): ObserveResult {
   const parsed = parseMetaMaskProcessOutput(result.stdout);
-  if (parsed === null) return { disposition: "ambiguous", reason: "provider_response_malformed" };
+  // A REQUEST_NOT_FOUND on stderr names where mm missed the request (its local list, or MetaMask's server): never proof.
+  if (parsed === null) return { disposition: "ambiguous", reason: metaMaskWatchMissReason(result) ?? "provider_response_malformed" };
   const pendingNotice = classifyMetaMaskPendingNotices(parsed.notices, recoveryToken);
   if (pendingNotice.disposition === "invalid") return { disposition: "ambiguous", reason: pendingNotice.reason };
   const value = parsed.envelope;

@@ -1,5 +1,6 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
+import { assertOwnClaimsAvailable } from "../../operation-index/admission.js";
 import { abandonedPrincipalCandidate, principalReleaseCandidate, proveSwapNoncesUnusable } from "./token-principal.js";
 import { sanitizeUniswapTokenFailureField, swapMarkerNonces, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation } from "./token-operation.js";
 export class UniswapTokenExecution {
@@ -15,7 +16,11 @@ export class UniswapTokenExecution {
         let op = await this.retireExpiredPrepared(await this.required(id));
         if (op.phase !== "prepared")
             blocked("Token swap is not prepared.", "uniswap_token_phase");
+        // `prepared` is the only phase the index lets go by the clock: before consent and again before it leaves that phase,
+        // the swap re-takes its account and another unresolved operation on it refuses it (QA F03).
+        await assertOwnClaimsAvailable(this.journal, op.operationId);
         await this.ports.foregroundApprove(op);
+        await assertOwnClaimsAvailable(this.journal, op.operationId);
         const usage = await this.ports.reserveUsage(op);
         op = await this.persist(transitionUniswapToken(op, "approved", usagePatch(usage), this.ports.now()));
         op = await this.advanceApproval(op);

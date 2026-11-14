@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseTransaction } from "viem";
 import { bridgeExecutionDestination } from "../../src/lifi/asset-registry.js";
+import { bindBridgeCommand } from "../../src/lifi/command-catalog.js";
 import { bridgeCapabilities } from "../../src/lifi/catalog.js";
 import { bridgeDeployment, bridgeProtocolEmitter } from "../../src/lifi/deployments.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
@@ -212,6 +213,51 @@ test("a reverse Linea quote saved before the source gate is refused at prepare w
   assert.equal(tampered.error?.message, "Bridge validation failed: source_execution_unreviewed.");
   assert.equal(provider.materializeCalls, 0); assert.equal(r.source.calls.length, 0); assert.equal(r.destination.calls.length, 0);
   assert.equal(r.approval.calls.length, 0); assert.equal(r.wrapping.loads, 0);
+});
+
+test("reverse Linea rows keep each tool's own gate, and prepare refuses every row as source_execution_unreviewed", async (t) => {
+  const now = new Date("2026-09-20T10:54:00.000Z"), across = reverseLineaStep((await lifiSteps("eth-linea", now))[0]);
+  across.id = "synthetic-linea-ethereum-native-across";
+  const retool = (tool: string) => { const step = structuredClone(across); step.id = `synthetic-linea-ethereum-native-${tool}`;
+    step.tool = tool; step.toolDetails.key = tool; step.estimate.tool = tool; return step; };
+  const provider = new LifiTestProvider([across, retool("relay"), retool("stargateV2")], now), temporary = await temporaryState(); t.after(temporary.cleanup);
+  const r = await lifiFixture(temporary.root, "eth-linea", { provider, policy: false });
+  const discovered = await r.core.execute({ command: "bridge.routes", profile: r.profile, request: r.request });
+  assert.equal(discovered.ok, true, discovered.error?.message);
+  const rows = (discovered.data as any).routes as any[];
+  // docs/lifi.md "Route row gates": only the across row reaches the source gate; relay and stargateV2 stop at their tool gate.
+  assert.deepEqual(Object.fromEntries(rows.map((row) => [row.tool, [row.preparable, row.executability_gate]])), {
+    across: [false, "source_execution_unreviewed"],
+    relay: [false, "finite_decoder_and_correlated_evidence_unavailable"],
+    stargateV2: [false, "asset_tool_unreviewed"],
+  });
+  for (const row of rows) {
+    const refused = await r.core.execute({ command: "bridge.prepare", profile: r.profile, quote: (discovered.data as any).quote_hash,
+      route: row.route_id, idempotencyKey: `linea-reverse-${String(row.tool).toLowerCase()}-001` });
+    assert.equal(refused.ok, false);
+    assert.equal(refused.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
+    assert.equal(refused.error?.message, "Bridge validation failed: source_execution_unreviewed.");
+  }
+  assert.equal(provider.materializeCalls, 0); assert.equal(r.source.calls.length, 0); assert.equal(r.destination.calls.length, 0);
+  assert.equal(r.approval.calls.length, 0); assert.equal(r.wrapping.loads, 0);
+});
+
+test("BNB or MON as a bridge source is refused at request validation as admitted_asset_pair, before any LI.FI call", async (t) => {
+  for (const chain of ["eip155:56", "eip155:143"]) {
+    assert.throws(() => bindBridgeCommand("bridge routes", { "--profile": "example", "--from-chain": chain, "--to-chain": "eip155:1",
+      "--from-token": "native", "--to-token": "native", "--amount": "0.001", "--to": LIFI_SYNTHETIC_SENDER, "--min-output": "0.00099",
+      "--max-native-debit-wei": "1000000000000000", "--max-route-fee": "0.00001", "--slippage-bps": "50" }),
+    (error: any) => error.code === "APN_INVALID_INPUT" && error.message === "Bridge validation failed: admitted_asset_pair.");
+  }
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await lifiFixture(temporary.root, "eth-linea", { policy: false });
+  for (const fromChainId of [56, 143] as const) {
+    const refused = await f.core.execute({ command: "bridge.routes", profile: f.profile, request: { ...f.request, fromChainId, toChainId: 1 } });
+    assert.equal(refused.ok, false);
+    assert.equal(refused.error?.code, "APN_INVALID_INPUT");
+    assert.equal(refused.error?.message, "Bridge validation failed: admitted_asset_pair.");
+  }
+  assert.equal(f.provider.routeCalls, 0);
 });
 
 test("Linea shared usage reservation is atomic, survives unknown outcome, and blocks daily-cap bypass", async (t) => {

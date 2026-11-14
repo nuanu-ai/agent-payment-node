@@ -221,6 +221,9 @@ async function executeLocked(id: string, ports: StargateTokenExecutionPorts, jou
   if (op.allowanceRequired && op.phase === "approved") {
     const submissionOpStackFees = await freshPreflight(op, ports, "before_approval"); await ports.confirmPolicy(op);
     const raw = await ports.signer.signTransaction(op.approvalEnvelope!); await verifySignedEnvelope(raw, op.owner, op.approvalEnvelope!);
+    // Nothing was marked yet, so the index may have let this operation go by the clock: right before the marker it is
+    // admitted again, refused while another unresolved operation holds the account; the signed bytes never leave (QA F03).
+    await journal.assertOwnClaims(op.operationId);
     const markerAt = now(); if (Date.parse(op.expiresAt) <= markerAt) fail("APN_REPREPARE_REQUIRED", "approval_marker_after_prepare_expiry");
     const approvalFinalityDeadline = new Date(markerAt + (op.approvalFinalityWindowMs ?? 0)).toISOString();
     const hash = keccak256(raw); op = transition({ ...op, approvalTransactionHash: hash,
@@ -257,6 +260,9 @@ async function executeLocked(id: string, ports: StargateTokenExecutionPorts, jou
     if (address(ports.signer.address) !== op.owner) fail("APN_REPREPARE_REQUIRED", "signer_identity_changed");
   } catch (error) { if (error instanceof ApnError && rpcUnavailable(error)) throw error; // nothing decided: the next execute retries
     return await requireCleanup(op, ports, journal, error instanceof ApnError ? String(error.details?.reason ?? error.code) : "bridge_preflight_failed"); }
+  // An operation that needed no approval reaches its first effect here, after every network read; one with a landed
+  // approval already holds its account. Re-admitted before its hold is reserved, so a refusal leaves it as it was (QA F03).
+  await journal.assertOwnClaims(op.operationId);
   op = await markUsageTarget(op, "reserved", journal);
   try { op = await reconcileUsage(op, ports, journal); }
   catch (error) {

@@ -207,6 +207,44 @@ test("historical exposure record remains readable and exposed without migration 
   assert.equal(await readFile(path, "utf8"), before);
 });
 
+/**
+ * QA PERMIT2-STATUS-EXECUTION-NOT-WIRED: after a paid GET whose settlement was proven, approve, observe, status (CLI and
+ * MCP) and the generic operation status still read `execution_blocked` / `permit2_production_execution_not_wired`.
+ * The view names what can still run: an unsigned operation alone keeps the not-wired blocker.
+ */
+const capabilityView = (record: Parameters<typeof publicPermit2Production>[0]) => {
+  const projected = publicPermit2Production(record); return [projected.lifecycle, projected.capability, projected.blockerCodes];
+};
+test("the public view names what can still run: unsigned blocked, exposed observe-only, a settled payment completed", async t => {
+  const f = await journalFixture(t), id = f.record.operationId;
+  assert.deepEqual(capabilityView(f.reserved), ["unsigned", "execution_blocked", ["permit2_production_execution_not_wired"]]);
+  assert.deepEqual(capabilityView(await f.journal.markSignatureRisk(id)), ["exposed_held", "observe_only", []]);
+  await f.journal.storeSigned(id, f.signed);
+  assert.deepEqual(capabilityView(await f.journal.markRequestPending(id)), ["request_attempted", "observe_only", []]);
+  const observed = await f.observe("settlement"); assert.ok(observed.proof);
+  const settled = await f.journal.finalize(id, observed.proof, "settlement");
+  assert.deepEqual(capabilityView(settled), ["settled", "completed", []]);
+  // `x402 permit2 status` (CLI and MCP) and the generic `operation status` read the same view of the settled payment.
+  const status = await readPermit2ProductionStatus(f.root, "owner", id) as { readonly capability?: unknown; readonly blockerCodes?: unknown };
+  assert.deepEqual([status.capability, status.blockerCodes], ["completed", []]);
+  const generic = await new OperationService(f.state).status(id) as { readonly capability?: unknown; readonly blockerCodes?: unknown };
+  assert.deepEqual([generic.capability, generic.blockerCodes], ["completed", []]);
+});
+
+test("an authorization proven expired unused reads completed, not execution_blocked", async t => {
+  const f = await journalFixture(t, true), id = f.record.operationId;
+  await f.journal.markSignatureRisk(id); f.advance(120);
+  const unused = await f.observe("expired_unused"); assert.ok(unused.proof);
+  assert.deepEqual(capabilityView(await f.journal.finalize(id, unused.proof, "expired_unused")), ["expired_no_effect", "completed", []]);
+});
+
+test("an unsigned authorization released past its deadline reads completed, not execution_blocked", async t => {
+  const f = await journalFixture(t); f.advance(120);
+  const released = await f.preparation.releaseExpired(f.record.operationId);
+  assert.equal(released.state, "released_unsubmitted");
+  assert.deepEqual(capabilityView(released), ["unsigned", "completed", []]);
+});
+
 test("x402 permit2 status reads the production journal of a real operation", async t => {
   const f = await journalFixture(t), id = f.record.operationId;
   const status = await readPermit2ProductionStatus(f.root, "owner", id);

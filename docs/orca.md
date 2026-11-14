@@ -251,8 +251,16 @@ Stage the file with
 activate it in the foreground with
 `apn allowlist policy activate --profile <profile> --revision <revision>`. The
 caps are examples; nothing defaults to them. Without an active admission
-`prepare` refuses with `swap_owner_admission_required`; a policy changed after
-`prepare` refuses with `swap_policy_drift`.
+`prepare` refuses with `swap_owner_admission_required`, and `next_actions`
+name `apn allowlist policy status --profile <profile>`; a policy changed after
+`prepare` refuses with `swap_policy_drift`. An active policy that does not
+admit one of the two assets also refuses with `swap_owner_admission_required`.
+Its `details` name the `side` (`source` or `destination`), the `chain`, the
+`asset` (`native` or the mint) and the `admissionGap`: `network_not_listed`,
+`asset_not_listed`, `swap_rail_not_admitted` (listed without the `swap` rail)
+or `swap_route_not_admitted` (admitted for `swap` with another route). Its
+`next_actions` are `apn allowlist policy status --profile <profile>` and
+`apn swap solana orca inventory`.
 
 ## Approve, execute, status
 
@@ -332,7 +340,9 @@ for the shared Solana pacing and cooldown rules.
 | `orca_insufficient_sol`, `orca_insufficient_source`, `orca_source_account_absent` (`APN_INSUFFICIENT_ASSET`) | The balance cannot cover the input, fee or rent, or the source token account is missing. | Fund the account and quote again. |
 | `orca_wsol_account_unusable`, `orca_wsol_account_changed` | The owner's wSOL account is not a plain owner account, or it was created or closed since the quote. | Fix the account and quote again. |
 | `orca_tick_array_moved`, `orca_output_below_minimum`, `orca_fee_drift`, `orca_rent_drift` | At approval the pool moved, the output fell below the minimum, or the fee or rent rose above the approved values. Nothing was signed. | Quote again. |
-| `swap_owner_admission_required`, `swap_policy_drift`, `swap_owner_account` | No active admission, the policy changed after `prepare`, or the profile account is not the quoted account. | Activate a policy for both assets; quote again with the profile's account. |
+| `swap_owner_admission_required`, `swap_policy_drift`, `swap_owner_account` | No active admission or none for the asset that `details.side` names (`details.admissionGap` says what is missing), the policy changed after `prepare`, or the profile account is not the quoted account. | Activate a policy for both assets with the pool's route; quote again with the profile's account. |
+| `allowlist_per_transfer_cap_exceeded` | At `prepare`, the input (or, for the output asset, the minimum output) is above the asset's per-transfer cap. `details` name the `side` and both amounts. | Quote a smaller amount or raise the cap. |
+| `allowlist_daily_cap_exceeded` | At approval, today's shared usage plus the input is above the daily cap (`details.daily_usage_atomic`, `daily_limit_atomic`). Nothing is reserved or signed. | Wait for the next UTC day or raise the cap. |
 
 ## Stable USDC to USDT operations from earlier releases
 

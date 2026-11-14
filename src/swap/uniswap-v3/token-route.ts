@@ -96,7 +96,8 @@ export function encodeUniswapTokenApproval(tokenAddress: string, amount: string)
 export async function verifyUniswapTokenRoutePins(call: EvmRpcCall, tag: Hex): Promise<void> {
   const rpc = call as TokenRpcCall, pins = UNISWAP_V3_CODE_PINS.filter((pin) => pin.address === UNISWAP_USDC || pin.address === ETHEREUM_USDT);
   if (rpc.primaryPoolEnabled?.() === true) {
-    // The pooled archive transport verifies chain 1 and the primary block hash before its first tagged read.
+    // The pooled archive transport verifies chain 1 and the primary block hash before its first tagged read; without an
+    // archive the selected primary, whose first batch proved chain 1, serves them at the block it just read.
     // Its nine pin reads therefore fit in three provider-compatible batches without repeating eth_chainId.
     const first = await tokenBatch(rpc, "archive", [
       { method: "eth_getCode", params: [UNISWAP_V3_SWAP_ROUTER, tag], cachePolicy: "immutable", decoder: tokenHex() },

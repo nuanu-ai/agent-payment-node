@@ -4,7 +4,7 @@ import { canonicalJson } from "../canonical.js";
 import { evmAddressLock } from "../evm-address-ownership.js";
 import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
-import { admitOperation } from "../operation-index/admission.js";
+import { admitOperation, assertOwnClaimsAvailable } from "../operation-index/admission.js";
 import { evmClaim, namedProfileHash } from "../operation-index/adapters/family-claims.js";
 import type { StargateNativeJournal, StargateNativeOperation } from "./native-execution.js";
 import type { StargateAdmission } from "./token-model.js";
@@ -31,6 +31,9 @@ export class FileStargateNativeJournal implements StargateNativeJournal {
     const state = new StateStore(this.root); await state.initialize();
     return await admitOperation(state, { family: "stargate_native", profileHash: namedProfileHash(operation.profile), operationId: operation.operationId,
       idempotencyHash: null, requestHash: null }, [evmClaim(1, address(operation.owner))], work);
+  }
+  async assertOwnClaims(operationId: string): Promise<void> {
+    const state = new StateStore(this.root); await state.initialize(); await assertOwnClaimsAvailable(state, operationId);
   }
   async load(id: string): Promise<StargateNativeOperation | null> {
     try {

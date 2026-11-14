@@ -21,6 +21,8 @@ export type TokenRpcCall = EvmRpcCall & {
     readonly primaryPoolSize?: () => number;
     readonly selectedPrimaryProviderId?: () => string | null;
     readonly bindPrimaryProvider?: (providerId: string | null) => Promise<void>;
+    /** Whether APN_ETHEREUM_ARCHIVE_RPC_URL names an archive; without one the primary serves the block-pinned reads. */
+    readonly archiveConfigured?: () => boolean;
 };
 export declare function tokenBatch(call: TokenRpcCall, route: TokenRpcRoute, items: readonly TokenRpcItem[]): Promise<readonly unknown[]>;
 export declare function tokenChain(value: unknown): unknown;

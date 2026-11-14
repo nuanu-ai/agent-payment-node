@@ -1,7 +1,7 @@
 import { mmActualGross } from "../economics.js";
 import { hashObject } from "../../canonical.js";
 import { mmDispatchIntent } from "../dispatch.js";
-import { mmPrivateHash } from "../identity.js";
+import { mmRequestIdHash } from "../identity.js";
 import { MM_RECEIPT_VERSION, type MetaMaskGaslessOperationRecord, type MetaMaskGaslessPublicOperation,
   type MetaMaskGaslessReceipt } from "../operation-model.js";
 import { mmFail } from "../reasons.js";
@@ -103,7 +103,7 @@ export function publicMetaMaskGaslessOperation(operation: MetaMaskGaslessOperati
       one_use_status: settlement !== null ? "consumed" : op.state === "revoked_unused" ? "disabled_unused" :
         op.submissionAttempts === 1 ? "possibly_live" : "not_dispatched",
       onchain_expiry: false, guard_held: !op.terminal },
-    provider_binding: intent.binding, provider_request_id_hash: mmPrivateHash("request-id", intent.requestId),
+    provider_binding: intent.binding, provider_request_id_hash: mmRequestIdHash(intent),
     submission_attempts: op.submissionAttempts, transaction_hash: transactionHash, settlement,
     scan_cursor: op.cursor, endpoint_origin: intent.initialSnapshot.endpointOrigin,
     endpoint_hash: intent.initialSnapshot.endpointHash, approved_at: op.approval?.approvedAt ?? null,

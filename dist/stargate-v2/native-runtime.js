@@ -8,7 +8,7 @@ import { STARGATE_SEND_ABI } from "./abi.js";
 import { executeStargateV2NativeEth, FileStargateNativeJournal, LocalStargateNativeSigner, prepareStargateV2NativeEth, stargateV2NativeCanonicalReceipt } from "./native-execution.js";
 import { TtyStargateNativeApproval } from "./native-tty.js";
 import { StargateNativeUsage } from "./native-usage.js";
-import { scanStargateLogs, StargateDestinationScanStore, STARGATE_UNICHAIN_SCAN_WINDOW } from "./destination-scan.js";
+import { scanStargateLogs, stargateLogInScan, StargateDestinationScanStore, STARGATE_UNICHAIN_SCAN_WINDOW } from "./destination-scan.js";
 import { legacyStargateStatusAfter } from "../legacy/stargate-v2/status.js";
 import { stargateFundsRefusal } from "./funds.js";
 const DESTINATION_POOL = getAddress("0xe9aBA835f813ca05E50A6C0ce65D0D74390F7dE7");
@@ -268,11 +268,16 @@ export async function observeStargateDestination(rpc, input, cursor) {
         eventName: "OFTReceived", args: { guid: input.guid, toAddress: input.recipient } });
     if (hash(baseline.hash) !== input.fromBlockHash)
         throw new ApnError("APN_RPC_PROTOCOL", "Stargate destination baseline is no longer canonical.");
-    const raw = await scanStargateLogs((method, params) => rpc.call(method, params), { address: DESTINATION_POOL, topics: topic }, BigInt(input.fromBlockNumberAtomic), quantity(finalityHead.number), STARGATE_UNICHAIN_SCAN_WINDOW, cursor);
+    const baselineNumber = BigInt(input.fromBlockNumberAtomic), head = quantity(finalityHead.number);
+    const raw = await scanStargateLogs((method, params) => rpc.call(method, params), { address: DESTINATION_POOL, topics: topic }, baselineNumber, head, STARGATE_UNICHAIN_SCAN_WINDOW, cursor);
     for (const value of raw) {
         const log = record(value);
         try {
             if (getAddress(String(log.address)) !== DESTINATION_POOL)
+                continue;
+            // An RPC that ignores the block bounds can answer a log at or before the baseline block or above the safe head; a
+            // log above the head is no proof until a later observe sees it at or below the safe head, exactly as in the token path.
+            if (!stargateLogInScan(quantity(log.blockNumber), baselineNumber, head))
                 continue;
             const event = decodeEventLog({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", topics: log.topics, data: String(log.data) });
             const canonical = record(await rpc.call("eth_getBlockByNumber", [log.blockNumber, false]));

@@ -205,6 +205,12 @@ export interface StargateNativeJournal {
     withOwnerLock<T>(owner: Address, work: () => Promise<T>): Promise<T>;
     /** Writes a new operation's owner claim to the operation index before `work` (its prepare body) reads anything. */
     admit<T>(operation: StargateAdmission, work: () => Promise<T>): Promise<T>;
+    /**
+     * The approve-time account guard right before the operation's first effect (QA F03): an index entry the wall clock let
+     * go while nothing was sent holds its claims again if the clock went back, and another unresolved operation on the
+     * account refuses it (OperationIndex.assertOwnClaimsAvailable).
+     */
+    assertOwnClaims(operationId: string): Promise<void>;
 }
 export declare class LocalStargateNativeSigner {
     private readonly state;

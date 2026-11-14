@@ -26,12 +26,32 @@ const DURABLE_PRE_EFFECT_REASONS = new Set([
     "coinbase_gasless_approval_rejected",
     "coinbase_gasless_deployment_or_balance_changed",
     "coinbase_gasless_policy_denied",
+    // Written after 0.5.106: a Coinbase gasless policy check or reservation that failed for a cause other than a refusal.
+    "coinbase_gasless_policy_check_apn_state_security",
+    "coinbase_gasless_policy_check_apn_state_corrupt",
+    "coinbase_gasless_policy_check_apn_state_busy",
+    "coinbase_gasless_policy_check_apn_invalid_input",
+    "coinbase_gasless_policy_check_apn_operation_blocked",
+    "coinbase_gasless_policy_check_failed",
 ]);
 const CHILD_NOT_CREATED_REASONS = new Set([
     "provider_binary_unavailable",
     "provider_child_not_created",
 ]);
 const PROVIDER_REJECTION_REASONS = new Set(["provider_denied", "provider_expired"]);
+/**
+ * The saved reason of a Coinbase gasless policy check or usage reservation that failed before the provider ran. Only the
+ * owner policy's own refusal (`APN_ALLOWLIST_REFUSED`) is `coinbase_gasless_policy_denied`. The other answers those
+ * checks can give (the state store, its locks, input validation, the usage ledger) name their code; anything else is
+ * `coinbase_gasless_policy_check_failed`. Every reason is in the closed list above, so orphan-receipt recovery and
+ * `receipt get` accept it. Records written before keep `coinbase_gasless_policy_denied` for every cause.
+ */
+export function coinbaseGaslessPolicyFailureReason(error) {
+    if (error instanceof ApnError && error.code === "APN_ALLOWLIST_REFUSED")
+        return "coinbase_gasless_policy_denied";
+    const reason = error instanceof ApnError ? `coinbase_gasless_policy_check_${error.code.toLowerCase()}` : "";
+    return DURABLE_PRE_EFFECT_REASONS.has(reason) ? reason : "coinbase_gasless_policy_check_failed";
+}
 export function providerDirectReceipt(operation, rpcReceipt) {
     const transition = operation.transitions.at(-1);
     if (transition === undefined)

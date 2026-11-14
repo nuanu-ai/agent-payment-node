@@ -1,7 +1,11 @@
 import { ApnError } from "./errors.js";
-import type { OperationRecord, ProviderDirectBinding, ProviderEffectReference } from "./model.js";
+import type { OperationRecord, PlainProviderEffectReference, ProviderDirectBinding, ProviderEffectReference,
+  SealedProviderEffectReference } from "./model.js";
 import type { ProviderAdapterBundle } from "./provider-ports.js";
 import type { ProviderProfileRecord } from "./provider-profile.js";
+import { providerRequestReferenceHash, type ProviderRequestReferenceBinding,
+  type ProviderRequestReferencePort } from "./provider-request-reference-store.js";
+import type { RuntimeContext } from "./runtime.js";
 
 export type ProviderDirectRecoveryOutcome =
   | { readonly disposition: "unchanged" }
@@ -9,7 +13,12 @@ export type ProviderDirectRecoveryOutcome =
   | { readonly disposition: "rejected"; readonly reason: "provider_denied" | "provider_expired" }
   | { readonly disposition: "ambiguous"; readonly reason: string };
 
+/**
+ * One no-replay read of the stored provider request. A sealed request id is opened first; a seal that cannot be opened
+ * throws its own precise refusal before the provider is asked anything, and the operation is not advanced.
+ */
 export async function observeProviderDirectRequest(
+  context: RuntimeContext,
   adapter: ProviderAdapterBundle,
   operation: OperationRecord & { readonly providerEffect: ProviderEffectReference },
   waitSeconds?: number,
@@ -18,10 +27,11 @@ export async function observeProviderDirectRequest(
   if (direct?.observe === undefined) {
     return { disposition: "ambiguous", reason: "provider_recovery_unavailable" };
   }
+  const recoveryToken = await providerEffectRecoveryToken(context, operation);
   let result: Awaited<ReturnType<NonNullable<typeof direct.observe>>>;
   try {
     result = await direct.observe({
-      recoveryToken: operation.providerEffect.recoveryToken,
+      recoveryToken,
       sender: operation.walletAddress,
       ...(waitSeconds === undefined ? {} : { waitSeconds }),
     });
@@ -29,21 +39,106 @@ export async function observeProviderDirectRequest(
     return { disposition: "unchanged" };
   }
   if (result.disposition !== "pending") return result;
-  return result.recoveryToken === operation.providerEffect.recoveryToken
+  return result.recoveryToken === recoveryToken
     ? { disposition: "unchanged" }
     : { disposition: "ambiguous", reason: "provider_recovery_identity_mismatch" };
 }
 
+/** A reference that keeps its id: every reference 0.5.106 or earlier wrote, and a delegated send's (the APN operation id). */
 export function createProviderEffectReference(
   recoveryToken: string,
   providerState: string,
-): ProviderEffectReference {
+): PlainProviderEffectReference {
   return {
     schemaVersion: "apn.provider-effect-reference.v1",
     kind: "transaction",
     recoveryToken,
     providerState,
   };
+}
+
+/**
+ * A provider's own request id for `operation` (its pending MFA request, or one the owner recovers), sealed before the
+ * record names it: the record keeps only its hash. The caller holds the operation lock and the record has no reference yet.
+ */
+export async function sealProviderEffectReference(
+  references: ProviderRequestReferencePort,
+  operation: OperationRecord,
+  recoveryToken: string,
+  providerState: string,
+): Promise<SealedProviderEffectReference> {
+  const recoveryTokenHash = providerRequestReferenceHash(requiredProviderId(operation), recoveryToken);
+  await references.seal(providerEffectBinding(operation, recoveryTokenHash), recoveryToken);
+  return { schemaVersion: "apn.provider-effect-reference.v2", kind: "transaction", recoveryTokenHash, providerState };
+}
+
+/**
+ * Whether a direct send returns a provider request id that APN seals: a provider-atomic send whose provider can be asked
+ * to observe its requests (MetaMask Guard MFA). One condition decides both the readiness before approval and the seal
+ * after the effect, so no request id is ever sealed without the wrapping secret having been read first.
+ */
+export function providerSealsRequests(context: RuntimeContext, binding: ProviderDirectBinding): boolean {
+  return binding.executionMode === "provider_atomic_send" &&
+    context.requireProviderRegistry().resolve(binding.providerId).direct?.observe !== undefined;
+}
+
+/**
+ * The reference a pending direct result is kept as: a delegated send's id is the APN operation id, which every output
+ * already names, and is kept as is; a provider's own request id is sealed. Null for a provider-atomic send whose provider
+ * cannot be asked about a request: APN could never read it again, so no id is kept (the caller records
+ * `provider_recovery_unavailable`).
+ */
+export async function providerEffectReferenceFor(
+  context: RuntimeContext,
+  operation: OperationRecord,
+  binding: ProviderDirectBinding,
+  recoveryToken: string,
+  providerState: string,
+): Promise<ProviderEffectReference | null> {
+  if (binding.executionMode === "delegated_session_transaction") return createProviderEffectReference(recoveryToken, providerState);
+  if (!providerSealsRequests(context, binding)) return null;
+  return await sealProviderEffectReference(context.requireProviderRequestReferences(), operation, recoveryToken, providerState);
+}
+
+/**
+ * Before the owner is asked to approve a send whose request id will be sealed, the wrapping secret that seals it is read
+ * (or created for a state that holds nothing sealed). A refusal leaves the operation awaiting approval, untouched.
+ */
+export async function readyProviderEffectReferences(context: RuntimeContext, binding: ProviderDirectBinding): Promise<void> {
+  if (providerSealsRequests(context, binding)) await context.requireProviderRequestReferences().ready();
+}
+
+/** The stored request id: kept by a version 1 reference, or opened from the seal of a version 2 one. */
+export async function providerEffectRecoveryToken(
+  context: RuntimeContext,
+  operation: OperationRecord & { readonly providerEffect: ProviderEffectReference },
+): Promise<string> {
+  const reference = operation.providerEffect;
+  if (reference.schemaVersion === "apn.provider-effect-reference.v1") return reference.recoveryToken;
+  return await context.requireProviderRequestReferences().open(providerEffectBinding(operation, reference.recoveryTokenHash));
+}
+
+/** The hash output shows for a stored reference (`provider_request_reference_hash`), whichever version keeps it. */
+export function providerEffectReferenceHash(providerId: string, reference: ProviderEffectReference): string {
+  return reference.schemaVersion === "apn.provider-effect-reference.v1"
+    ? providerRequestReferenceHash(providerId, reference.recoveryToken) : reference.recoveryTokenHash;
+}
+
+/** Whether a stored reference names this request id; a sealed one is compared by hash and never opened. */
+export function providerEffectNames(providerId: string, reference: ProviderEffectReference, recoveryToken: string): boolean {
+  return providerEffectReferenceHash(providerId, reference) === providerRequestReferenceHash(providerId, recoveryToken);
+}
+
+function providerEffectBinding(operation: OperationRecord, referenceHash: string): ProviderRequestReferenceBinding {
+  return { lane: "provider-direct", providerId: requiredProviderId(operation), profileHash: operation.profileHash,
+    operationId: operation.operationId, referenceHash };
+}
+
+function requiredProviderId(operation: OperationRecord): string {
+  if (operation.providerDirect === undefined) {
+    throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not a provider direct transfer.");
+  }
+  return operation.providerDirect.providerId;
 }
 
 export function canonicalProviderRecoveryToken(value: unknown): string {

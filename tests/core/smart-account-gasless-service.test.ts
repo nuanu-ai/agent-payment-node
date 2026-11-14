@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { canonicalJson, sha256 } from "../../src/canonical.js";
 import type { Hex } from "../../src/model.js";
+import { ApnError } from "../../src/errors.js";
+import { OperationIndex } from "../../src/operation-index/index.js";
 import { OperationService } from "../../src/operation-service.js";
 import { capabilityHash, metamaskSmartAccountX402CapabilitySnapshot, PROVIDER_PROFILE_VERSION } from "../../src/provider-profile.js";
 import { RuntimeContext } from "../../src/runtime.js";
@@ -438,4 +440,26 @@ test("Smart Account observation RPC is ignored before exposure, validates names 
   await assert.rejects(rpc.assertUnspent({ binding: f.binding, material: {} as never, safeBlock: {} as never }),
     { details: { reason: "sa_gasless_rpc_binding" } });
   assert.deepEqual(methods, []);
+});
+test("QA F03: the transfer is admitted again before its signing marker and again before exposure; a refusal signs or exposes nothing", async t => {
+  // The guard (re-admission of a released entry, then refusal while another operation holds the account) refuses here.
+  const refusal = new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this network and account is not terminal.");
+  // Refused at the first check: nothing is signed and the transfer stays approved, unsigned.
+  const f = await fixture(await temporary(t)); await f.service.prepare(f.input);
+  const seen: string[] = [];
+  const guard = t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string) => { seen.push(operationId); throw refusal; });
+  await assert.rejects(f.service.approve(f.id), (error: unknown) => error === refusal);
+  assert.deepEqual(seen, [f.id]);
+  assert.deepEqual([f.calls.approval, f.calls.seal, f.calls.expose, f.calls.verify, f.calls.settle], [1, 0, 0, 0, 0]);
+  const unsigned = await f.records.findOperation(f.id);
+  assert.deepEqual([unsigned?.state, unsigned?.signingAttempts, unsigned?.exposureAttempts], ["execution_pending", 0, 0]);
+  guard.mock.restore();
+  // Refused only at the second check: the child is sealed, never exposed.
+  const g = await fixture(await temporary(t)); await g.service.prepare(g.input);
+  let checks = 0;
+  t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async () => { checks += 1; if (checks === 2) throw refusal; });
+  await assert.rejects(g.service.approve(g.id), (error: unknown) => error === refusal);
+  assert.deepEqual([g.calls.approval, g.calls.seal, g.calls.expose, g.calls.verify, g.calls.settle], [1, 1, 0, 0, 0]);
+  const sealed = await g.records.findOperation(g.id);
+  assert.deepEqual([sealed?.state, sealed?.exposureAttempts, sealed?.terminal], ["material_sealed", 0, false]);
 });

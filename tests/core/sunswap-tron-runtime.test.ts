@@ -142,7 +142,10 @@ test("per-operation and daily caps come from the owner policy and the shared usa
   assert.equal((await daily.runtime.status(first.operationId, daily.clock.now())).state, "finalized");
   // The daily cap still refuses the next swap at consent, from the shared usage ledger.
   const second = await prepare(daily, "sunswap-runtime-0013");
-  await assert.rejects(daily.runtime.approveAndExecute(second.operationId, daily.clock.now()), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(daily.runtime.approveAndExecute(second.operationId, daily.clock.now()), (error: any) =>
+    error.code === "APN_OPERATION_BLOCKED" && error.message === "The transfer exceeds the asset policy daily cap." &&
+      error.details?.reason === "allowlist_daily_cap_exceeded" && error.details?.side === "source" && error.details?.asset === "native" &&
+      error.details?.daily_usage_atomic === AMOUNT && error.details?.daily_limit_atomic === AMOUNT && error.details?.amount_atomic === AMOUNT);
   assert.equal((await new SwapOperationRepository(other.root).loadAny(second.operationId))?.state, "awaiting_approval");
   assert.equal(daily.rpc.broadcasts.length, 1); assert.equal(await daily.usage(), AMOUNT);
 });
@@ -157,7 +160,9 @@ test("the actual CLI prepare path refuses an amount above the owner cap before r
   const result = await core.execute(bound.request);
   assert.equal(result.ok, false);
   assert.equal(result.error?.code, "APN_OPERATION_BLOCKED");
-  assert.equal(result.error?.details?.reason, undefined);
+  assert.equal(result.error?.details?.reason, "allowlist_per_transfer_cap_exceeded");
+  assert.deepEqual([result.error?.details?.side, result.error?.details?.asset, result.error?.details?.maximum_per_transfer_atomic,
+    result.error?.details?.amount_atomic], ["source", "native", "4999999", AMOUNT]);
   assert.match(result.error?.message ?? "", /asset policy per-transfer cap/u);
   assert.equal(await f.usage(), "0");
   assert.equal(f.rpc.broadcasts.length, 0);

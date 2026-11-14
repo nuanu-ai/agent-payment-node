@@ -90,6 +90,22 @@ export class DirectAllowlistGate {
     return lease;
   }
 
+  /**
+   * The ledger refuses a new reservation with its policy evaluation's own denial (`APN_OPERATION_BLOCKED`, no details)
+   * when another reservation took the asset's cap after this gate's evaluation. When the ledger holds no reservation of
+   * this operation, the owner policy is evaluated again with today's usage, and its refusal (a cap, for example
+   * `allowlist_daily_cap_exceeded`) is returned. Anything else, a replay or a crossed reservation included, is unchanged.
+   */
+  async reservationRefusal(subject: DirectAllowlistSubject, bindingValue: unknown, error: unknown): Promise<unknown> {
+    if (!(error instanceof ApnError) || error.code !== "APN_OPERATION_BLOCKED" || error.details !== undefined) return error;
+    try {
+      if (await this.existing(subject) !== null) return error;
+      const active = await this.confirm(subject, bindingValue), now = this.context.clock.now();
+      evaluate(active, subject, (await this.ledger.usage(identity(subject), now)).amountAtomic, now);
+    } catch (refusal) { return refusal instanceof ApnError && refusal.code === "APN_ALLOWLIST_REFUSED" ? refusal : error; }
+    return error;
+  }
+
   /** The prepared policy revision must still be the active one, for the same owner account. Reads no ledger state. */
   async confirm(subject: DirectAllowlistSubject, bindingValue: unknown): Promise<ActiveAssetPolicy> {
     const binding = validateDirectAllowlistBinding(bindingValue);

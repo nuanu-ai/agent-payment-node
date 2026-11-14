@@ -6,7 +6,7 @@ import { hashObject } from "../../src/canonical.js";
 import { mmPolicyHash } from "../../src/metamask-gasless/economics.js";
 import { mmRequestHash } from "../../src/metamask-gasless/operation-model.js";
 import { helperRequest, MM_HELPER_VERSION } from "../../src/metamask-gasless/client/protocol.js";
-import { mmDispatchIntent } from "../../src/metamask-gasless/dispatch.js";
+import { mmProviderIntent, mmRequestId } from "../../src/metamask-gasless/journal/request-reference.js";
 import { mmRequest } from "../../src/metamask-gasless/validation.js";
 import { mmRegistry } from "../../src/metamask-gasless/registry.js";
 import { validateMetaMaskGaslessOperation } from "../../src/metamask-gasless/journal/validation.js";
@@ -46,7 +46,10 @@ test("moving fee quote keeps exact net and immutable preparation, settles actual
   assert.equal(f.provider.submissions.length, 1); assert.equal(after.dispatch?.quote.feeAtomic, "17479");
   assert.equal(after.settlement?.debitAtomic, "18479"); assert.equal(after.settlement?.deliveredAtomic, "1000");
   assert.equal(after.settlement?.unusedGrossAtomic, "6521");
-  const helper = helperRequest({ version: MM_HELPER_VERSION, mode: "submit", intent: mmDispatchIntent(after) });
+  // The helper is handed the dispatched batch with the sealed request id in place of the journal's hash.
+  const sent = mmProviderIntent(after, await mmRequestId(f.references, after));
+  assert.deepEqual(f.provider.submissions[0], sent);
+  const helper = helperRequest({ version: MM_HELPER_VERSION, mode: "submit", intent: sent });
   assert.equal(helper.mode, "submit");
   assert.equal((result.operation as any).fees.approved_sender_native_debit_wei, "0");
   assert.equal((result.operation as any).fees.proven_sender_native_debit_wei, "0");

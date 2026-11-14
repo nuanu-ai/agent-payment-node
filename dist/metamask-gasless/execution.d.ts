@@ -2,16 +2,17 @@ import type { ClockPort, WaitPort } from "../ports.js";
 import type { StateStore } from "../state.js";
 import type { MetaMaskGaslessOperationRecord } from "./operation-model.js";
 import { type MetaMaskGaslessSave, type MetaMaskGaslessStep } from "./observation.js";
-import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMaskGaslessRpcFactory } from "./ports.js";
+import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMaskGaslessRequestReferencePort, MetaMaskGaslessRpcFactory } from "./ports.js";
 export declare class MetaMaskGaslessExecution {
     private readonly state;
     private readonly rpcFor;
     private readonly provider;
+    private readonly references;
     private readonly save;
     private readonly wait;
     private readonly clock;
     private readonly observation;
-    constructor(state: StateStore, rpcFor: MetaMaskGaslessRpcFactory, provider: MetaMaskGaslessProviderPort, clock: ClockPort, save: MetaMaskGaslessSave, wait: WaitPort);
+    constructor(state: StateStore, rpcFor: MetaMaskGaslessRpcFactory, provider: MetaMaskGaslessProviderPort, references: MetaMaskGaslessRequestReferencePort, clock: ClockPort, save: MetaMaskGaslessSave, wait: WaitPort);
     /** `siblings` are the account's earlier unresolved transfers, collected by the caller before this approval screen. */
     approve(op: MetaMaskGaslessOperationRecord, approval: MetaMaskGaslessApprovalPort, siblings: readonly MetaMaskGaslessOperationRecord[]): Promise<MetaMaskGaslessStep>;
     /** `siblings` as for `approve`; they are only compared, so a dispatched operation that only observes needs none. */

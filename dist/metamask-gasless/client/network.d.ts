@@ -1,8 +1,9 @@
 import type { ProjectWalletFacts, ReadNetwork, RelaySupportFacts, UsdcShortfallFacts } from "./read-diagnostic.js";
 import { type SubmitCheck, type SubmitPost } from "./submit-diagnostic.js";
 import { type SentinelFailure } from "./sentinel.js";
-import type { MetaMaskGaslessIntent, MetaMaskGaslessQuote } from "../model.js";
+import type { MetaMaskGaslessProviderIntent, MetaMaskGaslessQuote } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
+import type { MetaMaskServerRequestQuery } from "./server-request.js";
 export interface FetchExchangeRequest {
     readonly url: string;
     readonly method: "GET" | "POST";
@@ -32,10 +33,15 @@ export type ModeContext = {
     readonly projectId: string;
 } | {
     readonly mode: "submit" | "observe";
-    readonly intent: MetaMaskGaslessIntent;
+    readonly intent: MetaMaskGaslessProviderIntent;
     readonly projectId: string;
     readonly token: string;
     readonly now: () => Date;
+} | {
+    readonly mode: "readRequest";
+    readonly query: MetaMaskServerRequestQuery;
+    readonly projectId: string;
+    readonly token: string;
 };
 export declare class HelperNetworkPolicy {
     #private;
@@ -73,6 +79,8 @@ export declare class HelperNetworkPolicy {
     /** Only the exact failed original quote exchange may supply this private one-use capture. */
     takeSponsoredQuote(error: unknown): MetaMaskGaslessQuote | undefined;
     didObserveNotFound(): boolean;
+    /** The SHA-256 of the server request read's 2xx answer bytes, once it came; never the answer itself. */
+    requestBodyHash(): string | undefined;
     fixedFailure(): "mm_gasless_expired" | "mm_gasless_clock" | "mm_gasless_session_unavailable" | undefined;
     setExpectedSubmitBody(value: unknown): void;
     primeSubmitClock(value: Date): void;
@@ -95,6 +103,7 @@ export declare class HttpsFetchExchange implements FetchExchange {
     request(request: FetchExchangeRequest): Promise<FetchExchangeResponse>;
 }
 export declare function networkContextQuote(input: MetaMaskGaslessQuoteInput, owner: string, authToken: string, projectId: string): ModeContext;
-export declare function networkContextRequest(mode: "submit" | "observe", intent: MetaMaskGaslessIntent, projectId: string, token: string, now: () => Date): ModeContext;
+export declare function networkContextRequest(mode: "submit" | "observe", intent: MetaMaskGaslessProviderIntent, projectId: string, token: string, now: () => Date): ModeContext;
 export declare function networkContextEmpty(mode: "inspect" | "buildUnsigned"): ModeContext;
+export declare function networkContextServerRequest(query: MetaMaskServerRequestQuery, projectId: string, token: string): ModeContext;
 export {};

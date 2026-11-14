@@ -9,13 +9,15 @@ import { encodeFunctionData, keccak256, parseAbi } from "viem";
 import { ApnCore } from "../../src/core.js";
 import { canonicalJson, hashObject, sha256 } from "../../src/canonical.js";
 import type { Address, Hex } from "../../src/model.js";
+import type { WrappingSecretPort } from "../../src/macos-keychain.js";
+import { EncryptedMetaMaskGaslessRequestReferenceStore } from "../../src/metamask-gasless/journal/request-reference.js";
 import { StateStore } from "../../src/state.js";
 import { accountBindingHash, capabilityHash, metamaskDirectCapabilitySnapshot,
   type ProviderProfileRecord } from "../../src/provider-profile.js";
 import { mmPrivateHash, mmWalletIdentityHash } from "../../src/metamask-gasless/identity.js";
 import type { MetaMaskGaslessBinding, MetaMaskGaslessBlock, MetaMaskGaslessChainId, MetaMaskGaslessChainState,
-  MetaMaskGaslessCursor, MetaMaskGaslessIntent, MetaMaskGaslessObservation, MetaMaskGaslessProviderObservation,
-  MetaMaskGaslessRequest, MetaMaskGaslessRpcObservation, MetaMaskGaslessUnsignedDelegation } from "../../src/metamask-gasless/model.js";
+  MetaMaskGaslessCursor, MetaMaskGaslessIntent, MetaMaskGaslessObservation, MetaMaskGaslessProviderIntent,
+  MetaMaskGaslessProviderObservation, MetaMaskGaslessRequest, MetaMaskGaslessRpcObservation, MetaMaskGaslessUnsignedDelegation } from "../../src/metamask-gasless/model.js";
 import type { MetaMaskGaslessOperationRecord } from "../../src/metamask-gasless/operation-model.js";
 import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMaskGaslessQuoteInput,
   MetaMaskGaslessRepositoryPort, MetaMaskGaslessRpcPort, MetaMaskGaslessUnsignedInput } from "../../src/metamask-gasless/ports.js";
@@ -43,6 +45,18 @@ export class MmTestWait implements WaitPort {
   nowMs() { return 0; }
   async wait(milliseconds: number) { this.waits.push(milliseconds); return this.result; }
 }
+/** A fixed synthetic wrapping secret; each load hands out its own copy, as the Keychain port does. Never the Keychain. */
+export class MmTestWrappingSecret implements WrappingSecretPort {
+  loads = 0;
+  secret: Buffer | null = Buffer.alloc(32, 7);
+  /** Thrown by load when set, as a locked or refused Keychain would. */
+  failure: Error | undefined;
+  async load() {
+    this.loads += 1; if (this.failure !== undefined) throw this.failure;
+    return this.secret === null ? null : Buffer.from(this.secret);
+  }
+  async create() { const secret = this.secret ?? Buffer.alloc(32, 7); this.secret = secret; return Buffer.from(secret); }
+}
 export class MmTestApproval implements MetaMaskGaslessApprovalPort {
   calls: Parameters<MetaMaskGaslessApprovalPort["confirm"]>[0][] = [];
   accepted = true;
@@ -57,7 +71,7 @@ export class MmTestApproval implements MetaMaskGaslessApprovalPort {
 export class MmTestProvider implements MetaMaskGaslessProviderPort {
   calls: string[] = [];
   quotes: MetaMaskGaslessQuoteInput[] = [];
-  submissions: MetaMaskGaslessIntent[] = [];
+  submissions: MetaMaskGaslessProviderIntent[] = [];
   fees = ["50000"];
   feeAt = 0;
   failSubmit = false;
@@ -69,7 +83,7 @@ export class MmTestProvider implements MetaMaskGaslessProviderPort {
   failInspect = false;
   status: MetaMaskGaslessProviderObservation["status"] = "broadcasted";
   txHash: Hex | null = mmTestWord("transaction-a");
-  beforeSubmit: ((intent: MetaMaskGaslessIntent) => Promise<void>) | undefined;
+  beforeSubmit: ((intent: MetaMaskGaslessProviderIntent) => Promise<void>) | undefined;
   constructor(public binding: MetaMaskGaslessBinding, readonly now: Date) {}
   async inspect() { this.calls.push("inspect"); if (this.failInspect) throw new Error("private_identity_canary"); return this.binding; }
   async quote(input: MetaMaskGaslessQuoteInput) {
@@ -96,17 +110,17 @@ export class MmTestProvider implements MetaMaskGaslessProviderPort {
         verifyingContract: row.protocol.manager.address }, types, official) as Hex,
       relayTo: row.protocol.manager.address, mode: MM_BATCH_MODE };
   }
-  async submit(intent: MetaMaskGaslessIntent) {
+  async submit(intent: MetaMaskGaslessProviderIntent) {
     this.calls.push("submit"); this.submissions.push(structuredClone(intent)); await this.beforeSubmit?.(intent);
     if (this.submitError !== undefined) throw this.submitError;
     if (this.failSubmit) throw new Error("private_submit_canary");
     return this.hint(intent);
   }
-  async observe(intent: MetaMaskGaslessIntent) {
+  async observe(intent: MetaMaskGaslessProviderIntent) {
     this.calls.push("observe"); if (this.observeError !== undefined) throw this.observeError;
     if (this.failObserve) throw new Error("private_observe_canary"); return this.hint(intent);
   }
-  hint(intent: MetaMaskGaslessIntent): MetaMaskGaslessProviderObservation {
+  hint(intent: MetaMaskGaslessProviderIntent): MetaMaskGaslessProviderObservation {
     return { observedAt: this.now.toISOString(), requestIdHash: mmPrivateHash("request-id", intent.requestId),
       status: this.status, txHash: this.txHash };
   }
@@ -195,7 +209,9 @@ export async function mmFixture(root: string, chainId: MetaMaskGaslessChainId = 
     projectHash: mmPrivateHash("project", "synthetic-project"), walletReferenceHash: mmPrivateHash("wallet-reference", "synthetic-wallet", "name"),
     walletIdHash: mmWalletIdentityHash(MM_TEST_OWNER), namespace: "eip155", mode: "server", environment: "prod" };
   const provider = new MmTestProvider(binding, now), rpc = new MmTestRpc(chainId, now, designation), approval = new MmTestApproval();
-  const dependencies = { rpcFor: (selected: MetaMaskGaslessChainId) => { assert.equal(selected, chainId); return rpc; }, provider, approval };
+  const wrapping = new MmTestWrappingSecret(), references = new EncryptedMetaMaskGaslessRequestReferenceStore(state, wrapping);
+  const dependencies = { rpcFor: (selected: MetaMaskGaslessChainId) => { assert.equal(selected, chainId); return rpc; }, provider,
+    references, approval };
   const abandon = options.abandonApproval ? { operationAbandonApproval: options.abandonApproval } : {};
   const clock = { now: () => new Date(now) }, wait = new MmTestWait();
   const makeCore = (records?: MetaMaskGaslessRepositoryPort) => new ApnCore({ state, clock, wait,
@@ -213,8 +229,8 @@ export async function mmFixture(root: string, chainId: MetaMaskGaslessChainId = 
     return { id, input, operation: await record(id) };
   };
   const restart = () => new ApnCore({ state: new StateStore(root), metaMaskGasless: dependencies, clock, wait, ...abandon });
-  return { state, now, profile, publicProfile, binding, provider, rpc, approval, dependencies, clock, wait, advance,
-    makeCore, core, request, prepare, record, restart };
+  return { state, now, profile, publicProfile, binding, provider, rpc, approval, wrapping, references, dependencies, clock, wait,
+    advance, makeCore, core, request, prepare, record, restart };
 }
 
 /** Replaces the saved journal file as an earlier release could have left it; the reader must still accept it. */

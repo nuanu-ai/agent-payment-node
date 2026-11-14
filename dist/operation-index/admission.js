@@ -11,4 +11,15 @@ export async function admitOperation(state, identity, claims, work, holds = []) 
 export async function assertClaimsAvailable(state, profileHash, claims) {
     await new OperationIndex(state).assertAvailable({ family: null, profileHash, claims });
 }
+/**
+ * The approve-time account guard of a saved operation outside the OperationService facade, called right before its own
+ * approve or execute starts the effect (QA F03): an entry the index let go by the wall clock (a never-started record
+ * past its deadline plus the unstarted margin) while its record is open again by its family's rule (the clock went back)
+ * is admitted again, refused with APN_OPERATION_BLOCKED and left released while another unresolved operation holds one
+ * of its accounts. An entry that held its claims since its admission passes. `options` carry the family's admission
+ * tag and the quarantines its admission waited for. Nothing is written to the family's record.
+ */
+export async function assertOwnClaimsAvailable(state, operationId, options = {}) {
+    await new OperationIndex(state).assertOwnClaimsAvailable(operationId, options);
+}
 //# sourceMappingURL=admission.js.map

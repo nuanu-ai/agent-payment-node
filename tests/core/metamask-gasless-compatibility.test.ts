@@ -33,8 +33,10 @@ import {
   MmTestApproval,
   MmTestProvider,
   MmTestRpc,
+  MmTestWrappingSecret,
   mmFixture,
 } from "./metamask-gasless-helpers.js";
+import { EncryptedMetaMaskGaslessRequestReferenceStore } from "../../src/metamask-gasless/journal/request-reference.js";
 import { TestHttp } from "./x402-helpers.js";
 import { X402_URL } from "./x402-vectors.js";
 
@@ -417,7 +419,8 @@ async function mmCoreFor(state: StateStore, profile: string) {
     walletReferenceHash: mmPrivateHash("wallet-reference", "synthetic-wallet", "name"),
     walletIdHash: mmWalletIdentityHash(MM_TEST_OWNER), namespace: "eip155", mode: "server", environment: "prod" };
   const provider = new MmTestProvider(binding, now), rpc = new MmTestRpc(8453, now), approval = new MmTestApproval();
-  const dependencies = { rpcFor: () => rpc, provider, approval };
+  const references = new EncryptedMetaMaskGaslessRequestReferenceStore(state, new MmTestWrappingSecret());
+  const dependencies = { rpcFor: () => rpc, provider, references, approval };
   const core = new ApnCore({ state, metaMaskGasless: dependencies, clock: { now: () => new Date(now) } });
   const request: MetaMaskGaslessRequest = { chainId: 8453, recipient: MM_TEST_RECIPIENT,
     grossAtomic: "10000000", maxFeeAtomic: "50000", minReceivedAtomic: "9950000" };

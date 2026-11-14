@@ -3,7 +3,8 @@ import type { MetaMaskSubmitDiagnostic } from "./client/submit-diagnostic.js";
 import { takeObserveDiagnostic, type MetaMaskObserveDiagnostic } from "./client/observe-diagnostic.js";
 import type { MetaMaskGaslessClock } from "./clock.js";
 import { mmDispatchIntent } from "./dispatch.js";
-import { mmPrivateHash } from "./identity.js";
+import { mmRequestIdHash } from "./identity.js";
+import { mmProviderIntent, mmRequestId } from "./journal/request-reference.js";
 import { assertMetaMaskGaslessObservable, metaMaskGaslessObservationRoom,
   metaMaskGaslessObservationUnchanged } from "./journal/transitions.js";
 import type { MetaMaskGaslessCursor, MetaMaskGaslessMutable, MetaMaskGaslessObservation, MetaMaskGaslessProviderObservation,
@@ -11,7 +12,8 @@ import type { MetaMaskGaslessCursor, MetaMaskGaslessMutable, MetaMaskGaslessObse
 import { MM_CLOSED_PROVIDER_STATUSES, MM_PROVIDER_STATUSES } from "./model.js";
 import { MM_PROVED_AFTER_ABANDON, MM_TERMINAL, type MetaMaskGaslessOperationRecord } from "./operation-model.js";
 import { metaMaskGaslessOwner } from "./owner.js";
-import type { MetaMaskGaslessProviderPort, MetaMaskGaslessRpcFactory, MetaMaskGaslessRpcPort } from "./ports.js";
+import type { MetaMaskGaslessProviderPort, MetaMaskGaslessRequestReferencePort, MetaMaskGaslessRpcFactory,
+  MetaMaskGaslessRpcPort } from "./ports.js";
 import { mmClassify, mmFail, mmFailure, type MetaMaskGaslessFailure, type MetaMaskGaslessFailureReason } from "./reasons.js";
 import { mmExact, mmHex, mmIso } from "./validation.js";
 
@@ -47,7 +49,7 @@ export function metaMaskGaslessProviderObservation(value: unknown,
   op: MetaMaskGaslessOperationRecord): MetaMaskGaslessProviderObservation {
   const p = mmExact(value, ["observedAt", "requestIdHash", "status", "txHash"], "mm_gasless_evidence_invalid");
   mmIso(p.observedAt, "mm_gasless_evidence_invalid");
-  if (p.requestIdHash !== mmPrivateHash("request-id", op.intent.requestId) ||
+  if (p.requestIdHash !== mmRequestIdHash(op.intent) ||
     !(MM_PROVIDER_STATUSES as readonly string[]).includes(String(p.status))) mmFail("mm_gasless_evidence_invalid");
   if (p.txHash !== null) mmHex(p.txHash, 32, "mm_gasless_evidence_invalid");
   return p as unknown as MetaMaskGaslessProviderObservation;
@@ -55,8 +57,9 @@ export function metaMaskGaslessProviderObservation(value: unknown,
 
 export class MetaMaskGaslessObservationService {
   constructor(private readonly state: StateStore, private readonly rpcFor: MetaMaskGaslessRpcFactory,
-    private readonly provider: MetaMaskGaslessProviderPort, private readonly clock: MetaMaskGaslessClock,
-    private readonly save: MetaMaskGaslessSave, private readonly observer?: MetaMaskGaslessObserver) {}
+    private readonly provider: MetaMaskGaslessProviderPort, private readonly references: MetaMaskGaslessRequestReferencePort,
+    private readonly clock: MetaMaskGaslessClock, private readonly save: MetaMaskGaslessSave,
+    private readonly observer?: MetaMaskGaslessObserver) {}
 
   /**
    * One bounded observation. An operation the owner abandoned is observed the same way (provider status bound to the
@@ -134,12 +137,18 @@ export class MetaMaskGaslessObservationService {
       endpointOrigin: observer.rpc.endpointOrigin, endpointHash: observer.rpc.endpointHash } };
   }
 
+  /**
+   * The provider's job for this request, read by its id. A sealed request id that cannot be opened (absent, damaged,
+   * another operation's, or its wrapping secret unavailable) is a failed read like any other: the chain is still observed,
+   * and nothing is sent.
+   */
   private async readProvider(op: MetaMaskGaslessOperationRecord): Promise<MetaMaskGaslessProviderRead> {
     try {
       await metaMaskGaslessOwner(this.state, op.intent.profile, op.intent.binding); this.clock.check(op);
+      const requestId = await mmRequestId(this.references, op); this.clock.check(op);
       const hint = await this.state.withLocks(["provider-session:metamask-agent-wallet"], async () => {
         this.clock.check(op);
-        const value = await this.provider.observe(mmDispatchIntent(op)); this.clock.check(op);
+        const value = await this.provider.observe(mmProviderIntent(op, requestId)); this.clock.check(op);
         return metaMaskGaslessProviderObservation(value, op);
       });
       this.clock.check(op, [hint.observedAt]);
@@ -161,7 +170,7 @@ export class MetaMaskGaslessObservationService {
     // A closed provider job is final: a failed read (an expired session included) cannot replace what it said.
     if (closedProvider(op.providerObservation)) return op.providerObservation;
     return { observedAt: new Date(this.clock.check(op)).toISOString(),
-      requestIdHash: mmPrivateHash("request-id", op.intent.requestId), status: "unavailable", txHash: previousHash };
+      requestIdHash: mmRequestIdHash(op.intent), status: "unavailable", txHash: previousHash };
   }
 
   private decide(op: MetaMaskGaslessOperationRecord, chain: MetaMaskGaslessRpcObservation,

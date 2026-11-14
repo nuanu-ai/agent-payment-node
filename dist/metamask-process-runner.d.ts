@@ -1,5 +1,5 @@
 import { type MetaMaskNativeDeadlineInput, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
-import { type MetaMaskMfaNotice } from "./metamask-process-output.js";
+import { type MetaMaskMfaNotice, type MetaMaskRequestNotFound } from "./metamask-process-output.js";
 import { type MetaMaskProcessObservation } from "./metamask-process-observation.js";
 import type { Hex } from "./model.js";
 interface NativeFailureIdentifiers {
@@ -52,6 +52,11 @@ export interface MetaMaskProcessResult {
     readonly nativeDiagnostic?: MetaMaskNativeDiagnostic;
     /** Taken from both streams before they are zeroed; the caller decides whether to show it. */
     readonly observation?: MetaMaskProcessObservation;
+    /**
+     * `wallet requests watch <id>` only: where its REQUEST_NOT_FOUND answer on stderr says the request was not found
+     * (metamask-process-output.ts). Absent for every other command and answer. A fact about mm's lookup, never an outcome.
+     */
+    readonly requestNotFound?: MetaMaskRequestNotFound;
 }
 export interface MetaMaskProcessRunnerPort {
     runJson(argv: readonly string[], timeoutMs?: number, absoluteDeadline?: MetaMaskNativeDeadlineInput): Promise<MetaMaskProcessResult>;

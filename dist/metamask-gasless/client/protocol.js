@@ -1,6 +1,7 @@
 import { readDataRecord, validateReadDiagnostic } from "./read-diagnostic.js";
 import { validateSubmitDiagnostic } from "./submit-diagnostic.js";
 import { validateObserveDiagnostic } from "./observe-diagnostic.js";
+import { serverRequestQuery, serverRequestRead } from "./server-request.js";
 import { isPlainRecord } from "../../canonical.js";
 import { MM_PROVIDER_STATUSES } from "../model.js";
 import { mmAssertProfileBinding, mmBinding, mmPrivateHash } from "../identity.js";
@@ -29,6 +30,10 @@ export function helperRequest(value) {
         const r = mmExact(value, ["version", "mode", "intent"], "mm_gasless_input");
         return { version: MM_HELPER_VERSION, mode: value.mode, intent: intent(r.intent) };
     }
+    if (value.mode === "readRequest") {
+        const r = mmExact(value, ["version", "mode", "query"], "mm_gasless_input");
+        return { version: MM_HELPER_VERSION, mode: "readRequest", query: serverRequestQuery(r.query) };
+    }
     return mmFail("mm_gasless_input");
 }
 export function helperResponse(value, request) {
@@ -40,7 +45,7 @@ export function helperResponse(value, request) {
         const readMode = request.mode === "inspect" || request.mode === "quote" ? request.mode : null;
         const hasDiagnostic = readMode !== null && Object.hasOwn(value, "diagnostic");
         const hasSubmitDiagnostic = request.mode === "submit" && Object.hasOwn(value, "submitDiagnostic");
-        const hasObserveDiagnostic = request.mode === "observe" && Object.hasOwn(value, "observeDiagnostic");
+        const hasObserveDiagnostic = (request.mode === "observe" || request.mode === "readRequest") && Object.hasOwn(value, "observeDiagnostic");
         const r = mmExact(value, ["version", "ok", "failure", ...(hasDiagnostic ? ["diagnostic"] : []), ...(hasSubmitDiagnostic ? ["submitDiagnostic"] : []),
             ...(hasObserveDiagnostic ? ["observeDiagnostic"] : [])], responseReason(request.mode));
         const f = mmExact(readMode === null ? r.failure : readDataRecord(r.failure), ["code", "reason"], responseReason(request.mode));
@@ -66,6 +71,8 @@ export function helperResponse(value, request) {
         quoteOutput(r.result, request.input);
     else if (request.mode === "buildUnsigned")
         mmValidateUnsigned(r.result, request.input, responseReason(request.mode));
+    else if (request.mode === "readRequest")
+        serverRequestRead(r.result, request.query);
     else
         observation(r.result, request.intent);
     return value;

@@ -29,8 +29,8 @@ export class ProviderPermissionService {
                     return publicPendingPermissionProfile(profile, pending.adapter, pending.permission, Math.floor(this.context.clock.now().getTime() / 1000));
                 }
                 if (request.command === "wallet.permission.forget") {
-                    assertPendingExpectedRevision(pending.permission.revision, request.expectedRevision);
-                    const forgotten = await pending.lifecycle.forget(profileHash, request.expectedRevision);
+                    assertCurrentRevision(request, profile, pending.permission.revision);
+                    const forgotten = await staleRevisionGuidance(request, profile, pending.lifecycle.forget(profileHash, request.expectedRevision));
                     return forgottenOutput(profile, pending.adapter.provider_id, forgotten.warning);
                 }
                 throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The provider permission is pending consent; retry the exact connect intent while it is live, or forget the current revision first.", { nextActions: pendingPermissionNextActions(profile, pending.permission, Math.floor(this.context.clock.now().getTime() / 1000)) });
@@ -39,9 +39,9 @@ export class ProviderPermissionService {
             bound = mutable ? await upgradeProviderProfile(adapter, bound, repository) : await previewProviderProfile(adapter, bound);
             const permissions = requirePermissions(adapter.permissions, profile);
             if (request.command === "wallet.permission.forget") {
-                assertExpectedRevision(bound, request.expectedRevision);
+                assertCurrentRevision(request, profile, bound.revision);
                 const current = await permissions.read(profileHash);
-                const forgotten = await permissions.forget(profileHash, current?.revision ?? request.expectedRevision);
+                const forgotten = await staleRevisionGuidance(request, profile, permissions.forget(profileHash, current?.revision ?? request.expectedRevision));
                 await repository.remove(profileHash);
                 return forgottenOutput(profile, bound.provider_id, forgotten.warning);
             }
@@ -49,11 +49,11 @@ export class ProviderPermissionService {
             if (request.command === "wallet.permission.list")
                 permission = await permissions.read(profileHash);
             else {
-                assertExpectedRevision(bound, request.expectedRevision);
+                assertCurrentRevision(request, profile, bound.revision);
                 const current = await requireCurrentPermission(permissions, profileHash);
-                permission = request.command === "wallet.permission.sync"
-                    ? await permissions.sync(profileHash, current.revision)
-                    : await permissions.disable(profileHash, current.revision);
+                permission = await staleRevisionGuidance(request, profile, request.command === "wallet.permission.sync"
+                    ? permissions.sync(profileHash, current.revision)
+                    : permissions.disable(profileHash, current.revision));
             }
             if (permission === null)
                 throw new ApnError("APN_STATE_CORRUPT", "The provider profile has no committed permission.");
@@ -88,19 +88,37 @@ async function requireCurrentPermission(permissions, profileHash) {
         throw new ApnError("APN_STATE_CORRUPT", "The provider profile has no committed permission.");
     return permission;
 }
-function assertExpectedRevision(profile, expectedRevision) {
-    if (profile.revision !== expectedRevision) {
-        throw new ApnError("APN_PROFILE_REVISION_CONFLICT", "The expected Smart Account permission revision is stale.", {
-            current_revision: String(profile.revision),
+/**
+ * The revision a guarded command names must be the one `wallet permission list` shows as `revision` (the provider
+ * profile's, or a pending intent's own). A stale one is read again there and the same command repeated with it; it is
+ * never a reason to reconnect, which would ask MetaMask for a new permission.
+ */
+function assertCurrentRevision(request, profile, currentRevision) {
+    if (currentRevision !== request.expectedRevision) {
+        throw new ApnError("APN_PROFILE_REVISION_CONFLICT", "The expected Smart Account permission revision is stale; read the " +
+            "current revision with wallet permission list and repeat this command with it.", {
+            current_revision: String(currentRevision),
+            nextActions: staleRevisionNextActions(request, profile),
         });
     }
 }
-function assertPendingExpectedRevision(currentRevision, expectedRevision) {
-    if (currentRevision !== expectedRevision) {
-        throw new ApnError("APN_PROFILE_REVISION_CONFLICT", "The expected Smart Account permission revision is stale.", {
-            current_revision: String(currentRevision),
-        });
+/** A revision that moved between that check and the provider lifecycle's own compare-and-set gets the same guidance. */
+async function staleRevisionGuidance(request, profile, action) {
+    try {
+        return await action;
     }
+    catch (error) {
+        if (!(error instanceof ApnError) || error.code !== "APN_PROFILE_REVISION_CONFLICT" || error.details?.nextActions !== undefined)
+            throw error;
+        throw new ApnError(error.code, error.message, { ...error.details, nextActions: staleRevisionNextActions(request, profile) });
+    }
+}
+function staleRevisionNextActions(request, profile) {
+    const verb = request.command.slice("wallet.permission.".length);
+    return [
+        `apn wallet permission list --profile ${profile}`,
+        `apn wallet permission ${verb} --profile ${profile} --expected-revision <revision>`,
+    ];
 }
 function forgottenOutput(profile, provider, warning) {
     return {

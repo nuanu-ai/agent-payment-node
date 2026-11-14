@@ -25,6 +25,12 @@ export declare class MerchantExits {
     settle(o: MerchantOperation): Promise<MerchantOperation | null>;
     /** `landed`: the node holds a receipt for the attempt's transaction, so observation (not an exit) records its outcome. */
     private decide;
+    /**
+     * Approve's own exit when its account check right after `signing_started` refuses (QA F03): custody was never asked,
+     * no SIGN claim or sealed bytes exist and nothing was sent, so the attempt ends `failed_before_effect` (`never_signed`)
+     * now and both holds it reserved are released, as observe would after the deadline. The caller holds merchantLocks.
+     */
+    closeBeforeSigning(o: MerchantOperation): Promise<MerchantOperation>;
     abandon(idInput: string, consent: OperationAbandonApprovalPort): Promise<MerchantOperation>;
     /** Holds first (a retry after a crash repeats the same outcome digest), then the terminal record. */
     private finish;

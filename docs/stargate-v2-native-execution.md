@@ -83,6 +83,10 @@ Foreground approval records `approved`. Before signing, APN:
 - requires the frozen fee envelope to remain includable (otherwise `fee_spike`);
 - simulates the exact frozen call with the frozen value and fee envelope;
 - requires a fresh gas estimate to remain within the frozen gas limit;
+- after these network reads and before the usage hold, re-admits the operation in the operation index when a machine
+  clock that ran ahead released it and then went back: `APN_OPERATION_BLOCKED` while another unresolved operation holds
+  the Ethereum account, leaving it `approved` (only the hold, the local signature and the marker follow; a refusal
+  inside them would release the hold and need a new prepare, so the check stays here);
 - reopens the encrypted signer profile to verify its address (otherwise `signer_identity_changed`);
 - after signing, checks the prepared expiry again (otherwise `APN_REPREPARE_REQUIRED`, `expired_before_marker`).
 
@@ -101,6 +105,11 @@ send again.
 - Safe source confirmation must contain the exact official `OFTSent` event.
 - Completion requires a safe Unichain `OFTReceived` emitted by the pinned destination pool and bound to the exact source
   EID, GUID, recipient and frozen received amount.
+- The `OFTReceived` block must be after the frozen destination baseline block and at or below the safe head. The
+  baseline is the block whose balance APN read before the send was signed, so a log in that block or earlier predates
+  the operation. An RPC that ignores the `eth_getLogs` `fromBlock` or `toBlock` can return a log outside that range.
+  APN skips such a log, as the token lane does. The operation stays pending. A later observe can use the same log once
+  the safe head reaches its block.
 - A balance delta is recorded only as corroboration and never terminalizes delivery.
 - The versioned route finality policy is frozen in the operation and canonical receipt: Ethereum and Unichain both use
   `safe`. The selected tag is never weakened to `latest` or `pending`.

@@ -33,10 +33,11 @@ export const metaMaskNativeAdapter: OperationFamilyAdapter<MetaMaskNativeOperati
   async resume(context, record, options) {
     assertResumeOptions(options, { refuseWait: () => oneObservationOnly("MetaMask native transfer") });
     return dataOutcome(await (await import("../../metamask-native-transfer-owner.js"))
-      .readMetaMaskNativeTransfer(context.state.root, record.operationId, true), "durable_public_state");
+      .readMetaMaskNativeTransfer(context.state.root, record.operationId, true, context.providerRequestReferences), "durable_public_state");
   },
   // An outcome that stayed unknown after the quote expired has the owner exit (R4), behind TTY consent.
   abandon: async (context, record) => await (await import("../../metamask-native-transfer-owner.js")).abandonMetaMaskNativeTransfer(
-    context.state.root, record.operationId, async intent => await context.requireOperationAbandonApproval().approve(intent), () => context.clock.now()),
+    context.state.root, record.operationId, async intent => await context.requireOperationAbandonApproval().approve(intent), () => context.clock.now(),
+    context.providerRequestReferences),
   commands: { status: OPERATION_STATUS, resume: OPERATION_RESUME, exit: OPERATION_ABANDON },
 };

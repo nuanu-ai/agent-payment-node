@@ -3,7 +3,7 @@ import { captureSponsoredQuote, parseSentinelResponse, sentinelFailure, sentinel
 import { MM_SENTINEL_NETWORKS_ENDPOINT, MM_SERVER_WALLET_NETWORKS_ENDPOINT, mmProjectWalletsUrl } from "./provider-endpoints.js";
 import { readProjectWallets } from "./project-wallets.js";
 import { request as httpsRequest } from "node:https";
-import { canonicalJson, exactKeys, isPlainRecord } from "../../canonical.js";
+import { canonicalJson, exactKeys, isPlainRecord, sha256 } from "../../canonical.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress } from "../../network-policy.js";
 import { MM_SENTINEL_SLUG, mmRegistry } from "../registry.js";
 import { mmFail } from "../reasons.js";
@@ -22,6 +22,7 @@ export class HelperNetworkPolicy {
     counts = new Map();
     successes = new Set();
     notFound = false;
+    #requestBodyHash;
     #sponsoredProof;
     #sponsoredAccepted = false;
     expectedSubmitBody;
@@ -89,6 +90,8 @@ export class HelperNetworkPolicy {
         return quote;
     }
     didObserveNotFound() { return this.notFound; }
+    /** The SHA-256 of the server request read's 2xx answer bytes, once it came; never the answer itself. */
+    requestBodyHash() { return this.#requestBodyHash; }
     fixedFailure() {
         return this.deadlineFailure ?? (this.sessionFailure ? "mm_gasless_session_unavailable" : undefined);
     }
@@ -109,7 +112,8 @@ export class HelperNetworkPolicy {
     assertComplete() {
         const expected = this.context.mode === "quote" ? ["project-wallets", "mimir-networks", "accounts-networks", "sentinel-networks",
             "rpc-decimals", ...(this.#sponsoredAccepted ? [] : ["rpc-balance"]), "sentinel-quote"] :
-            this.context.mode === "submit" ? ["submit"] : this.context.mode === "observe" ? ["observe"] : [];
+            this.context.mode === "submit" ? ["submit"] : this.context.mode === "observe" ? ["observe"] :
+                this.context.mode === "readRequest" ? ["read-request"] : [];
         const walletListed = this.context.mode !== "quote" || this.#projectWallets?.listed === true;
         if (this.counts.size !== expected.length || expected.some((key) => this.counts.get(key) !== 1) || !walletListed) {
             this.submitRefused("incomplete");
@@ -167,8 +171,10 @@ export class HelperNetworkPolicy {
             // The project's wallet list answers 200, or 404 for a project with none; any other status is refused with it recorded.
             if (key === "project-wallets" && response.status !== 200 && response.status !== 404)
                 mmFail("mm_gasless_provider_unavailable");
-            if (this.context.mode === "observe" && response.status === 404)
+            if ((this.context.mode === "observe" || this.context.mode === "readRequest") && response.status === 404)
                 this.notFound = true;
+            if (key === "read-request" && response.status >= 200 && response.status < 300)
+                this.#requestBodyHash = sha256(response.body);
             if (response.status >= 200 && response.status < 300) {
                 try {
                     if (key === "sentinel-quote" && response.status === 200 && this.context.mode === "quote" && body !== null)
@@ -246,6 +252,15 @@ export class HelperNetworkPolicy {
             mmFail("mm_gasless_provider_unavailable");
         if (this.context.mode === "quote")
             return classifyQuote(this.context, url, method, headers, body);
+        if (this.context.mode === "readRequest") {
+            // One GET of this request's own status in the session's project; the query's UUID keeps the path exact.
+            exactProviderUrl(url);
+            requireBearer(headers, this.context.token);
+            const own = `${MIMIR}/v1/projects/${encodeURIComponent(this.context.projectId)}/transaction-requests/${this.context.query.requestId}`;
+            if (url === own && method === "GET" && body === null)
+                return "read-request";
+            return mmFail("mm_gasless_provider_unavailable");
+        }
         if (this.context.mode !== "submit" && this.context.mode !== "observe")
             return mmFail("mm_gasless_provider_unavailable");
         exactProviderUrl(url);
@@ -563,4 +578,7 @@ export function networkContextQuote(input, owner, authToken, projectId) {
 }
 export function networkContextRequest(mode, intent, projectId, token, now) { return { mode, intent, projectId, token, now }; }
 export function networkContextEmpty(mode) { return { mode }; }
+export function networkContextServerRequest(query, projectId, token) {
+    return { mode: "readRequest", query: structuredClone(query), projectId, token };
+}
 //# sourceMappingURL=network.js.map

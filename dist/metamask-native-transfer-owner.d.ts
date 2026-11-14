@@ -2,6 +2,8 @@ import { type MetaMaskNativeDeadline, type MetaMaskNativeDiagnostic } from "./me
 import type { OperationAbandonIntent } from "./operation-abandon-approval.js";
 import { type MetaMaskNativeReadObservation } from "./metamask-native-transfer-adapter.js";
 import { type MetaMaskNativeOperation as NativeOperation, type MetaMaskNativeOwnedContext } from "./metamask-native-journal.js";
+import { type MetaMaskNativePublicReadObservation } from "./metamask-native-request-reference.js";
+import type { ProviderRequestReferencePort } from "./provider-request-reference-store.js";
 export type { MetaMaskNativeOwnedContext } from "./metamask-native-journal.js";
 /** Journal readers, also reachable here for callers that name the command module. */
 export { readMetaMaskNativeSettlement, readMetaMaskNativeReservation, assertMetaMaskNativeFailedBeforeEffect, assertMetaMaskNativeGenericCapacityRelease, metaMaskNativeOperationExists } from "./metamask-native-journal.js";
@@ -28,10 +30,12 @@ export declare function withNativeFeeCeiling(error: unknown, caps: {
     readonly perTransferWei: string;
     readonly dailyRemainingWei: string;
 }, profile: string): unknown;
-export declare function runMetaMaskNativeTransfer(stateRoot: string, input: MetaMaskNativeTransferInput): Promise<{
+/** `references` seals the MetaMask request id the hand-off may return; its wrapping secret is read before consent. */
+export declare function runMetaMaskNativeTransfer(stateRoot: string, input: MetaMaskNativeTransferInput, references: ProviderRequestReferencePort): Promise<{
     next_actions: string[];
     mfa_task?: never;
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    provider_request_reason?: "provider_request_reference_unsealed";
     diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;
     state: string;
@@ -49,10 +53,6 @@ export declare function runMetaMaskNativeTransfer(stateRoot: string, input: Meta
 } | {
     next_actions: string[];
     mfa_task: {
-        status: string;
-        provider: string;
-        provider_state: string;
-        request_id: string;
         auth_method: string | null;
         expires_at: string | null;
         observed_at: string;
@@ -60,8 +60,27 @@ export declare function runMetaMaskNativeTransfer(stateRoot: string, input: Meta
         evidence_hash: string;
         owner_action: string;
         observe_command: string;
+        request_id: string;
+        request_id_hash?: never;
+        status: string;
+        provider: string;
+        provider_state: string;
+    } | {
+        auth_method: string | null;
+        expires_at: string | null;
+        observed_at: string;
+        source: "send" | "watch";
+        evidence_hash: string;
+        owner_action: string;
+        observe_command: string;
+        request_id_hash: string;
+        request_id?: never;
+        status: string;
+        provider: string;
+        provider_state: string;
     };
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    provider_request_reason?: "provider_request_reference_unsealed";
     diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;
     state: string;
@@ -83,18 +102,23 @@ export declare function runMetaMaskNativeTransfer(stateRoot: string, input: Meta
  * The transfer stays UNKNOWN with its reserves charged; the next actions name the owner's only exit, abandonment after
  * the quote expired, which frees the account and keeps the reserves until the chain proves an outcome.
  */
-export declare function metaMaskNativeClosedRequestNextActions(op: Pick<NativeOperation, "operationId" | "state" | "transactionHash" | "providerRequestId" | "context">, read: MetaMaskNativeReadObservation | undefined): string[] | undefined;
+export declare function metaMaskNativeClosedRequestNextActions(op: Pick<NativeOperation, "operationId" | "state" | "transactionHash" | "providerRequestId" | "context">, read: Pick<MetaMaskNativeReadObservation, "request_identity_verified" | "provider_status"> | undefined): string[] | undefined;
 /**
  * Before a new transfer is admitted, every transfer of this account and chain that can never start is closed under its
  * own operation lock. Best effort: one that cannot be closed now no longer blocks (the family's own rule reads it as
  * resolved), and its next status closes it.
  */
 export declare function closeExpiredNativeTransfersOf(stateRoot: string, chainId: number, payer: string): Promise<void>;
-export declare function readMetaMaskNativeTransfer(stateRoot: string, idInput: string, observe?: boolean): Promise<{
-    read_observation?: MetaMaskNativeReadObservation;
+/**
+ * Status, and with `observe` one no-send read of the stored request or transaction. A record that seals its request id
+ * opens it from `references` first; one that cannot be opened refuses the read precisely, and nothing is read or written.
+ */
+export declare function readMetaMaskNativeTransfer(stateRoot: string, idInput: string, observe?: boolean, references?: ProviderRequestReferencePort): Promise<{
+    read_observation?: MetaMaskNativePublicReadObservation;
     next_actions: string[];
     mfa_task?: never;
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    provider_request_reason?: "provider_request_reference_unsealed";
     diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;
     state: string;
@@ -110,13 +134,9 @@ export declare function readMetaMaskNativeTransfer(stateRoot: string, idInput: s
     effect_attempts: 0 | 1;
     proof_class: string;
 } | {
-    read_observation?: MetaMaskNativeReadObservation;
+    read_observation?: MetaMaskNativePublicReadObservation;
     next_actions: string[];
     mfa_task: {
-        status: string;
-        provider: string;
-        provider_state: string;
-        request_id: string;
         auth_method: string | null;
         expires_at: string | null;
         observed_at: string;
@@ -124,8 +144,27 @@ export declare function readMetaMaskNativeTransfer(stateRoot: string, idInput: s
         evidence_hash: string;
         owner_action: string;
         observe_command: string;
+        request_id: string;
+        request_id_hash?: never;
+        status: string;
+        provider: string;
+        provider_state: string;
+    } | {
+        auth_method: string | null;
+        expires_at: string | null;
+        observed_at: string;
+        source: "send" | "watch";
+        evidence_hash: string;
+        owner_action: string;
+        observe_command: string;
+        request_id_hash: string;
+        request_id?: never;
+        status: string;
+        provider: string;
+        provider_state: string;
     };
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    provider_request_reason?: "provider_request_reference_unsealed";
     diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;
     state: string;
@@ -146,10 +185,11 @@ export declare function readMetaMaskNativeTransfer(stateRoot: string, idInput: s
  * never sends, keeps the stored transaction hash or request id, and leaves the held usage consumed. A transfer that
  * never reached its effect marker and whose consent has passed is closed as failed before effect instead (no consent).
  */
-export declare function abandonMetaMaskNativeTransfer(stateRoot: string, idInput: string, approve: (intent: OperationAbandonIntent) => Promise<void>, now: () => Date): Promise<{
+export declare function abandonMetaMaskNativeTransfer(stateRoot: string, idInput: string, approve: (intent: OperationAbandonIntent) => Promise<void>, now: () => Date, references?: ProviderRequestReferencePort): Promise<{
     next_actions: string[];
     mfa_task?: never;
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    provider_request_reason?: "provider_request_reference_unsealed";
     diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;
     state: string;
@@ -167,10 +207,6 @@ export declare function abandonMetaMaskNativeTransfer(stateRoot: string, idInput
 } | {
     next_actions: string[];
     mfa_task: {
-        status: string;
-        provider: string;
-        provider_state: string;
-        request_id: string;
         auth_method: string | null;
         expires_at: string | null;
         observed_at: string;
@@ -178,8 +214,27 @@ export declare function abandonMetaMaskNativeTransfer(stateRoot: string, idInput
         evidence_hash: string;
         owner_action: string;
         observe_command: string;
+        request_id: string;
+        request_id_hash?: never;
+        status: string;
+        provider: string;
+        provider_state: string;
+    } | {
+        auth_method: string | null;
+        expires_at: string | null;
+        observed_at: string;
+        source: "send" | "watch";
+        evidence_hash: string;
+        owner_action: string;
+        observe_command: string;
+        request_id_hash: string;
+        request_id?: never;
+        status: string;
+        provider: string;
+        provider_state: string;
     };
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    provider_request_reason?: "provider_request_reference_unsealed";
     diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;
     state: string;

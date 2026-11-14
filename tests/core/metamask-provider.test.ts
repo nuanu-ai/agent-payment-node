@@ -249,7 +249,7 @@ test("generic APN profile binds, restarts and reads independent Base balance", a
     reused: false,
     proof_class: "provider_profile_binding",
     funding_guidance: { network: "Base", asset: "USDC", address: ADDRESS_A, action: "Fund manually only; APN performs no funding action." },
-    next_actions: ["Use apn wallet balance with an explicit Base RPC URL"],
+    next_actions: ["Use apn wallet balance --profile metamask with an explicit Base RPC URL"],
   });
 
   const restarted = new FixtureRunner();

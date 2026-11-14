@@ -1,6 +1,6 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { assertRecipientAdmitted } from "../../allowlist-recipient-pins.js";
-import { evaluateAssetPolicy } from "../../asset-policy-registry.js";
+import { evaluateSwapAssetAdmission, swapPolicyStatusCommand } from "../owner-admission.js";
 import type { ActiveAssetPolicy } from "../../allowlist-active-policy.js";
 import type { AssetUsageLedger } from "../../asset-usage-ledger.js";
 import type { ChainAccount, ChainWalletStoragePort } from "../../direct-rail-ports.js";
@@ -33,13 +33,16 @@ export class JupiterV1OwnerAdmission {
  }
  async resolveRoute(profile:string, amountAtomic:string, minimumOutputAtomic:string, expected?:string, ownReservationAtomic="0"):Promise<{readonly route:JupiterV1RouteConfig;readonly routes:readonly JupiterV1RouteConfig[];readonly owner:JupiterV1OwnerBinding}>{
    const account=await this.localAccount(profile,expected), active=await this.activePolicy(profile), now=this.now(), at=now.toISOString();
-   if(active===null||active.profile!==profile||active.accounts.solana!==account.address||active.digest!==active.registry.policyDigest) blocked("The exact active owner policy is required.");
+   if(active===null)throw new ApnError("APN_OPERATION_BLOCKED","The exact active owner policy is required.",{reason:"jupiter_v1_owner_admission",nextActions:[swapPolicyStatusCommand(profile)]});
+   if(active.profile!==profile||active.accounts.solana!==account.address||active.digest!==active.registry.policyDigest) blocked("The exact active owner policy is required.");
    // Route admission (pool, programs) is generation-independent: every known route of an admitted pool matches.
    let admitted:readonly JupiterV1RouteConfig[]=JUPITER_V1_KNOWN_ROUTES;
    for(const [asset,amount] of [[{kind:"native" as const,identifier:null},amountAtomic],[{kind:"token" as const,identifier:"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"},minimumOutputAtomic]] as const){
      const used=await this.usage.usage({account:account.address,chain:JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.chain,asset},now);
-     const result=evaluateAssetPolicy(active.registry,{chain:JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.chain,asset,rail:"swap",amountAtomic:amount,
-       dailyUsageAtomic:asset.kind==="native"?(BigInt(used.amountAtomic)-BigInt(ownReservationAtomic)).toString():used.amountAtomic,asOfDate:at.slice(0,10),asOf:at});
+     // An asset the policy does not list or admit for swaps, or an amount above its cap, is named like the other swap lanes.
+     const result=evaluateSwapAssetAdmission(active.registry,{profile,side:asset.kind==="native"?"source":"destination",inventory:"apn swap solana jupiter inventory",
+       asset:{chain:JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.chain,...asset}},{amountAtomic:amount,
+       dailyUsageAtomic:asset.kind==="native"?(BigInt(used.amountAtomic)-BigInt(ownReservationAtomic)).toString():used.amountAtomic},at);
      // Jupiter pays only the owned payer, yet each row's recipient pin (OD-1) still decides: one without it refuses.
      assertRecipientAdmitted({admission:result,recipient:account.address});
      admitted=admitted.filter(r=>assetAdmitsSwapMechanism(result.asset,r.mechanismPin));

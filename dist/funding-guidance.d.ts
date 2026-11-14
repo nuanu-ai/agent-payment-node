@@ -6,8 +6,9 @@ export interface WalletFundingGuidance {
     };
     readonly next_actions: readonly string[];
 }
-/** Posture-aware funding advice: never suggests adding an asset that is at or above its owner limit. */
-export declare function walletFundingGuidance(usdcAtomic: string, ethAtomic: string, policy: ProfilePolicyRecord | null, postureActions: readonly string[]): WalletFundingGuidance;
+/** Posture-aware funding advice: never suggests adding an asset that is at or above its owner limit. The balance re-read
+ * names the profile asked about, never the default one. */
+export declare function walletFundingGuidance(profile: string, usdcAtomic: string, ethAtomic: string, policy: ProfilePolicyRecord | null, postureActions: readonly string[]): WalletFundingGuidance;
 export interface SelectedAssetFunding {
     readonly chainId: number;
     readonly kind: "native" | "erc20";

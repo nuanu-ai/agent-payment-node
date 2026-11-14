@@ -167,6 +167,19 @@ apn x402 permit2 status --profile <profile> --operation <operation-id>
 record `approve` and `observe` write. They return a redacted view: state, lifecycle, terminal flag, chain, payer,
 recipient, token, amount, deadline and resource origin.
 
+`capability` and `blockerCodes` say what can still run for the operation, the same in `approve`, `observe`, `status`,
+MCP `apn_x402_permit2_status` and the generic `operation status`:
+
+| Operation | `capability` | `blockerCodes` |
+| --- | --- | --- |
+| Terminal: `settled`, `expired_no_effect`, `released_unsubmitted` | `completed` | none |
+| Exposed: `exposure_unknown`, `request_pending`, `terminal_pending` | `observe_only` | none |
+| Unsigned: `prepared`, `reserving`, `reserved`, `release_pending` | `execution_blocked` | `permit2_production_execution_not_wired` |
+
+Only the foreground CLI `x402 permit2 approve` executes an unsigned operation; no MCP tool and no generic approve does.
+Through 0.5.106 every operation read `execution_blocked` with `permit2_production_execution_not_wired`, a settled
+payment too. The view is computed when it is read and is never stored, so earlier records read the new values.
+
 - A missing record returns `not_found` without creating anything.
 - A wrong profile, malformed records, invalid operation ids, unsafe permissions and symbolic links fail closed.
 - Status uses a non-mutating checked reader: no initialization, locks, repair, fsync, RPC, wallet, policy activation,
