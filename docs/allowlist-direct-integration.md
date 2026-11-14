@@ -97,17 +97,22 @@ anything is signed.
 - On EVM, the native signer approves and signs in one call, so the lease is written with `started` immediately before
   that call.
 
-**A failed reservation.** Nothing is signed or sent.
+**A failed check at approval.** Nothing is sent. On TRON and Solana the operation ends `failed_before_effect`, and each
+step keeps its reason only for its own refusal. Any other APN error, for example a state file or directory that fails
+its permission check (`APN_STATE_SECURITY`), is saved as `<prefix>_<error code in lower case>`, and a non-APN error as
+`<prefix>_failed`.
 
-| Rail | Cause | Journal |
-| --- | --- | --- |
-| TRON, Solana | The owner policy refuses (`APN_ALLOWLIST_REFUSED`) | `failed_before_effect`, reason `allowlist_refused_at_approval` |
-| TRON, Solana | Any other error, for example a ledger file or directory that fails its permission check (`APN_STATE_SECURITY`) | `failed_before_effect`, reason `usage_reservation_<error code in lower case>`, here `usage_reservation_apn_state_security` |
-| EVM | The owner policy refuses (`APN_ALLOWLIST_REFUSED`) | `failed_before_effect`, reason `allowlist_refused_at_approval` |
-| EVM | Any other error | Stays `awaiting_approval`; the command returns the error |
+| Rail | Step | Its own refusal: reason | Any other error: prefix |
+| --- | --- | --- | --- |
+| TRON, Solana | Chain revalidation and the owner approval screen | The owner's refusal on the screen (`APN_NATIVE_REJECTED`), an owner-policy refusal as below, or an expiry, funding, fee or custody refusal: `approval_or_pre_effect_validation_refused` | `approval_or_pre_effect_validation`, for example `approval_or_pre_effect_validation_apn_rpc_ambiguous` for a lost RPC answer |
+| TRON, Solana | Chain policy principal caps, before the reservation | `APN_PROFILE_DRIFT`, `APN_WALLET_POLICY_REQUIRED`, `APN_ALLOWLIST_REFUSED`, `APN_OPERATION_BLOCKED`: `chain_policy_refused_at_approval` | `chain_policy_check` |
+| TRON, Solana | Usage reservation | `APN_ALLOWLIST_REFUSED`: `allowlist_refused_at_approval` | `usage_reservation` |
+| Solana | Owner and policy re-check under the locks, before sealing | `APN_PROFILE_DRIFT`, `APN_WALLET_POLICY_REQUIRED`, `APN_ALLOWLIST_REFUSED`, `APN_OPERATION_BLOCKED`: `pre_sign_owner_or_policy_changed` | `pre_sign_policy_check` |
+| Solana | Owner and policy re-check of the sealed, never-sent signature, before its first send | Expiry, funding, fee, owner-policy or custody refusal: `never_submitted_frozen_effect_no_longer_valid` | `pre_send_policy_check` |
+| EVM | Usage reservation | `APN_ALLOWLIST_REFUSED`: `allowlist_refused_at_approval` | None: the operation stays `awaiting_approval` and the command returns the error |
 
-TRON and Solana records written by 0.5.106 and earlier keep `allowlist_refused_at_approval` for every cause, a ledger
-state error included.
+For example, a usage ledger directory open to the group gives `usage_reservation_apn_state_security`. TRON and Solana
+records written by 0.5.106 and earlier keep the step's refusal reason for every cause, a state error included.
 
 **Transitions.** The ledger follows the journal forward, idempotently, after each durable write and on every resume.
 

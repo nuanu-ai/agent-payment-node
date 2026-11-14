@@ -29,7 +29,7 @@ export class SolanaApproval implements RailApprovalPort {
   /** Stands in for the time the owner spends reading the screen. */
   onApprove: (() => void) | undefined;
   async approve(input: Parameters<RailApprovalPort["approve"]>[0]): Promise<void> {
-    this.calls.push(input); this.allowlistBindings.push(input.allowlist); this.onApprove?.(); if (this.refuse) throw new Error("synthetic approval refusal");
+    this.calls.push(input); this.allowlistBindings.push(input.allowlist); this.onApprove?.(); if (this.refuse) throw new ApnError("APN_NATIVE_REJECTED", "The chain approval was refused.", { nativeCode: "APN_APPROVAL_REFUSED" });
   }
 }
 export class SolanaWait implements WaitPort {

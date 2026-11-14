@@ -14,7 +14,7 @@ import { canonicalProfile } from "./wallet-policy.js";
 import { DirectAllowlistGate, refuse, type DirectAllowlistBinding } from "./direct-allowlist-gate.js";
 import { railAllowlistSubject, requireListedRailAsset } from "./rail-direct-allowlist.js";
 import { RailPrepareClaimStore, RailApprovalClaimStore, sealPrepareClaim, sealApprovalClaim, type RailApprovalClaim } from "./rail-operation-claims.js";
-import { RailOperationLifecycle, binding } from "./rail-operation-lifecycle.js";
+import { RailOperationLifecycle, binding, railStopReason } from "./rail-operation-lifecycle.js";
 import { reportingRateLimits } from "./rpc-rate-limit.js";
 
 interface RailPrepareInput {
@@ -203,7 +203,7 @@ export class RailOperationService {
           prepared: operation.prepared, allowlist: operation.allowlist });
         await this.lifecycle.revalidate(operation, adapter);
       } catch (error) {
-        await this.lifecycle.move(operation, "failed_before_effect", "approval_or_pre_effect_validation_refused", "durable_pre_effect");
+        await this.lifecycle.move(operation, "failed_before_effect", railStopReason("approval", error), "durable_pre_effect");
         throw error;
       }
       if (adapter.execution === "provider_atomic") return await this.lifecycle.submit(operation, adapter, null, await this.lifecycle.reserveUsage(operation));
@@ -263,7 +263,7 @@ export class RailOperationService {
         // Drift during the prompt is refused here without RPC; the send guard below re-reads the chain with a fresh reference.
         await this.lifecycle.assertCurrentRailPolicy(operation);
       } catch (error) {
-        await this.failApprovalClaim(operation, claim, claims, "approval_or_pre_effect_validation_refused");
+        await this.failApprovalClaim(operation, claim, claims, railStopReason("approval", error));
         throw error;
       }
       let send: RailSendBinding | undefined;

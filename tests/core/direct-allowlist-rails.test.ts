@@ -11,12 +11,13 @@ import { runCli } from "../../src/cli.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { DIRECT_ALLOWLIST_SCHEMA, DirectAllowlistGate, requireListedDirectAsset, type DirectAllowlistSubject } from "../../src/direct-allowlist-gate.js";
 import type { DirectAssetUsageLease } from "../../src/direct-asset-usage.js";
-import type { DirectRailPort } from "../../src/direct-rail-ports.js";
+import type { DirectRailPort, RailApprovalPort } from "../../src/direct-rail-ports.js";
 import { ApnError } from "../../src/errors.js";
 import { createMcpServer } from "../../src/mcp-server.js";
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
 import { requireListedRailAsset } from "../../src/rail-direct-allowlist.js";
-import { railReservationFailureReason } from "../../src/rail-operation-lifecycle.js";
+import { ChainPolicyService } from "../../src/chain-policy-service.js";
+import { RailOperationLifecycle, railStopReason } from "../../src/rail-operation-lifecycle.js";
 import { newRailOperation, transitionRail, type RailOperationRecord } from "../../src/rail-operation-model.js";
 import { SOLANA_CHAIN, TRON_CHAIN, activateDirectPolicy, directAdmission, directUsage, reserveRailLease, revokeDirectPolicy } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -274,11 +275,110 @@ test("a TRON owner-cap refusal at the reservation keeps the allowlist reason; a 
   assert.deepEqual(await findStored(s.core.rails.records, legacyId), saved);
 });
 
-test("only the allowlist's own refusal is recorded as allowlist_refused_at_approval; every other reserve failure names its cause", () => {
-  assert.equal(railReservationFailureReason(new ApnError("APN_ALLOWLIST_REFUSED", "refused", { reason: "allowlist_daily_cap_exceeded" })), "allowlist_refused_at_approval");
-  assert.equal(railReservationFailureReason(new ApnError("APN_STATE_SECURITY", "unsafe")), "usage_reservation_apn_state_security");
-  assert.equal(railReservationFailureReason(new ApnError("APN_STATE_CORRUPT", "corrupt")), "usage_reservation_apn_state_corrupt");
-  assert.equal(railReservationFailureReason(new ApnError("APN_STATE_BUSY", "busy")), "usage_reservation_apn_state_busy");
-  assert.equal(railReservationFailureReason(new ApnError("APN_OPERATION_BLOCKED", "crossed")), "usage_reservation_apn_operation_blocked");
-  assert.equal(railReservationFailureReason(new Error("EIO")), "usage_reservation_failed");
+test("each TRON and Solana pre-effect stop keeps its reason only for its own refusal; every other error names its cause", () => {
+  const blocked = new ApnError("APN_OPERATION_BLOCKED", "cap", { reason: "chain_policy_daily_limit_exceeded" });
+  const cases: [Parameters<typeof railStopReason>[0], unknown, string][] = [
+    ["approval", new ApnError("APN_NATIVE_REJECTED", "refused", { nativeCode: "APN_APPROVAL_REFUSED" }), "approval_or_pre_effect_validation_refused"],
+    ["approval", new ApnError("APN_ALLOWLIST_REFUSED", "missing", { reason: "allowlist_binding_missing" }), "approval_or_pre_effect_validation_refused"],
+    ["approval", new ApnError("APN_INSUFFICIENT_ASSET", "funds"), "approval_or_pre_effect_validation_refused"],
+    ["approval", new ApnError("APN_REPREPARE_REQUIRED", "expired"), "approval_or_pre_effect_validation_refused"],
+    ["approval", new ApnError("APN_RPC_AMBIGUOUS", "lost"), "approval_or_pre_effect_validation_apn_rpc_ambiguous"],
+    ["approval", new ApnError("APN_STATE_SECURITY", "unsafe"), "approval_or_pre_effect_validation_apn_state_security"],
+    ["approval", new Error("EIO"), "approval_or_pre_effect_validation_failed"],
+    ["usage_reservation", new ApnError("APN_ALLOWLIST_REFUSED", "refused", { reason: "allowlist_daily_cap_exceeded" }), "allowlist_refused_at_approval"],
+    ["usage_reservation", new ApnError("APN_STATE_SECURITY", "unsafe"), "usage_reservation_apn_state_security"],
+    ["usage_reservation", new ApnError("APN_STATE_CORRUPT", "corrupt"), "usage_reservation_apn_state_corrupt"],
+    ["usage_reservation", new ApnError("APN_STATE_BUSY", "busy"), "usage_reservation_apn_state_busy"],
+    ["usage_reservation", new ApnError("APN_OPERATION_BLOCKED", "crossed"), "usage_reservation_apn_operation_blocked"],
+    ["usage_reservation", new Error("EIO"), "usage_reservation_failed"],
+    ["chain_policy", blocked, "chain_policy_refused_at_approval"],
+    ["chain_policy", new ApnError("APN_WALLET_POLICY_REQUIRED", "denied"), "chain_policy_refused_at_approval"],
+    ["chain_policy", new ApnError("APN_PROFILE_DRIFT", "changed"), "chain_policy_refused_at_approval"],
+    ["chain_policy", new ApnError("APN_STATE_SECURITY", "unsafe"), "chain_policy_check_apn_state_security"],
+    ["chain_policy", new ApnError("APN_STATE_CORRUPT", "corrupt"), "chain_policy_check_apn_state_corrupt"],
+    ["chain_policy", new Error("EIO"), "chain_policy_check_failed"],
+    ["pre_sign", new ApnError("APN_ALLOWLIST_REFUSED", "changed", { reason: "allowlist_policy_changed" }), "pre_sign_owner_or_policy_changed"],
+    ["pre_sign", new ApnError("APN_PROFILE_DRIFT", "changed"), "pre_sign_owner_or_policy_changed"],
+    ["pre_sign", new ApnError("APN_REPREPARE_REQUIRED", "expired"), "pre_sign_policy_check_apn_reprepare_required"],
+    ["pre_sign", new ApnError("APN_STATE_SECURITY", "unsafe"), "pre_sign_policy_check_apn_state_security"],
+    ["pre_sign", new Error("EIO"), "pre_sign_policy_check_failed"],
+    ["pre_send", new ApnError("APN_REPREPARE_REQUIRED", "expired"), "never_submitted_frozen_effect_no_longer_valid"],
+    ["pre_send", new ApnError("APN_ALLOWLIST_REFUSED", "changed", { reason: "allowlist_policy_changed" }), "never_submitted_frozen_effect_no_longer_valid"],
+    ["pre_send", new ApnError("APN_STATE_SECURITY", "unsafe"), "pre_send_policy_check_apn_state_security"],
+    ["pre_send", new Error("EIO"), "pre_send_policy_check_failed"],
+  ];
+  for (const [step, error, reason] of cases) assert.equal(railStopReason(step, error), reason, `${step}: ${String(error)}`);
+});
+
+test("an RPC failure while TRON or Solana approval revalidates the chain is saved under its cause; the owner's refusal keeps the approval reason", async (t) => {
+  for (const rail of ["tron", "solana"] as const) {
+    for (const [failure, reason] of [
+      [new ApnError("APN_RPC_AMBIGUOUS", "The RPC answer was lost."), "approval_or_pre_effect_validation_apn_rpc_ambiguous"],
+      [new ApnError("APN_NATIVE_REJECTED", "The chain approval was refused.", { nativeCode: "APN_APPROVAL_REFUSED" }), "approval_or_pre_effect_validation_refused"],
+    ] as const) {
+      const temporary = await temporaryState(); t.after(temporary.cleanup);
+      let s: Fixture, id: string;
+      if (rail === "tron") { const fixture = await tronFixture(temporary.root); s = fixture; id = await fixture.prepare("trx", "tron-approval-check-0001"); }
+      else { const fixture = await solanaFixture(temporary.root); s = fixture; id = await fixture.prepare("sol", "solana-approval-check-0001"); }
+      if (failure.code === "APN_RPC_AMBIGUOUS") (s.adapter as unknown as DirectRailPort).revalidate = async () => { throw failure; };
+      else (s.approval as RailApprovalPort).approve = async () => { throw failure; };
+      const approved = await s.core.execute({ command: "transfer.approve", operationId: id });
+      assert.equal(approved.error?.code, failure.code, `${rail} ${reason}`);
+      const ended = (await findStored(s.core.rails.records, id))!;
+      assert.equal(ended.state, "failed_before_effect", rail); assert.equal(ended.reason, reason, rail);
+      assert.equal(ended.allowlistLease, undefined, rail); assert.equal(s.rpc.submissions.length, 0, rail);
+    }
+  }
+});
+
+test("a TRON or Solana chain-policy check that fails at approval for a state error is saved under its cause; a real cap refusal keeps chain_policy_refused_at_approval", async (t) => {
+  for (const rail of ["tron", "solana"] as const) {
+    for (const [failure, reason] of [
+      [new ApnError("APN_STATE_SECURITY", "State file must have mode 0600."), "chain_policy_check_apn_state_security"],
+      [new ApnError("APN_OPERATION_BLOCKED", "The chain asset policy or spending limit does not authorize this transfer.", { reason: "chain_policy_daily_limit_exceeded" }), "chain_policy_refused_at_approval"],
+    ] as const) {
+      const temporary = await temporaryState(); t.after(temporary.cleanup);
+      let s: Fixture, id: string;
+      if (rail === "tron") { const fixture = await tronFixture(temporary.root); s = fixture; id = await fixture.prepare("trx", "tron-chain-check-0001"); }
+      else { const fixture = await solanaFixture(temporary.root); s = fixture; id = await fixture.prepare("sol", "solana-chain-check-0001"); }
+      // assertPrincipal runs at approval only inside the reservation step; it reads the profile's rail records there.
+      const mock = t.mock.method(ChainPolicyService.prototype, "assertPrincipal", async () => { throw failure; });
+      const approved = await s.core.execute({ command: "transfer.approve", operationId: id });
+      mock.mock.restore();
+      assert.equal(approved.error?.code, failure.code, `${rail} ${reason}`);
+      const ended = (await findStored(s.core.rails.records, id))!;
+      assert.equal(ended.state, "failed_before_effect", rail); assert.equal(ended.reason, reason, rail);
+      assert.equal(ended.allowlistLease, undefined, rail); assert.equal(s.rpc.submissions.length, 0, rail);
+      assert.equal(await directUsage(temporary.root, s.account.address, rail === "tron" ? TRON_CHAIN : SOLANA_CHAIN, null, s.now), "0", rail);
+    }
+  }
+});
+
+test("a local Solana policy re-check that fails for a state error before sealing or before the first send is saved under its cause, with the hold released", async (t) => {
+  for (const [stage, reason] of [["pre_sign", "pre_sign_policy_check_apn_state_security"], ["pre_send", "pre_send_policy_check_apn_state_security"]] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const s = await solanaFixture(temporary.root), id = await s.prepare("sol", `solana-${stage.replace("_", "-")}-check-0001`);
+    // Local Solana approval re-checks the owner policy twice with signing_started (after the send-window read, then
+    // under the locks right before sealing) and once with the sealed, never-sent signature right before its first send.
+    const original = RailOperationLifecycle.prototype.assertCurrentRailPolicy; let signingChecks = 0;
+    const mock = t.mock.method(RailOperationLifecycle.prototype, "assertCurrentRailPolicy", async function (this: RailOperationLifecycle, operation: RailOperationRecord) {
+      if (operation.state === "signing_started") signingChecks += 1;
+      if (stage === "pre_sign" ? operation.state === "signing_started" && signingChecks === 2 : operation.state === "signed_not_submitted") {
+        throw new ApnError("APN_STATE_SECURITY", "State directory is accessible by another user.");
+      }
+      return await original.call(this, operation);
+    });
+    const approved = await s.core.execute({ command: "transfer.approve", operationId: id });
+    mock.mock.restore();
+    // Before sealing the error is returned; after sealing the never-sent signature is closed and the operation answered.
+    if (stage === "pre_sign") assert.equal(approved.error?.code, "APN_STATE_SECURITY", stage);
+    else assert.equal(approved.ok, true, approved.error?.message);
+    const ended = (await findStored(s.core.rails.records, id))!;
+    assert.equal(ended.state, "failed_before_effect", stage); assert.equal(ended.reason, reason, stage);
+    assert.equal(ended.transitions.some((entry) => entry.state === "signed_not_submitted"), stage === "pre_send", stage);
+    assert.equal(s.rpc.submissions.length, 0, stage);
+    const lease = ended.allowlistLease!;
+    assert.equal((await new AssetUsageLedger(temporary.root).load(lease.reservation, lease.reservation.reservationId))?.state, "failed_before_effect", stage);
+    assert.equal(await directUsage(temporary.root, s.account.address, SOLANA_CHAIN, null, s.now), "0", stage);
+  }
 });

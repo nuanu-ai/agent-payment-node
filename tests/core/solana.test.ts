@@ -97,8 +97,10 @@ test("local Solana public identity and unsigned prepare recover across restart w
 
   restarted.approval.refuse = true;
   const refused = await restarted.core.execute({ command: "transfer.approve", operationId: id });
-  assert.equal(refused.ok, false);
+  assert.equal(refused.ok, false); assert.equal(refused.error?.code, "APN_NATIVE_REJECTED");
   assert.equal((await findStored(restarted.core.rails.records, id))!.state, "failed_before_effect");
+  // The owner's own refusal keeps the approval step's reason.
+  assert.equal((await findStored(restarted.core.rails.records, id))!.reason, "approval_or_pre_effect_validation_refused");
   assert.equal(first.rpc.submissions.length, 0);
   assert.equal(first.rpc.simulateCalls, 0);
   assert.equal(await restarted.storage.effect(restarted.account, id, (await findStored(restarted.core.rails.records, id))!.fingerprint), null);
