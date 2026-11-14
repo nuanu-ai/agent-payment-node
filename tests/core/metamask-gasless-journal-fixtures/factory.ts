@@ -2,7 +2,7 @@ import { createExactExecutionBatchTerms, createLimitedCallsTerms, hashDelegation
 import { TypedDataEncoder } from "ethers";
 import { encodeFunctionData, keccak256, parseAbi } from "viem";
 import { hashObject, sha256 } from "../../../src/canonical.js";
-import { mmWalletIdentityHash } from "../../../src/metamask-gasless/identity.js";
+import { mmRequestIdHash, mmWalletIdentityHash } from "../../../src/metamask-gasless/identity.js";
 import type { MetaMaskGaslessIntent, MetaMaskGaslessMutable, MetaMaskGaslessUnsignedDelegation } from
   "../../../src/metamask-gasless/model.js";
 import { mmMutable, mmRequestHash, type MetaMaskGaslessOperationRecord } from "../../../src/metamask-gasless/operation-model.js";
@@ -101,8 +101,7 @@ export function mark(operation: MetaMaskGaslessOperationRecord): MetaMaskGasless
 
 export function unknown(operation: MetaMaskGaslessOperationRecord, at = "2026-09-09T00:02:00.000Z") {
   return advanceMetaMaskGaslessOperation(operation, { state: "unknown_finality",
-    providerObservation: { observedAt: at, requestIdHash: hashObject({
-      purpose: "apn.metamask-gasless.request-id.v1", value: operation.intent.requestId }), status: "unavailable", txHash: null },
+    providerObservation: { observedAt: at, requestIdHash: mmRequestIdHash(operation.intent), status: "unavailable", txHash: null },
     observation: { observedAt: at, phase: "unavailable", reason: "mm_gasless_rpc_unavailable",
       candidateTxHash: null, transactionBlock: null, finalityBlock: null, evidenceHash: null },
     failure: mmFailure("mm_gasless_submit_unknown") }, at);
@@ -125,7 +124,7 @@ export function complete(operation: MetaMaskGaslessOperationRecord, at = "2026-0
     unusedGrossAtomic: "0" as const, designation: "pinned" as const, permission: "consumed" as const,
     receiptCounterAtomic: "1" as const, finalityCounterAtomic: "1" as const };
   const patch: Partial<MetaMaskGaslessMutable> = { state: "completed", providerObservation: { observedAt: at,
-    requestIdHash: hashObject({ purpose: "apn.metamask-gasless.request-id.v1", value: operation.intent.requestId }),
+    requestIdHash: mmRequestIdHash(operation.intent),
     status: "confirmed", txHash }, cursor: { startBlock: operation.cursor.startBlock,
     nextBlockAtomic: "151", previousEndBlock: finalityBlock }, observation: { observedAt: at, phase: "success",
     reason: "mm_gasless_success", candidateTxHash: txHash, transactionBlock, finalityBlock,
@@ -152,8 +151,9 @@ export function fillLegacyHistory(operation: MetaMaskGaslessOperationRecord, len
     millis += 1_000;
     const at = new Date(millis).toISOString();
     current = legacyAppend(current, { state: "unknown_finality",
-      providerObservation: { observedAt: at, requestIdHash: hashObject({ purpose: "apn.metamask-gasless.request-id.v1",
-        value: current.intent.requestId }), status: "unavailable", txHash: current.providerObservation?.txHash ?? null },
+      // The record's own request hash: kept as such by a current journal, derived from the id in an earlier one.
+      providerObservation: { observedAt: at, requestIdHash: mmRequestIdHash(current.intent), status: "unavailable",
+        txHash: current.providerObservation?.txHash ?? null },
       observation: { observedAt: at, phase: "unavailable", reason: "mm_gasless_rpc_unavailable",
         candidateTxHash: current.observation?.candidateTxHash ?? null, transactionBlock: null, finalityBlock: null,
         evidenceHash: hashObject({ fixture: "legacy-observation", at }) },
