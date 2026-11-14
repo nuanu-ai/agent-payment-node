@@ -309,7 +309,10 @@ export class RailOperationLifecycle {
         refuse("allowlist_binding_missing", "This transfer was prepared before the owner allowlist gate; prepare a new transfer.");
       }
       return await this.allowlist.reserve(railAllowlistSubject(operation), operation.allowlist);
-    } catch (error) {
+    } catch (caught) {
+      // A cap another reservation took inside the ledger is the owner policy's refusal, as the gate words it.
+      const error = operation.allowlist === undefined ? caught
+        : await this.allowlist.reservationRefusal(railAllowlistSubject(operation), operation.allowlist, caught);
       await this.move(operation, "failed_before_effect", railStopReason("usage_reservation", error), "durable_pre_effect");
       throw error;
     }
@@ -336,7 +339,8 @@ const RAIL_STOPS = {
   approval: { refused: approvalRefusal, refusal: "approval_or_pre_effect_validation_refused", prefix: "approval_or_pre_effect_validation" },
   chain_policy: { refused: ownerPolicyRefusal, refusal: "chain_policy_refused_at_approval", prefix: "chain_policy_check" },
   usage_reservation: { refused: (error: ApnError) => error.code === "APN_ALLOWLIST_REFUSED", refusal: "allowlist_refused_at_approval", prefix: "usage_reservation" },
-  pre_sign: { refused: ownerPolicyRefusal, refusal: "pre_sign_owner_or_policy_changed", prefix: "pre_sign_policy_check" },
+  pre_sign: { refused: (error: ApnError) => ownerPolicyRefusal(error) || error.code === "APN_REPREPARE_REQUIRED",
+    refusal: "pre_sign_owner_or_policy_changed", prefix: "pre_sign_policy_check" },
   pre_send: { refused: railEffectProvenUnsendable, refusal: "never_submitted_frozen_effect_no_longer_valid", prefix: "pre_send_policy_check" },
 } as const;
 /**

@@ -106,10 +106,15 @@ its permission check (`APN_STATE_SECURITY`), is saved as `<prefix>_<error code i
 | --- | --- | --- | --- |
 | TRON, Solana | Chain revalidation and the owner approval screen | The owner's refusal on the screen (`APN_NATIVE_REJECTED`), an owner-policy refusal as below, or an expiry, funding, fee or custody refusal: `approval_or_pre_effect_validation_refused` | `approval_or_pre_effect_validation`, for example `approval_or_pre_effect_validation_apn_rpc_ambiguous` for a lost RPC answer |
 | TRON, Solana | Chain policy principal caps, before the reservation | `APN_PROFILE_DRIFT`, `APN_WALLET_POLICY_REQUIRED`, `APN_ALLOWLIST_REFUSED`, `APN_OPERATION_BLOCKED`: `chain_policy_refused_at_approval` | `chain_policy_check` |
-| TRON, Solana | Usage reservation | `APN_ALLOWLIST_REFUSED`: `allowlist_refused_at_approval` | `usage_reservation` |
-| Solana | Owner and policy re-check under the locks, before sealing | `APN_PROFILE_DRIFT`, `APN_WALLET_POLICY_REQUIRED`, `APN_ALLOWLIST_REFUSED`, `APN_OPERATION_BLOCKED`: `pre_sign_owner_or_policy_changed` | `pre_sign_policy_check` |
+| TRON, Solana | Usage reservation | `APN_ALLOWLIST_REFUSED`, or a cap another approval took inside the ledger: `allowlist_refused_at_approval` | `usage_reservation` |
+| Solana | Owner and policy re-check under the locks, before sealing | `APN_PROFILE_DRIFT`, `APN_WALLET_POLICY_REQUIRED`, `APN_ALLOWLIST_REFUSED`, `APN_OPERATION_BLOCKED`, or an expiry (`APN_REPREPARE_REQUIRED`): `pre_sign_owner_or_policy_changed` | `pre_sign_policy_check` |
 | Solana | Owner and policy re-check of the sealed, never-sent signature, before its first send | Expiry, funding, fee, owner-policy or custody refusal: `never_submitted_frozen_effect_no_longer_valid` | `pre_send_policy_check` |
 | EVM | Usage reservation | `APN_ALLOWLIST_REFUSED`: `allowlist_refused_at_approval` | None: the operation stays `awaiting_approval` and the command returns the error |
+
+A cap another approval took inside the ledger: the ledger refuses with `APN_OPERATION_BLOCKED` and no details. When
+the ledger holds no reservation of this operation, the gate evaluates the owner policy again with today's usage, and
+the command returns that refusal (for example `APN_ALLOWLIST_REFUSED`, `allowlist_daily_cap_exceeded`). Any other
+`APN_OPERATION_BLOCKED` from the ledger, such as a replay conflict, is saved as `usage_reservation_apn_operation_blocked`.
 
 For example, a usage ledger directory open to the group gives `usage_reservation_apn_state_security`. TRON and Solana
 records written by 0.5.106 and earlier keep the step's refusal reason for every cause, a state error included.

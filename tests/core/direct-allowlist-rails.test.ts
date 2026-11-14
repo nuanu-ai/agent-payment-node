@@ -9,7 +9,7 @@ import { chainAsset, SOLANA_USDT } from "../../src/chain-policy.js";
 import { bindArgv, bindMcpInput } from "../../src/command-binder.js";
 import { runCli } from "../../src/cli.js";
 import type { OutputEnvelope } from "../../src/commands.js";
-import { DIRECT_ALLOWLIST_SCHEMA, DirectAllowlistGate, requireListedDirectAsset, type DirectAllowlistSubject } from "../../src/direct-allowlist-gate.js";
+import { DIRECT_ALLOWLIST_SCHEMA, DirectAllowlistGate, directUsageKey, requireListedDirectAsset, type DirectAllowlistSubject } from "../../src/direct-allowlist-gate.js";
 import type { DirectAssetUsageLease } from "../../src/direct-asset-usage.js";
 import type { DirectRailPort, RailApprovalPort } from "../../src/direct-rail-ports.js";
 import { ApnError } from "../../src/errors.js";
@@ -275,6 +275,36 @@ test("a TRON owner-cap refusal at the reservation keeps the allowlist reason; a 
   assert.deepEqual(await findStored(s.core.rails.records, legacyId), saved);
 });
 
+test("a TRON daily cap another approval took inside the ledger is the owner's cap refusal; a ledger block within the caps keeps its own cause", async (t) => {
+  for (const race of ["cap_taken", "blocked_within_caps"] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const s = await tronFixture(temporary.root);
+    const prepared = await s.core.execute({ command: "transfer.prepare-tron", profile: s.account.profile, asset: "trx", recipient: TRON_RECIPIENT,
+      amount: "1.5", maximumFee: "30", idempotencyKey: `tron-ledger-${race.replaceAll("_", "-")}-0001` });
+    assert.equal(prepared.ok, true, prepared.error?.message);
+    const id = (prepared.operation as { operation_id: string }).operation_id; s.rpc.prepared = (await findStored(s.core.rails.records, id))!.prepared;
+    // The gate's own evaluation saw no other usage; the ledger answers under its bucket lock, after a competing approval.
+    const original = AssetUsageLedger.prototype.reserve;
+    const mock = t.mock.method(AssetUsageLedger.prototype, "reserve", async function (this: AssetUsageLedger, input: Parameters<typeof original>[0]) {
+      if (input.idempotencyKey !== directUsageKey(id)) return await original.call(this, input);
+      if (race === "blocked_within_caps") throw new ApnError("APN_OPERATION_BLOCKED", "The idempotency key is already bound to a different usage reservation.");
+      await original.call(this, { ...input, amountAtomic: "2000000", idempotencyKey: "competing-direct-approval-0001" });
+      return await original.call(this, input);
+    });
+    const approved = await s.core.execute({ command: "transfer.approve", operationId: id });
+    mock.mock.restore();
+    const ended = (await findStored(s.core.rails.records, id))!;
+    assert.equal(ended.state, "failed_before_effect", race); assert.equal(ended.allowlistLease, undefined, race);
+    assert.equal(s.rpc.submissions.length, 0, race);
+    if (race === "cap_taken") {
+      refusal(approved, "allowlist_daily_cap_exceeded"); assert.equal(ended.reason, "allowlist_refused_at_approval");
+      assert.equal(await directUsage(temporary.root, s.account.address, TRON_CHAIN, null, s.now), "2000000");
+    } else {
+      assert.equal(approved.error?.code, "APN_OPERATION_BLOCKED"); assert.equal(ended.reason, "usage_reservation_apn_operation_blocked");
+    }
+  }
+});
+
 test("each TRON and Solana pre-effect stop keeps its reason only for its own refusal; every other error names its cause", () => {
   const blocked = new ApnError("APN_OPERATION_BLOCKED", "cap", { reason: "chain_policy_daily_limit_exceeded" });
   const cases: [Parameters<typeof railStopReason>[0], unknown, string][] = [
@@ -299,7 +329,7 @@ test("each TRON and Solana pre-effect stop keeps its reason only for its own ref
     ["chain_policy", new Error("EIO"), "chain_policy_check_failed"],
     ["pre_sign", new ApnError("APN_ALLOWLIST_REFUSED", "changed", { reason: "allowlist_policy_changed" }), "pre_sign_owner_or_policy_changed"],
     ["pre_sign", new ApnError("APN_PROFILE_DRIFT", "changed"), "pre_sign_owner_or_policy_changed"],
-    ["pre_sign", new ApnError("APN_REPREPARE_REQUIRED", "expired"), "pre_sign_policy_check_apn_reprepare_required"],
+    ["pre_sign", new ApnError("APN_REPREPARE_REQUIRED", "expired"), "pre_sign_owner_or_policy_changed"],
     ["pre_sign", new ApnError("APN_STATE_SECURITY", "unsafe"), "pre_sign_policy_check_apn_state_security"],
     ["pre_sign", new Error("EIO"), "pre_sign_policy_check_failed"],
     ["pre_send", new ApnError("APN_REPREPARE_REQUIRED", "expired"), "never_submitted_frozen_effect_no_longer_valid"],

@@ -485,8 +485,8 @@ end the operation `failed_before_effect` before the provider runs. The saved rea
 
 | Cause | Reason |
 | --- | --- |
-| The owner policy refuses (`APN_ALLOWLIST_REFUSED`) | `coinbase_gasless_policy_denied` |
-| `APN_STATE_SECURITY`, `APN_STATE_CORRUPT`, `APN_STATE_BUSY`, `APN_INVALID_INPUT` or `APN_OPERATION_BLOCKED` from the state store, its locks, input validation or the usage ledger | `coinbase_gasless_policy_check_<error code in lower case>`, for example `coinbase_gasless_policy_check_apn_state_security` |
+| The owner policy refuses (`APN_ALLOWLIST_REFUSED`), or another hold took the cap inside the ledger: the policy is checked again with today's usage and its refusal is returned | `coinbase_gasless_policy_denied` |
+| `APN_STATE_SECURITY`, `APN_STATE_CORRUPT`, `APN_STATE_BUSY` or `APN_INVALID_INPUT` from the state store, its locks, input validation or the usage ledger; `APN_OPERATION_BLOCKED` from the ledger within the caps, for example a replay conflict | `coinbase_gasless_policy_check_<error code in lower case>`, for example `coinbase_gasless_policy_check_apn_state_security` |
 | Any other error | `coinbase_gasless_policy_check_failed` |
 
 Records saved by 0.5.106 and earlier keep `coinbase_gasless_policy_denied` for every cause. A record saved with one of

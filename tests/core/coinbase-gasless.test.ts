@@ -321,6 +321,27 @@ test("a Coinbase pre-effect stop saved under a new cause recovers from a crash b
   assert.equal(s.providerCalls(), 0);
 });
 
+test("a Coinbase daily cap another hold took inside the ledger is the policy's denial, before AWAL", async t => {
+  const s = await policyFixture(t);
+  await activateCoinbasePolicy(s.root, "coinbase-policy", { per: "1000", daily: "1500" });
+  assert.equal((await s.core.execute(s.request("ledger-cap-race"))).ok, true);
+  const id = s.state.operationId("coinbase-policy", "ledger-cap-race");
+  // Both policy checks saw no other usage; the ledger answers under its bucket lock, after a competing hold of 1000.
+  const original = AssetUsageLedger.prototype.reserve;
+  const mock = t.mock.method(AssetUsageLedger.prototype, "reserve", async function (this: AssetUsageLedger, input: Parameters<typeof original>[0]) {
+    if (input.idempotencyKey === `apn.coinbase-gasless:${id}`) await original.call(this, { ...input, idempotencyKey: "competing-gasless-hold-0001" });
+    return await original.call(this, input);
+  });
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  mock.mock.restore();
+  assert.equal(result.error?.code, "APN_ALLOWLIST_REFUSED"); assert.equal(result.error?.details?.reason, "coinbase_allowlist_caps_or_asset");
+  const ended = (await s.state.findOperation(id))!;
+  assert.equal(ended.state, "failed_before_effect"); assert.equal(ended.reason, "coinbase_gasless_policy_denied");
+  assert.equal(s.providerCalls(), 0);
+  assert.equal((await new AssetUsageLedger(s.root).usage({ account: SENDER, chain: "eip155:8453",
+    asset: { kind: "token", identifier: BASE_USDC } }, POLICY_NOW)).amountAtomic, "1000");
+});
+
 test("an uncertain Coinbase provider result retains one usage reservation and never invokes AWAL twice", async t => {
   const s = await policyFixture(t, "ambiguous");
   s.rpc.noCandidate = true;
