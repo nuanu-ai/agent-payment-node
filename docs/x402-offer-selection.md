@@ -59,6 +59,13 @@ value (`sellerValue`) and what APN accepts (`accepted`), plus one line per refus
 (`refused`), in CLI and MCP alike. `x402_offer_asset_not_offered` means the seller does not offer that chain and token
 at all.
 
+**`x402 inspect --payer`.** The payer adds the lowest-index Permit2 offer that payer can sign (`permit2`, on any EVM
+network) beside the candidates of the selected network and token; it never removes a candidate. A challenge that lists
+no Permit2 offer at all (an EIP-3009-only seller) inspects exactly as without `--payer`: the same candidates, or the
+same refusal of the selected network and token. A listed Permit2 offer APN refuses, or an invalid payer, is still
+refused by its deciding field. Through 0.5.106 an EIP-3009-only challenge was refused with `x402_permit2_no_listed_offer`
+whenever `--payer` was given.
+
 **Seller text is untrusted.** An agent reads refusals, so a refusal's `message` holds only APN's own words (the offer's
 position, the selected network and token, the reason and field). Seller values appear only in the structured `details`,
 and verbatim only when they match `^[A-Za-z0-9._:/-]{1,64}$`. Any other value (a URL with a query, text with spaces,

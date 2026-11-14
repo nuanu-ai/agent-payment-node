@@ -581,8 +581,48 @@ test("inspect with an explicit payer admits a Permit2-only challenge while prese
     .execute({ command: "x402.inspect", url: X402_URL, payer });
   assert.equal(unsupported.ok, false);
   assert.equal(unsupported.error?.code, "APN_X402_UNSUPPORTED_OFFER");
-  assert.equal(unsupported.error?.details?.reason, "x402_permit2_no_listed_offer");
+  // No Permit2 offer is listed, so the payer adds nothing: the refusal is the selected network and token's own.
+  assert.equal(unsupported.error?.details?.reason, "x402_offer_asset_not_offered");
   assert.deepEqual(unsupportedHttp.calls, [{ url: X402_URL }]);
+  await assert.rejects(access(state.root));
+});
+
+test("inspect with an explicit payer keeps an EIP-3009-only offer as the same candidate as without the payer", async (t) => {
+  const state = await temporaryState();
+  t.after(state.cleanup);
+  const payer = "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4" as const;
+  const header = canonicalPaymentRequiredHeader(X402_PAYMENT_REQUIRED);
+  const inspect = async (withPayer: boolean) => {
+    const http = new TestHttp(challengeObservation({ header }));
+    const envelope = await new ApnCore({ state: new StateStore(state.root), http, native: NEVER_NATIVE, rpc: NEVER_RPC })
+      .execute({ command: "x402.inspect", url: X402_URL, ...(withPayer ? { payer } : {}) });
+    assert.deepEqual(http.calls, [{ url: X402_URL }]);
+    return envelope;
+  };
+  const without = await inspect(false);
+  const withPayer = await inspect(true);
+  assert.equal(without.ok, true, JSON.stringify(without));
+  assert.equal(withPayer.ok, true, JSON.stringify(withPayer));
+  const result = withPayer.data as InspectResult;
+  assert.deepEqual(result.candidates.map((candidate) => [candidate.index, candidate.assetTransferMethod]), [["0", "eip3009"]]);
+  assert.equal(Object.hasOwn(result, "permit2"), false);
+  assert.deepEqual(withPayer.data, without.data);
+
+  // A listed Permit2 offer APN refuses is still refused by its deciding field, payer or not beside an EIP-3009 candidate.
+  const refusedPermit2 = { ...X402_REQUIREMENTS, network: "eip155:43114", asset: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+    extra: { assetTransferMethod: "permit2", name: "TetherToken", version: "1", spenderAddress: payer } };
+  const refusedHttp = new TestHttp(challengeObservation({
+    header: canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: [X402_REQUIREMENTS, refusedPermit2] }),
+  }));
+  const refused = await new ApnCore({ state: new StateStore(state.root), http: refusedHttp, native: NEVER_NATIVE, rpc: NEVER_RPC })
+    .execute({ command: "x402.inspect", url: X402_URL, payer });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error?.code, "APN_X402_UNSUPPORTED_OFFER");
+  assert.equal(refused.error?.details?.reason, "x402_offer_spender_mismatch");
+
+  // An invalid payer is refused before any candidate is shown.
+  await assert.rejects(inspectX402(new TestHttp(challengeObservation({ header })), X402_URL, undefined, x402Asset(8453),
+    "0x5b38da6a701c568545dcfcb03fcb875f56beddC4" as never), (error: unknown) => error instanceof ApnError && error.code === "APN_INVALID_INPUT");
   await assert.rejects(access(state.root));
 });
 

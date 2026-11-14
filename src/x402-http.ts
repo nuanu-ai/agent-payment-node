@@ -26,7 +26,7 @@ import type { HttpGetRequest, HttpObservation, HttpPort, InspectResult } from ".
 import type { X402HttpObservation } from "./x402-state-integrity.js";
 import { decodeX402RequestBody, optionalX402HttpRequest, type X402HttpRequestV1 } from "./x402-http-request.js";
 import { observedPaidResult } from "./x402-opaque-result.js";
-import { inspectPermit2Offer } from "./x402-permit2/inspection.js";
+import { inspectPermit2Offer, type Permit2OfferInspection } from "./x402-permit2/inspection.js";
 import type { Address } from "./model.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -90,7 +90,7 @@ export async function inspectX402(
   payer?: Address,
 ): Promise<InspectResult> {
   const { endpoint, canonicalUrl, paymentRequired } = await readX402Challenge(http, value, request);
-  const permit2 = payer === undefined ? undefined : inspectPermit2Offer({ accepts: paymentRequired.accepts, payer });
+  const permit2 = payer === undefined ? undefined : payerPermit2Offer(paymentRequired.accepts, payer, asset !== null);
   const inspected = asset === null ? undefined : inspectOffers(paymentRequired, canonicalUrl, asset);
   if (asset === null && permit2 === undefined) {
     throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "Seller challenge has no Permit2 offer this payer can inspect.", { reason: "x402_offer_asset_not_offered" });
@@ -111,6 +111,22 @@ export async function inspectX402(
     candidates,
     ...(permit2 === undefined ? {} : { permit2 }),
   };
+}
+
+/**
+ * The lowest-index Permit2 offer `payer` can sign. Beside a selected network and token, `--payer` only adds Permit2
+ * metadata: a challenge that lists no Permit2 offer at all inspects exactly as without the flag (its EIP-3009 candidates,
+ * or the refusal of that network and token). A listed Permit2 offer APN refuses, or an invalid payer, is still refused
+ * by its deciding field; with no selected network and token the Permit2 offer is the only answer and its absence is refused.
+ */
+function payerPermit2Offer(accepts: readonly unknown[], payer: Address, besideSelectedAsset: boolean): Permit2OfferInspection | undefined {
+  try {
+    return inspectPermit2Offer({ accepts, payer });
+  } catch (error) {
+    if (besideSelectedAsset && error instanceof ApnError && error.code === "APN_X402_UNSUPPORTED_OFFER" &&
+      error.details?.reason === "x402_permit2_no_listed_offer") return undefined;
+    throw error;
+  }
 }
 
 /** One unpaid request to a canonical public HTTPS URL that must answer 402 with exactly one strict PAYMENT-REQUIRED header. */
