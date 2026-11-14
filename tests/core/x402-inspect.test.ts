@@ -587,7 +587,7 @@ test("inspect with an explicit payer admits a Permit2-only challenge while prese
   await assert.rejects(access(state.root));
 });
 
-test("inspect with an explicit payer keeps an EIP-3009-only offer as the same candidate as without the payer", async (t) => {
+test("inspect with an explicit payer keeps EIP-3009 candidates: an EIP-3009-only challenge as without it, a refused Permit2 offer beside them in permit2Refusal", async (t) => {
   const state = await temporaryState();
   t.after(state.cleanup);
   const payer = "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4" as const;
@@ -608,17 +608,37 @@ test("inspect with an explicit payer keeps an EIP-3009-only offer as the same ca
   assert.equal(Object.hasOwn(result, "permit2"), false);
   assert.deepEqual(withPayer.data, without.data);
 
-  // A listed Permit2 offer APN refuses is still refused by its deciding field, payer or not beside an EIP-3009 candidate.
+  // A listed Permit2 offer APN refuses beside an EIP-3009 candidate: the candidate stays, and the Permit2 refusal is
+  // named by its reason and deciding field in `permit2Refusal`, not as a refusal of the whole inspection.
   const refusedPermit2 = { ...X402_REQUIREMENTS, network: "eip155:43114", asset: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
     extra: { assetTransferMethod: "permit2", name: "TetherToken", version: "1", spenderAddress: payer } };
-  const refusedHttp = new TestHttp(challengeObservation({
-    header: canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts: [X402_REQUIREMENTS, refusedPermit2] }),
-  }));
-  const refused = await new ApnCore({ state: new StateStore(state.root), http: refusedHttp, native: NEVER_NATIVE, rpc: NEVER_RPC })
-    .execute({ command: "x402.inspect", url: X402_URL, payer });
-  assert.equal(refused.ok, false);
-  assert.equal(refused.error?.code, "APN_X402_UNSUPPORTED_OFFER");
-  assert.equal(refused.error?.details?.reason, "x402_offer_spender_mismatch");
+  const mixed = async (accepts: readonly unknown[]) => {
+    const http = new TestHttp(challengeObservation({ header: canonicalPaymentRequiredHeader({ ...X402_PAYMENT_REQUIRED, accepts }) }));
+    const envelope = await new ApnCore({ state: new StateStore(state.root), http, native: NEVER_NATIVE, rpc: NEVER_RPC })
+      .execute({ command: "x402.inspect", url: X402_URL, payer });
+    assert.deepEqual(http.calls, [{ url: X402_URL }]);
+    return envelope;
+  };
+  const kept = await mixed([X402_REQUIREMENTS, refusedPermit2]);
+  assert.equal(kept.ok, true, JSON.stringify(kept.error));
+  const keptResult = kept.data as InspectResult;
+  assert.deepEqual(keptResult.candidates, (without.data as InspectResult).candidates);
+  assert.equal(Object.hasOwn(keptResult, "permit2"), false);
+  assert.deepEqual(keptResult.permit2Refusal, {
+    reason: "x402_offer_spender_mismatch",
+    field: "extra.spenderAddress",
+    sellerValue: payer,
+    accepted: "0x402085c248EeA27D92E8b30b2C58ed07f9E20001",
+    refused: [`offer 1 eip155:43114 0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7 permit2: x402_offer_spender_mismatch extra.spenderAddress=${payer} (APN accepts 0x402085c248EeA27D92E8b30b2C58ed07f9E20001)`],
+  });
+  // The field is absent whenever no Permit2 offer was refused.
+  assert.equal(Object.hasOwn(without.data as InspectResult, "permit2Refusal"), false);
+  assert.equal(Object.hasOwn(result, "permit2Refusal"), false);
+  // With nothing payable for the selected network and token, the refused Permit2 offer is the inspection's refusal.
+  const alone = await mixed([refusedPermit2]);
+  assert.equal(alone.ok, false);
+  assert.equal(alone.error?.code, "APN_X402_UNSUPPORTED_OFFER");
+  assert.equal(alone.error?.details?.reason, "x402_offer_spender_mismatch");
 
   // An invalid payer is refused before any candidate is shown.
   await assert.rejects(inspectX402(new TestHttp(challengeObservation({ header })), X402_URL, undefined, x402Asset(8453),

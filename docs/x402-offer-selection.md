@@ -60,11 +60,18 @@ value (`sellerValue`) and what APN accepts (`accepted`), plus one line per refus
 at all.
 
 **`x402 inspect --payer`.** The payer adds the lowest-index Permit2 offer that payer can sign (`permit2`, on any EVM
-network) beside the candidates of the selected network and token; it never removes a candidate. A challenge that lists
-no Permit2 offer at all (an EIP-3009-only seller) inspects exactly as without `--payer`: the same candidates, or the
-same refusal of the selected network and token. A listed Permit2 offer APN refuses, or an invalid payer, is still
-refused by its deciding field. Through 0.5.106 an EIP-3009-only challenge was refused with `x402_permit2_no_listed_offer`
-whenever `--payer` was given.
+network) beside the candidates of the selected network and token; it never removes a candidate.
+
+- A challenge that lists no Permit2 offer at all (an EIP-3009-only seller) inspects exactly as without `--payer`: the
+  same candidates, or the same refusal of the selected network and token.
+- A listed Permit2 offer APN refuses, beside candidates, keeps the candidates and adds `permit2Refusal`: its `reason`,
+  deciding `field`, `sellerValue`, `accepted` and one `refused` line per refused Permit2 offer, as a refusal would name
+  them. The field is present only then.
+- With no candidate for the selected network and token, that Permit2 refusal is the answer (`APN_X402_UNSUPPORTED_OFFER`).
+- An invalid payer is refused (`APN_INVALID_INPUT`).
+
+Through 0.5.106 an EIP-3009-only challenge was refused with `x402_permit2_no_listed_offer` whenever `--payer` was given,
+and a refused Permit2 offer refused the whole inspection.
 
 **Seller text is untrusted.** An agent reads refusals, so a refusal's `message` holds only APN's own words (the offer's
 position, the selected network and token, the reason and field). Seller values appear only in the structured `details`,

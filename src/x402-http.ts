@@ -5,7 +5,7 @@ import { isIP } from "node:net";
 import { performance } from "node:perf_hooks";
 import { rootCertificates, type TLSSocket } from "node:tls";
 import { canonicalJson, domainHash, sha256 } from "./canonical.js";
-import { ApnError } from "./errors.js";
+import { ApnError, type ErrorDetails } from "./errors.js";
 import {
   isPublicIp,
   parsePublicHttpsUrl,
@@ -22,7 +22,7 @@ import {
 import { CONTROL_HEADERS, optionalSingleHeader, pairRawHeaders, paymentResponseHeader, requireAsciiControl, singleControlHeader,
   validateRawHeaders } from "./x402-http-headers.js";
 import { inspectOffers, unsupportedOfferError } from "./x402-offer-inspect.js";
-import type { HttpGetRequest, HttpObservation, HttpPort, InspectResult } from "./x402-model.js";
+import type { HttpGetRequest, HttpObservation, HttpPort, InspectPermit2Refusal, InspectResult } from "./x402-model.js";
 import type { X402HttpObservation } from "./x402-state-integrity.js";
 import { decodeX402RequestBody, optionalX402HttpRequest, type X402HttpRequestV1 } from "./x402-http-request.js";
 import { observedPaidResult } from "./x402-opaque-result.js";
@@ -90,13 +90,17 @@ export async function inspectX402(
   payer?: Address,
 ): Promise<InspectResult> {
   const { endpoint, canonicalUrl, paymentRequired } = await readX402Challenge(http, value, request);
-  const permit2 = payer === undefined ? undefined : payerPermit2Offer(paymentRequired.accepts, payer, asset !== null);
+  const payerOffer = payer === undefined ? null : payerPermit2Offer(paymentRequired.accepts, payer, asset !== null);
+  const permit2 = payerOffer !== null && "offer" in payerOffer ? payerOffer.offer : undefined;
+  const refusal = payerOffer !== null && "refusal" in payerOffer ? payerOffer : undefined;
   const inspected = asset === null ? undefined : inspectOffers(paymentRequired, canonicalUrl, asset);
   if (asset === null && permit2 === undefined) {
     throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "Seller challenge has no Permit2 offer this payer can inspect.", { reason: "x402_offer_asset_not_offered" });
   }
-  // Each offer of this network and token that APN cannot sign is named with the field that decided it.
   if (asset !== null && inspected !== undefined && inspected.candidates.length === 0 && permit2 === undefined) {
+    // Nothing is payable: the refused Permit2 offer the payer asked about is the answer, as it was through 0.5.106.
+    if (refusal !== undefined) throw refusal.error;
+    // Each offer of this network and token that APN cannot sign is named with the field that decided it.
     throw unsupportedOfferError(asset, paymentRequired, inspected);
   }
   const candidates = inspected?.candidates ?? [];
@@ -110,22 +114,31 @@ export async function inspectX402(
     },
     candidates,
     ...(permit2 === undefined ? {} : { permit2 }),
+    ...(refusal === undefined ? {} : { permit2Refusal: refusal.refusal }),
   };
 }
 
+type PayerPermit2 = { readonly offer: Permit2OfferInspection } | { readonly refusal: InspectPermit2Refusal; readonly error: ApnError };
+
 /**
  * The lowest-index Permit2 offer `payer` can sign. Beside a selected network and token, `--payer` only adds Permit2
- * metadata: a challenge that lists no Permit2 offer at all inspects exactly as without the flag (its EIP-3009 candidates,
- * or the refusal of that network and token). A listed Permit2 offer APN refuses, or an invalid payer, is still refused
- * by its deciding field; with no selected network and token the Permit2 offer is the only answer and its absence is refused.
+ * facts and never removes a candidate: a challenge that lists no Permit2 offer at all inspects exactly as without the
+ * flag (null), and a listed Permit2 offer APN refuses comes back as that refusal, by its deciding field, for
+ * `permit2Refusal`. An invalid payer is refused whole. With no selected network and token the Permit2 offer is the only
+ * answer, so its absence or refusal is refused.
  */
-function payerPermit2Offer(accepts: readonly unknown[], payer: Address, besideSelectedAsset: boolean): Permit2OfferInspection | undefined {
+function payerPermit2Offer(accepts: readonly unknown[], payer: Address, besideSelectedAsset: boolean): PayerPermit2 | null {
   try {
-    return inspectPermit2Offer({ accepts, payer });
+    return { offer: inspectPermit2Offer({ accepts, payer }) };
   } catch (error) {
-    if (besideSelectedAsset && error instanceof ApnError && error.code === "APN_X402_UNSUPPORTED_OFFER" &&
-      error.details?.reason === "x402_permit2_no_listed_offer") return undefined;
-    throw error;
+    if (!besideSelectedAsset || !(error instanceof ApnError) || error.code !== "APN_X402_UNSUPPORTED_OFFER") throw error;
+    const details: ErrorDetails = error.details ?? {}, { reason, field, sellerValue, accepted, refused } = details;
+    if (reason === "x402_permit2_no_listed_offer") return null;
+    if (typeof reason !== "string") throw error;
+    return { error, refusal: { reason, ...(typeof field === "string" ? { field } : {}),
+      ...(typeof sellerValue === "string" ? { sellerValue } : {}), ...(typeof accepted === "string" ? { accepted } : {}),
+      // ErrorDetail's only list is readonly string[].
+      ...(Array.isArray(refused) ? { refused: refused as readonly string[] } : {}) } };
   }
 }
 
