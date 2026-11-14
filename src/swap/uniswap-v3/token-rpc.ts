@@ -79,11 +79,15 @@ export function createTokenRpc(input: { readonly environment: Readonly<Record<st
     const descriptor = resolve().descriptors[selected]!;
     if (method === "eth_sendRawTransaction") return await submitDirect(method, params, async () => await resolve().session.externalAttempt(
       descriptor.origin, async () => { effects += 1; return await descriptor.attempt(method, params); }));
-    return await descriptor.sessionCall(resolve().session)(method, params);
+    return await descriptor.sessionCall(resolve().session)(method, resolve().archive ? params : pinnedToHash(method, params, primaryBlocks));
   }) as TokenRpcCall;
   Object.defineProperties(call, {
     batch: { value: async (requested: TokenRpcRoute, items: readonly TokenRpcItem[]) => {
       const index = selected ?? 0, descriptor = resolve().descriptors[index]!, route = servedTokenRoute(requested, descriptor, resolve().archive);
+      // The primary stands in for an unconfigured archive or receipt reader only once the pool has selected it: such a batch
+      // never runs the selection, which could quarantine a candidate on a sub-error and send the batch to the next one.
+      if (route === "primary" && requested !== "primary" && selected === null) throw new ApnError("APN_RPC_CONFIG",
+        "Uniswap token primary provider is not semantically selected.", { reason: "token_primary_not_selected", rpcRoute: requested });
       if (route === "primary") return await primary(items);
       if (route === "archive") await verifyArchive(items);
       return await descriptor.sessionBatchCall(resolve().session)(items, route);
@@ -108,7 +112,7 @@ export function createTokenRpc(input: { readonly environment: Readonly<Record<st
       if (tried.has(index)) continue; tried.add(index);
       // Pool code always acquires probe before the scheduler's provider-family lock. No path acquires them in reverse.
       const result = await input.state.withLocks([probeLock(index)], async () => { try {
-        const values = await resolve().descriptors[index]!.sessionBatchCall(resolve().session)(items, "primary");
+        const values = await resolve().descriptors[index]!.sessionBatchCall(resolve().session)(pinnedItems(items, primaryBlocks), "primary");
         rememberBlocks(items, values); selected = index;
         attempts.push({ providerId: candidates()[index]!.id, outcome: "selected", reason: null });
         return { ok: true as const, values };
@@ -126,17 +130,10 @@ export function createTokenRpc(input: { readonly environment: Readonly<Record<st
       { reason: "token_primary_pool_exhausted", attemptedProviders: attempts.length.toString() });
   }
   async function selectedBatch(items: readonly TokenRpcItem[]) {
-    const values = await resolve().descriptors[selected!]!.sessionBatchCall(resolve().session)(items, "primary");
+    const values = await resolve().descriptors[selected!]!.sessionBatchCall(resolve().session)(pinnedItems(items, primaryBlocks), "primary");
     rememberBlocks(items, values); return values;
   }
-  function rememberBlocks(items: readonly TokenRpcItem[], values: readonly unknown[]) {
-    for (let index = 0; index < items.length; index += 1) if (items[index]!.method === "eth_getBlockByNumber") {
-      try { const block = evmRpcRecord(values[index]), number = evmRpcQuantity(block.number), hash = evmRpcHex(block.hash, 32);
-        primaryBlocks.set(`0x${number.toString(16)}`, hash);
-        if (number > 0n && typeof block.parentHash === "string") primaryBlocks.set(`0x${(number - 1n).toString(16)}`, evmRpcHex(block.parentHash, 32));
-      } catch { /* The caller decoder owns the required block shape. */ }
-    }
-  }
+  function rememberBlocks(items: readonly TokenRpcItem[], values: readonly unknown[]) { rememberPrimaryBlocks(primaryBlocks, items, values); }
   async function verifyArchive(items: readonly TokenRpcItem[]) {
     const tags = [...new Set(items.map(archiveTag).filter((tag): tag is string => tag !== null && !archiveVerified.has(tag)))];
     if (tags.length === 0) return;
@@ -195,11 +192,14 @@ function createLegacyTokenRpc(input: { readonly environment: Readonly<Record<str
     return { session, descriptor, read: descriptor.sessionCall(session), batch: descriptor.sessionBatchCall(session),
       archive: bridgeArchiveEndpoint(1, input.environment) !== null }; })();
   let effects = 0, archiveVerified = false;
+  const primaryBlocks = new Map<string, string>();
   const call = (async (method, params) => { if (method === "eth_sendRawTransaction") return await submitDirect(method, params, async () => await resolve().session.externalAttempt(
     resolve().descriptor.origin, async () => { effects += 1; return await resolve().descriptor.attempt(method, params); }));
-    return await resolve().read(method, params); }) as TokenRpcCall;
+    // Without an archive the primary serves every pinned scalar read; with one, a pinned read is the archive's.
+    return await resolve().read(method, resolve().archive ? params : pinnedToHash(method, params, primaryBlocks)); }) as TokenRpcCall;
   Object.defineProperties(call, { batch: { value: async (requested: TokenRpcRoute, items: readonly TokenRpcItem[]) => {
     const route = servedTokenRoute(requested, resolve().descriptor, resolve().archive);
+    if (route === "primary") { const values = await resolve().batch(pinnedItems(items, primaryBlocks), route); rememberPrimaryBlocks(primaryBlocks, items, values); return values; }
     if (route === "archive" && !archiveVerified) { const identity = items.findIndex((item) => item.method === "eth_chainId");
       if (identity >= 0) { const values = await resolve().batch(items, route); tokenChain(values[identity]); archiveVerified = true; return values; }
       await resolve().batch([{ method: "eth_chainId", params: [], cachePolicy: "none", decoder: tokenChain }], route); archiveVerified = true; }
@@ -223,6 +223,31 @@ function servedTokenRoute(route: TokenRpcRoute, descriptor: ReturnType<typeof br
   if (route === "archive") return archive ? "archive" : "primary";
   if (route === "receipt") return descriptor.receipts.reader || descriptor.receipts.fallback ? "receipt" : "primary";
   return route;
+}
+
+/** The EIP-1898 block parameter of each state read that takes one. EIP-1898 defines none for eth_estimateGas. */
+const PINNABLE_STATE_READS: Readonly<Record<string, number>> = { eth_call: 1, eth_getCode: 1, eth_getStorageAt: 2, eth_getBalance: 1, eth_getTransactionCount: 1 };
+/** The blocks this command read from the primary by number: each block's hash, and its parent hash for the block before it. */
+function rememberPrimaryBlocks(blocks: Map<string, string>, items: readonly TokenRpcItem[], values: readonly unknown[]): void {
+  for (let index = 0; index < items.length; index += 1) if (items[index]!.method === "eth_getBlockByNumber") {
+    try { const block = evmRpcRecord(values[index]), number = evmRpcQuantity(block.number), hash = evmRpcHex(block.hash, 32);
+      blocks.set(`0x${number.toString(16)}`, hash);
+      if (number > 0n && typeof block.parentHash === "string") blocks.set(`0x${(number - 1n).toString(16)}`, evmRpcHex(block.parentHash, 32));
+    } catch { /* The caller decoder owns the required block shape. */ }
+  }
+}
+/**
+ * A state read the primary serves at a block number this command read from it goes out pinned to that block's hash
+ * (EIP-1898, requireCanonical), as the custody's allowance read already is: a backend on another branch refuses it
+ * instead of answering that branch's state. The request count is unchanged; a number the command never read stays as it is.
+ */
+function pinnedToHash(method: string, params: readonly unknown[], blocks: ReadonlyMap<string, string>): readonly unknown[] {
+  const index = PINNABLE_STATE_READS[method], tag = index === undefined || params.length !== index + 1 ? undefined : params[index];
+  const hash = typeof tag === "string" && /^0x(?:0|[1-9a-f][0-9a-f]*)$/u.test(tag) ? blocks.get(tag) : undefined;
+  return hash === undefined ? params : [...params.slice(0, index), { blockHash: hash, requireCanonical: true }];
+}
+function pinnedItems(items: readonly TokenRpcItem[], blocks: ReadonlyMap<string, string>): readonly TokenRpcItem[] {
+  return items.map((item) => { const params = pinnedToHash(item.method, item.params, blocks); return params === item.params ? item : { ...item, params }; });
 }
 
 function archiveTag(item: TokenRpcItem): string | null {

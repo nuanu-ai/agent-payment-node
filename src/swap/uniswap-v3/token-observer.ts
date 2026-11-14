@@ -45,7 +45,7 @@ export class UniswapTokenObserver {
     const tag = block.tag, gasDebitWei = (gasUsed * effectivePrice).toString();
     // The effect's own block state; a primary without an archive serves it only while it keeps that block's state.
     const atEffect = async (items: readonly TokenRpcItem[]) => {
-      try { return await tokenBatch(rpc, "archive", items); } catch (error) { throw statusStateRefused(error, rpc, op, blockNumber); }
+      try { return await tokenBatch(rpc, "archive", items); } catch (error) { throw statusStateRefused(error, rpc, op, blockNumber, BigInt(safe.number)); }
     };
     if (status === 0n || kind !== "swap") {
       const [rawAllowance] = await atEffect([allowanceRequest(op, tag)]), allowance = BigInt(evmRpcHex(rawAllowance, 32));
@@ -67,18 +67,23 @@ export class UniswapTokenObserver {
       inputDebitAtomic: (inputBefore - inputAfter).toString(), outputCreditAtomic: (outputAfter - outputBefore).toString() };
   }
 }
+/** How many recent blocks of state a pruning full node keeps (geth's default; public endpoints serve about as many). */
+const PRUNED_STATE_DEPTH = 128n;
 /**
  * Without APN_ETHEREUM_ARCHIVE_RPC_URL the primary serves the reads pinned to the effect's block. When it answers one of
- * them with a JSON-RPC error (not a rate limit, a revert or a transport failure), that is how a pruning node refuses a
- * block's state it no longer keeps (about 128 blocks): status names the archive setting and the command to run again.
- * Every other failure, and any failure of a configured archive, is returned unchanged.
+ * them with a JSON-RPC error (not a rate limit, a revert or a transport failure) and the block is provably older than a
+ * pruning node keeps (the safe head, at or below the latest head, is more than 128 blocks past it), status names the
+ * archive setting and the command to run again. A nearer block's refusal (a load-balanced backend behind, a provider
+ * reporting a revert as -32000) and any failure of a configured archive are returned unchanged.
  */
-function statusStateRefused(error: unknown, rpc: TokenRpcCall, op: UniswapTokenOperation, block: bigint): unknown {
+function statusStateRefused(error: unknown, rpc: TokenRpcCall, op: UniswapTokenOperation, block: bigint, safeHead: bigint): unknown {
   const details = error instanceof ApnError && error.code === "APN_RPC_PROTOCOL" ? error.details : undefined;
-  if (rpc.archiveConfigured?.() !== false || details === undefined || details.rpcSubcallId === undefined || details.providerCode === 3) return error;
+  if (rpc.archiveConfigured?.() !== false || details === undefined || details.rpcSubcallId === undefined || details.providerCode === 3 ||
+      safeHead - block <= PRUNED_STATE_DEPTH) return error;
   return new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", `Uniswap token status needs the token state at the effect's block ${block}, ` +
     "and the primary RPC refused that read. Without APN_ETHEREUM_ARCHIVE_RPC_URL the primary serves it, and a pruning node keeps a block's " +
     "state for about 128 blocks.", { reason: "uniswap_token_status_archive_required", endpointRole: "primary", blockNumber: block.toString(),
+    safeBlockNumber: safeHead.toString(),
     ...(typeof details.rpcMethod === "string" ? { rpcMethod: details.rpcMethod } : {}),
     ...(typeof details.providerCode === "number" ? { providerCode: details.providerCode } : {}),
     nextActions: ["Set APN_ETHEREUM_ARCHIVE_RPC_URL to a public HTTPS Ethereum archive endpoint, then run status again.",

@@ -24,7 +24,16 @@ holds for both families, including the token lane's batched reads. The token
 lane reads receipts from `APN_ETHEREUM_RECEIPT_RPC_URL` when it is set to
 another origin than the primary, else from the archive when that is set, else
 from the primary. A batch goes to one endpoint only; it is never sent to
-another one after a failure.
+another one after a failure. With a token-lane primary pool, the primary
+stands in for a missing archive or receipt reader only after the pool has
+selected its provider; such a batch before that refuses with
+`APN_RPC_CONFIG` / `token_primary_not_selected` and probes nothing. A token
+lane state read the primary serves (`eth_call`, `eth_getCode`,
+`eth_getStorageAt`, `eth_getBalance` at a block the command read) is pinned
+to that block's hash (EIP-1898, `requireCanonical: true`), so a backend on
+another branch refuses it instead of answering other state. `eth_estimateGas`
+keeps the block number, since EIP-1898 does not define it there. Pinning
+changes no request count.
 Public endpoints that need no account or API key:
 
 ```sh
@@ -263,12 +272,15 @@ block before it. Without `APN_ETHEREUM_ARCHIVE_RPC_URL` the primary serves
 these reads. A pruning public primary keeps that state for only about 128
 blocks (about 25 minutes), so run `status` soon after the send, or set an
 archive endpoint before a later first `status`. When the primary answers one
-of these reads with a JSON-RPC error, `status` refuses with
+of these reads with a JSON-RPC error and the effect's block is more than 128
+blocks behind the safe head, `status` refuses with
 `APN_PROVIDER_CAPABILITY_UNAVAILABLE` / `uniswap_token_status_archive_required`
-(`details.blockNumber` is the effect's block). Nothing is recorded, and
-`next_actions` say to set `APN_ETHEREUM_ARCHIVE_RPC_URL` and run
-`apn swap ethereum uniswap-token status --operation <id>` again. With an
-archive configured, its failures are reported as they are. Quote, prepare and
+(`details.blockNumber` is the effect's block, `details.safeBlockNumber` the
+safe head). Nothing is recorded, and `next_actions` say to set
+`APN_ETHEREUM_ARCHIVE_RPC_URL` and run
+`apn swap ethereum uniswap-token status --operation <id>` again. A refusal of
+a nearer block (for example a load-balanced backend that is behind) and any
+failure of a configured archive are reported as they are. Quote, prepare and
 the signing guard read only at a block they have just read from the primary,
 so they never need an archive.
 
