@@ -1,6 +1,7 @@
 import { canonicalJson, hashObject, sha256 } from "../canonical.js";
 import { SA_FILE_LIMIT, SA_HISTORY_LIMIT, SA_MUTABLE_KEYS, SA_OPERATION_KIND, SA_OPERATION_VERSION, SA_TERMINAL, SA_TERMINAL_RESERVE_BYTES, SA_TERMINAL_RESERVE_TRANSITIONS, saImmutable, saMutable, saRequestHash } from "./operation-model.js";
 import { saMaterialHash, saRequirementsHash, saSame } from "./integrity.js";
+import { saProviderReasonToken, saVerifyAccepted } from "./model.js";
 import { SA_REASON_CODES, saFail } from "./reasons.js";
 import { saBlock, saBlockOrder, saCanonicalAddress, saExact, saHash, saHex, saIso, saStateCounters, saUint, validateSmartAccountGaslessIntent } from "./schema.js";
 const TRANSITION_KEYS = ["at", "previousHash", ...SA_MUTABLE_KEYS, "transitionHash"];
@@ -178,10 +179,24 @@ function journalMutable(value, intent, operationId, fingerprint, at) {
         if (time(exposedAt) >= time(intent.expiresAt))
             corrupt();
     }
+    let accepted = false;
     if (m.verification !== null) {
-        const v = saExact(m.verification, ["observedAt", "payer", "isValid", "responseHash"]);
-        if (exposedAt === null || v.isValid !== true || saCanonicalAddress(v.payer) !== intent.binding.ownerAddress)
+        const refused = typeof m.verification === "object" && Object.hasOwn(m.verification, "invalidReason");
+        const v = saExact(m.verification, ["observedAt", "payer", "isValid", ...(refused ? ["invalidReason"] : []), "responseHash"]);
+        if (exposedAt === null)
             corrupt();
+        if (!refused) {
+            if (v.isValid !== true || saCanonicalAddress(v.payer) !== intent.binding.ownerAddress)
+                corrupt();
+            accepted = true;
+        }
+        else {
+            // A refused answer: invalid, or valid for another payer. Its reason is a closed token or none.
+            const payer = v.payer === null ? null : saCanonicalAddress(v.payer);
+            if (typeof v.isValid !== "boolean" || (v.isValid && (payer === null || payer === intent.binding.ownerAddress)) ||
+                (v.invalidReason !== null && saProviderReasonToken(v.invalidReason) !== v.invalidReason))
+                corrupt();
+        }
         within(v.observedAt, exposedAt, at);
         saHash(v.responseHash);
     }
@@ -190,13 +205,13 @@ function journalMutable(value, intent, operationId, fingerprint, at) {
             corrupt();
     }
     else {
-        if (m.verification === null)
+        if (!accepted)
             corrupt();
         dispatchAt = within(m.dispatchStartedAt, m.verification.observedAt, at);
         if (time(dispatchAt) >= time(intent.expiresAt))
             corrupt();
     }
-    if ((m.state === "verified_pending" && m.verification === null) ||
+    if ((m.state === "verified_pending" && !accepted) ||
         (m.state === "exposure_pending" && m.verification !== null))
         corrupt();
     if (m.providerSettlement !== null) {
@@ -268,8 +283,11 @@ function step(previous, next) {
     if (!EDGES[previous.state].includes(next.state) || time(next.at) < time(previous.at))
         corrupt();
     const once = ["approval", "material", "verification", "providerSettlement"];
+    // A refused verify answer is written on the step that leaves exposure for unknown finality, never on the way to settle.
+    const refused = next.verification !== null && !saVerifyAccepted(next.verification);
     const stages = { approval: ["awaiting_approval", "execution_pending"], material: ["material_pending", "material_sealed"],
-        verification: ["exposure_pending", "verified_pending"], providerSettlement: ["dispatch_pending", "submitted_pending"] };
+        verification: ["exposure_pending", refused ? "unknown_finality" : "verified_pending"],
+        providerSettlement: ["dispatch_pending", "submitted_pending"] };
     for (const key of once) {
         if (previous[key] !== null && !saSame(previous[key], next[key]))
             corrupt();

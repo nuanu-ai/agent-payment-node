@@ -17,6 +17,11 @@ export interface SmartAccountX402EnginePort {
 export declare class OfficialSmartAccountX402Engine implements SmartAccountX402EnginePort {
     create(input: Parameters<SmartAccountX402EnginePort["create"]>[0]): Promise<PaymentPayload>;
 }
+/**
+ * MetaMask's facilitator addresses: the SDK list plus the Base signers MetaMask's facilitator publishes beyond it
+ * (SA_FACILITATORS, from its own `/supported`). A seller offer must name only these.
+ */
+export declare const APPROVED_METAMASK_FACILITATORS: readonly Address[];
 export declare class MetaMaskSmartAccountX402Adapter implements X402PaymentMaterialPort {
     private readonly permissions;
     private readonly materials;

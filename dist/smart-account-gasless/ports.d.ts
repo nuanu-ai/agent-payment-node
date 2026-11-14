@@ -1,5 +1,5 @@
 import type { Hex } from "../model.js";
-import type { SmartAccountGaslessBinding, SmartAccountGaslessBlock, SmartAccountGaslessCursor, SmartAccountGaslessIntent, SmartAccountGaslessMaterialDescriptor, SmartAccountGaslessMaterialHashes, SmartAccountGaslessPayload, SmartAccountGaslessProfileIdentity, SmartAccountGaslessProviderBinding, SmartAccountGaslessProviderSettlement, SmartAccountGaslessRpcObservation, SmartAccountGaslessSealedMaterial, SmartAccountGaslessSnapshot, SmartAccountGaslessVerification } from "./model.js";
+import type { SmartAccountGaslessBinding, SmartAccountGaslessBlock, SmartAccountGaslessCursor, SmartAccountGaslessIntent, SmartAccountGaslessMaterialDescriptor, SmartAccountGaslessMaterialHashes, SmartAccountGaslessPayload, SmartAccountGaslessProfileIdentity, SmartAccountGaslessProviderBinding, SmartAccountGaslessProviderSettlement, SmartAccountGaslessRpcObservation, SmartAccountGaslessSealedMaterial, SmartAccountGaslessSnapshot, SmartAccountGaslessVerifyAnswer } from "./model.js";
 import type { SmartAccountGaslessOperationRecord, SmartAccountGaslessReceipt } from "./operation-model.js";
 export interface SmartAccountGaslessMaterialPort {
     /** Ordinary retained custody read; it never connects, grants or signs. */
@@ -23,7 +23,7 @@ export interface SmartAccountGaslessMaterialValidatorPort {
 }
 export interface SmartAccountGaslessProviderPort {
     supported(): Promise<SmartAccountGaslessProviderBinding>;
-    verify(operation: SmartAccountGaslessOperationRecord, material: SmartAccountGaslessSealedMaterial): Promise<SmartAccountGaslessVerification>;
+    verify(operation: SmartAccountGaslessOperationRecord, material: SmartAccountGaslessSealedMaterial): Promise<SmartAccountGaslessVerifyAnswer>;
     settle(operation: SmartAccountGaslessOperationRecord, material: SmartAccountGaslessSealedMaterial): Promise<SmartAccountGaslessProviderSettlement>;
 }
 export interface SmartAccountGaslessObserveInput {

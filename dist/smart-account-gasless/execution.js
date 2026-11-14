@@ -1,4 +1,5 @@
 import { saPolicyHash, saSame } from "./integrity.js";
+import { saVerifyAccepted } from "./model.js";
 import { assertSmartAccountGaslessBinding, smartAccountGaslessOwner } from "./owner.js";
 import { SmartAccountGaslessClock, smartAccountGaslessApprovalPhrase, smartAccountGaslessApprovalSummary, smartAccountGaslessSnapshot } from "./policy.js";
 import { saClassify, saError, saFail, saFailure } from "./reasons.js";
@@ -115,15 +116,22 @@ export class SmartAccountGaslessExecution {
                 saFail("sa_gasless_state_corrupt");
             const verification = await this.provider.verify(op, exposed);
             this.clock.check(op, [verification.observedAt]);
-            await persist({ state: "verified_pending", verification });
-            // Only the immediate call that received this verify response may reach settle.
-            await this.guard(op, false, exposed);
-            const dispatchAt = new Date(this.clock.live(op)).toISOString();
-            await persist({ state: "dispatch_pending", submissionAttempts: 1, dispatchStartedAt: dispatchAt }, dispatchAt);
-            this.clock.live(op);
-            const providerSettlement = await this.provider.settle(op, exposed);
-            this.clock.check(op, [providerSettlement.observedAt]);
-            await persist({ state: "submitted_pending", providerSettlement });
+            if (!saVerifyAccepted(verification)) {
+                // The refused answer is kept with its closed reason; the delegation stays exposed until its on-chain expiry.
+                await persist({ state: "unknown_finality", verification, failure: saFailure(verification.isValid
+                        ? "sa_gasless_verify_payer_mismatch" : "sa_gasless_verify_rejected") });
+            }
+            else {
+                await persist({ state: "verified_pending", verification });
+                // Only the immediate call that received this verify response may reach settle.
+                await this.guard(op, false, exposed);
+                const dispatchAt = new Date(this.clock.live(op)).toISOString();
+                await persist({ state: "dispatch_pending", submissionAttempts: 1, dispatchStartedAt: dispatchAt }, dispatchAt);
+                this.clock.live(op);
+                const providerSettlement = await this.provider.settle(op, exposed);
+                this.clock.check(op, [providerSettlement.observedAt]);
+                await persist({ state: "submitted_pending", providerSettlement });
+            }
         }
         catch (error) {
             const failure = saClassify(error, "sa_gasless_internal");

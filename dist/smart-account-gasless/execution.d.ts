@@ -1,6 +1,6 @@
 import type { ClockPort } from "../ports.js";
 import type { StateStore } from "../state.js";
-import type { SmartAccountGaslessMutable } from "./model.js";
+import { type SmartAccountGaslessMutable } from "./model.js";
 import type { SmartAccountGaslessOperationRecord } from "./operation-model.js";
 import type { SmartAccountGaslessApprovalPort, SmartAccountGaslessMaterialPort, SmartAccountGaslessProviderPort, SmartAccountGaslessRpcFactory, SmartAccountGaslessRpcPort } from "./ports.js";
 import { type SmartAccountGaslessFailure } from "./reasons.js";
