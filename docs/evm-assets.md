@@ -298,19 +298,34 @@ schema version stays `apn.cli.v1`.
 started record precedes signing, and the encrypted signature is saved before the command returns. After a restart APN
 retrieves only that signature; if none exists, the operation fails before effect rather than signing a replacement.
 
-**After signing.** A saved signature is only dispatched as its exact bytes, or kept for `operation resume`:
+**After signing.** A saved signature is only dispatched as its exact bytes, or kept for `operation resume`. APN never
+signs a second transaction for a transfer and never changes its nonce or fees.
 
 - If the approving invocation finds no receipt yet, the state is `submitted_pending`.
-  `apn operation resume --operation <id> --observe-only true --rpc-url <url>` inspects it later without broadcasting.
-- Resume sends a signature APN never dispatched. After an ambiguous dispatch it re-sends the identical bytes only when
-  the RPC holds neither a receipt nor the pending transaction.
+  `apn operation resume --operation <id> --observe-only true --rpc-url <url>` inspects it later without custody access
+  and never broadcasts.
+- A plain resume sends a signature APN never dispatched, once, behind its dispatch fence. If `--observe-only true` finds
+  such a signature first, it moves it to `unknown_finality` without sending it; from then on it is handled as dispatched.
+- For a dispatched transfer (`submitted_pending` or `unknown_finality`), resume reads the receipt of the saved
+  transaction hash first. A receipt completes the transfer or confirms a revert when its proof is sufficient. An
+  unreadable receipt, or a receipt whose proof is insufficient, leaves the transfer nonterminal, and resume does
+  nothing more.
+- Only when the RPC answers that no receipt exists does resume read, in one batch, the sender's nonce at the
+  `finalized` tag and the receipt and the transaction of the saved hash. If that read fails, nothing more happens.
 - If the sender's finalized nonce is past the frozen one, and a node whose transaction index reaches the block read at
   prepare knows neither the transaction nor a receipt, the transfer ends `failed_proven_superseded` and its usage hold
-  is released.
-- For a transfer already in `unknown_finality`, resume checks the saved transaction's receipt and can complete it or
-  confirm a revert when the existing receipt proof is sufficient. If the receipt is absent, unreadable or still
-  insufficient, the operation stays nonterminal. From that state resume does not send the transaction again, load
-  custody material or attempt a nonce-based supersession proof.
+  is released. Nothing is sent.
+- **Same-transaction re-send.** If that batch shows no receipt, no transaction for the saved hash, and a finalized
+  sender nonce that is not past the frozen nonce, resume passes the same signed transaction to the RPC again
+  (`eth_sendRawTransaction`). It reads the saved signed bytes back from encrypted custody, checks them against the saved
+  transaction hash and the frozen transfer, and sends them unchanged. The transaction hash and nonce are the same as
+  the first send, so at most one copy can be included and the amount moves at most once.
+  - The RPC returns the same hash: the state is `submitted_pending`, reason `same_signed_bytes_redispatched`.
+  - The send fails: the state is `unknown_finality` (reason `redispatch_outcome_ambiguous` when it was
+    `submitted_pending`).
+  - The RPC returns another hash: nothing changes.
+- Every later plain resume repeats these checks, so the same bytes can be passed again while the conditions hold.
+  `--observe-only true` and the blocker observation of a new prepare never send them.
 
 **Abandon.**
 

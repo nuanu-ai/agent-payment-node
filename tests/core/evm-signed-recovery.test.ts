@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import test from "node:test";
 import { ApnCore } from "../../src/core.js";
 import { ApnError } from "../../src/errors.js";
@@ -61,6 +63,20 @@ test("an ambiguous dispatch the RPC never saw is re-sent as the identical bytes 
   assert.equal((await setup.core.transfer.resume(prepared.operation_id) as { state: string }).state, "completed");
   assert.equal(rpc.broadcastCount, 2);
   assert.equal(await ledgerState(temporary.root, (await setup.state.findOperation(prepared.operation_id))!), "finalized");
+});
+
+// QA EVM-RESEND-FROM-UNKNOWN-FINALITY: README and part of the EVM guide promised that resume never repeats a send, while
+// the test above proves it passes the identical signed bytes again. Both now state that behaviour and its conditions.
+test("README and the EVM guide state the same-transaction re-send and no longer promise that resume never repeats a send", async () => {
+  const folded = async (path: string) => (await readFile(resolve(path), "utf8")).replace(/\s+/gu, " ");
+  const readme = await folded("README.md"), guide = await folded("docs/evm-assets.md");
+  assert.doesNotMatch(readme, /an ambiguous send is only observed afterwards, never repeated/u);
+  assert.doesNotMatch(guide, /From that state resume does not send the transaction again/u);
+  assert.match(readme, /only when the RPC holds neither a receipt nor the transaction for the saved hash and the sender's finalized nonce is not past the frozen nonce/u);
+  assert.match(readme, /at most one copy can be included; APN never signs a second transfer/u);
+  assert.match(guide, /resume passes the same signed transaction to the RPC again/u);
+  assert.match(guide, /the state is `submitted_pending`, reason `same_signed_bytes_redispatched`/u);
+  assert.match(guide, /`--observe-only true` and the blocker observation of a new prepare never send them/u);
 });
 
 test("a finalized nonce taken by another transaction ends the transfer as superseded, releases its hold and frees the account", async (t) => {
