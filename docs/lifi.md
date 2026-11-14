@@ -117,9 +117,14 @@ A changed policy refuses before signing (`allowlist_policy_changed`); prepare a 
 
 Ethereum, Base and Arbitrum One are source chains. BNB Smart Chain, Monad and Linea are destination-only: they are
 reached only from Ethereum with native ETH, and the recipient must be the profile owner's own address
-(`bridge_self_recipient_required`). A destination-only chain presented as a source is refused before LI.FI step
-materialization: `bridge routes` returns every row as `preparable: false` with `source_execution_unreviewed`, and
-`bridge prepare` refuses the quote with the same reason, including a quote saved earlier.
+(`bridge_self_recipient_required`). A destination-only chain presented as a source never reaches LI.FI step
+materialization. Where APN stops it depends on the pair:
+
+| Request | Stopped by | Result |
+| --- | --- | --- |
+| BNB to Ethereum ETH, MON to Ethereum ETH | `bridge routes` request validation, before any wallet read or LI.FI call | `APN_INVALID_INPUT`, message `Bridge validation failed: admitted_asset_pair.` BNB and MON pair only with their own coin, and no source chain has a BNB or MON row |
+| Any other request from BNB Smart Chain, Monad or Linea | `bridge routes` request validation | `APN_INVALID_INPUT` with `admitted_asset_pair` (another chain or asset kind), `admitted_quote_asset_pair` (a quote-only destination), or `asset_not_on_frozen_list` / `asset_listed_not_bridge_admitted` (a token leg: these chains have no token rows) |
+| Linea ETH to Ethereum ETH | `bridge prepare` | `bridge routes` lists every row as `preparable: false` with its row gate ([Route row gates](#route-row-gates)): `source_execution_unreviewed` on the `across` row, `asset_tool_unreviewed` on a `stargateV2` row, `finite_decoder_and_correlated_evidence_unavailable` on any other tool. `bridge prepare` refuses every row of the quote with `APN_PROVIDER_CAPABILITY_UNAVAILABLE`, message `Bridge validation failed: source_execution_unreviewed.`, before materialization or any RPC read, including a quote saved earlier |
 
 ### Native coins
 
@@ -174,9 +179,16 @@ any route leg and treats a drift as an installation fault. An address the list d
 ### Quote-only destinations
 
 Ethereum USDC to four further USDC deployments named by the frozen list can be discovered and decoded offline, but not
-executed. Every returned row is `preparable: false` with `destination_execution_unreviewed`; `bridge prepare` refuses
-it before opening any destination RPC, and no approval or send path exists. A tool not listed for the destination
-returns `destination_tool_quote_unavailable`.
+executed. Every returned row is `preparable: false`, and its `executability_gate` depends on the tool
+([Route row gates](#route-row-gates)):
+
+- An `across` or `stargateV2` row whose tool the destination lists has `destination_execution_unreviewed`.
+- An `across` or `stargateV2` row whose tool the destination does not list has `destination_tool_quote_unavailable`.
+- A row of any other tool, such as `relay`, has `finite_decoder_and_correlated_evidence_unavailable`.
+
+`bridge prepare` refuses every row of such a quote with `APN_PROVIDER_CAPABILITY_UNAVAILABLE`, message
+`Bridge validation failed: destination_execution_unreviewed.`, before materialization or any RPC read. No approval or
+send path exists.
 
 | Destination | USDC | Tools |
 | --- | --- | --- |
@@ -263,6 +275,33 @@ chains, tokens, atomic amount, the tools APN allowed (`across` and `stargateV2` 
 call; for the Ethereum ETH to BNB composite `across`, `fly` and a destination call), whether LI.FI sent
 `unavailableRoutes`, and its `filteredOut` and `failed` rows (path, step, tool, error type, code, message). At most
 eight rows of each kind are shown, control characters are stripped and each field is capped at 240 characters.
+
+#### Route row gates
+
+Each route row has `preparable`, `executable: false` and `executability_gate`. A preparable row has `preparable: true`
+and `executability_gate: selected_materialization_rpc_deployment_fee_and_consent_required`. Every other row has
+`preparable: false` and the first gate in this table that applies to it:
+
+| Order | `executability_gate` | Applies to |
+| --- | --- | --- |
+| 1 | `finite_decoder_and_correlated_evidence_unavailable` | A tool other than `across` and `stargateV2`, such as LI.FI's `relay`, `glacis`, `mayan` or `near` (APN's own Relay rail is `apn relay`, see [relay.md](relay.md)) |
+| 2 | `asset_tool_unreviewed` | A `stargateV2` row with a native principal outside Ethereum ETH to Base ETH |
+| 3 | `destination_tool_quote_unavailable` | A quote-only destination that does not list the row's tool |
+| 4 | `destination_execution_unreviewed` | A quote-only destination that lists the row's tool |
+| 5 | `asset_tool_unreviewed` | A leg with no reviewed row for the tool, such as `stargateV2` with WBTC (no pinned Stargate pool) |
+| 6 | `source_execution_unreviewed` | A destination-only source; in practice only the `across` row of Linea ETH to Ethereum ETH |
+
+So `destination_execution_unreviewed` and `source_execution_unreviewed` appear only on `across` and `stargateV2` rows
+that pass the earlier gates. A `relay` row always shows its own tool gate (order 1). A `stargateV2` native row from
+Linea shows `asset_tool_unreviewed` (order 2).
+
+`bridge prepare` does not trust the stored row gate: it parses the hash-bound raw response again. A route ID that is
+not in the quote is refused with `APN_INVALID_INPUT` (`route_not_in_snapshot`). Then `bridge prepare` refuses in this
+order, each time with `APN_PROVIDER_CAPABILITY_UNAVAILABLE` and the message `Bridge validation failed: <reason>.`:
+
+1. `destination_execution_unreviewed`: every row of a quote to a quote-only destination, whatever its row gate.
+2. `source_execution_unreviewed`: every row of a quote from a destination-only chain, whatever its row gate.
+3. `finite_bridge_decoder_unavailable`: any other row with `preparable: false`.
 
 ### Prepare
 
@@ -978,11 +1017,13 @@ does not refuse a repeat payment of the same terms while the first is in flight.
 | `asset_not_on_frozen_list` | Token address not on the frozen list | Use an admitted row |
 | `asset_listed_not_bridge_admitted` | Listed token without a bridge row | Use an admitted row |
 | `asset_has_no_listed_peer` | Row has no admitted destination (Ethereum USDT) | No route exists |
-| `admitted_asset_pair` | Legs differ in kind, pair, decimals or peers | Choose a matching pair |
+| `admitted_asset_pair` (`APN_INVALID_INPUT`) | Legs differ in kind, pair, decimals or peers; also BNB or MON as source | Choose a matching pair |
 | `asset_tool_unreviewed` | Tool not admitted for this asset or direction | Use Across, or Stargate only for the admitted pairs |
-| `source_execution_unreviewed` | Destination-only chain used as source | Use Ethereum, Base or Arbitrum as source |
-| `destination_execution_unreviewed` | Quote-only destination | Not executable |
+| `finite_decoder_and_correlated_evidence_unavailable` | Route row of a tool other than `across` or `stargateV2`, such as `relay` | Choose an `across` or `stargateV2` row |
+| `source_execution_unreviewed` | Linea ETH to Ethereum ETH: the `across` row gate, and the `bridge prepare` refusal (`APN_PROVIDER_CAPABILITY_UNAVAILABLE`) for every row of that quote | Use Ethereum, Base or Arbitrum as source |
+| `destination_execution_unreviewed` | Quote-only destination: the gate of an `across` or `stargateV2` row whose tool it lists, and the `bridge prepare` refusal (`APN_PROVIDER_CAPABILITY_UNAVAILABLE`) for every row of that quote | Not executable |
 | `destination_tool_quote_unavailable` | Tool not listed for a quote-only destination | Not executable |
+| `finite_bridge_decoder_unavailable` (`APN_PROVIDER_CAPABILITY_UNAVAILABLE`) | `bridge prepare` of any other row with `preparable: false` | Choose a row with `preparable: true` |
 | `bridge_self_recipient_required` (`APN_ALLOWLIST_REFUSED`) | Linea, Monad or BNB native delivery to another address | Send to the profile owner's own address |
 | `allowlist_policy_changed`, `bridge_binding_changed`, `bridge_mechanism_mismatch` | Policy or binding differs from preparation | Prepare a new operation |
 | `APN_FEE_BUDGET_EXCEEDED` (`aggregate_native_debit`, `fresh_aggregate_native_debit`, `stargate_native_fee_exceeds_cap`) | Fees exceed `--max-native-debit-wei` | Raise the budget or retry later |
