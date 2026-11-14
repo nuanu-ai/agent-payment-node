@@ -38,7 +38,7 @@ import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-ve
 const isolated = await temporaryState(), temporaryRoot = isolated.base;
 after(isolated.cleanup);
 
-const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "relay", "mega", "mega funding", "sei", "sei funding", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "circle evm", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet metamask", "wallet policy", "wallet allowance", "x402", "x402 merchant", "x402 permit2", "x402 solana", "x402 permit2 allowance", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
+const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "relay", "mega", "mega funding", "sei", "sei funding", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "gasless usdt", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "circle evm", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet metamask", "wallet policy", "wallet allowance", "x402", "x402 merchant", "x402 permit2", "x402 solana", "x402 permit2 allowance", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
   "x402 permit2 approve", "x402 permit2 observe",
   "x402 permit2 preflight",
@@ -247,6 +247,48 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "Machine contract: apn help --json",
     "Detailed help: apn help wallet policy <child>",
   ].join("\n"));
+});
+
+test("every parent path of a command is a group whose help lists that command (QA F07)", () => {
+  const groups = new Map(COMMAND_GROUPS.map((group) => [group.path.join(" "), group]));
+  for (const command of COMMANDS) {
+    for (let length = 1; length < command.path.length; length += 1) {
+      const parent = command.path.slice(0, length).join(" ");
+      assert.ok(groups.has(parent), `${command.path.join(" ")} has no group ${parent}`);
+    }
+    if (command.path.length < 2) continue;
+    const help = dispatchDiscovery(["help", ...command.path.slice(0, -1)]);
+    assert.ok(help?.ok, command.path.join(" "));
+    assert.ok(help.output.split("\n").includes(`  ${command.synopsis} — ${command.summary}`), command.path.join(" "));
+  }
+});
+
+test("gasless usdt group help lists its six leaf commands, and gasless names it as a subgroup (QA F07)", () => {
+  const leaves = COMMANDS.filter((command) => command.path.length === 3 && command.path[0] === "gasless" && command.path[1] === "usdt");
+  assert.deepEqual(leaves.map((command) => command.path[2]), ["prepare", "status", "resume", "execute", "execution-status", "observe"]);
+  const expected = [
+    "Prepare, send once and observe an Ethereum USDT transfer whose gas is paid in USDT.",
+    "",
+    "Usage:",
+    "  apn gasless usdt <command> [options]",
+    "",
+    "Subgroups:",
+    "  (none)",
+    "",
+    "Commands:",
+    ...leaves.map((command) => `  ${command.synopsis} — ${command.summary}`),
+    "",
+    "Machine contract: apn help --json",
+    "Detailed help: apn help gasless usdt <child>",
+  ].join("\n");
+  assert.equal(renderHelp(["gasless", "usdt"]), expected);
+  for (const argv of [["help", "gasless", "usdt"], ["gasless", "usdt", "--help"]]) {
+    assert.deepEqual(dispatchDiscovery(argv), { ok: true, output: expected, exitCode: 0, presentation: "text" }, argv.join(" "));
+  }
+  assert.ok(renderHelp(["gasless"]).split("\n").includes(
+    "  apn gasless usdt <command> [options] — Prepare, send once and observe an Ethereum USDT transfer whose gas is paid in USDT."));
+  assert.deepEqual(COMMAND_MANIFEST.groups.find((group) => group.path.join(" ") === "gasless usdt"),
+    { path: ["gasless", "usdt"], summary: "Prepare, send once and observe an Ethereum USDT transfer whose gas is paid in USDT.", kind: "group" });
 });
 
 test("machine discovery emits the exact complete manifest as one raw JSON value", () => {

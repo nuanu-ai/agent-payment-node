@@ -86,6 +86,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["stargate", "token"], summary: "Bridge pinned Optimism USDC to Polygon with an optional native drop.", kind: "group" },
   { path: ["gasless"], summary: "Transfer USDC with gas paid from the total USDC budget.", kind: "group" },
   { path: ["gasless", "transfer"], summary: "Prepare and approve a USDC fee transfer.", kind: "group" },
+  { path: ["gasless", "usdt"], summary: "Prepare, send once and observe an Ethereum USDT transfer whose gas is paid in USDT.", kind: "group" },
   { path: ["bridge"], summary: "Discover, prepare and recover finite LI.FI cross-chain routes.", kind: "group" },
   { path: ["oneclick"], summary: "Direct NEAR 1Click deposits on pinned lanes to TRON and Solana.", kind: "group" },{ path: ["oneclick", "source"], summary: "One Base USDC or Ethereum ETH source deposit.", kind: "group" },
   { path: ["circle"], summary: "Bounded Circle V2 Base to Solana USDC operations.", kind: "group" },
