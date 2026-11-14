@@ -7,6 +7,7 @@ import { ApnError } from "../../errors.js";
 import type { ClockPort } from "../../ports.js";
 import type { StateStore } from "../../state.js";
 import { assetAdmitsSwapMechanism } from "../route-admission.js";
+import { evaluateSwapAssetAdmission, swapOwnerAdmissionRequired, type SwapAssetSide } from "../owner-admission.js";
 import type { UniswapTokenQuoteRequest } from "./token-builder.js";
 import type { UniswapTokenOperation } from "./token-operation.js";
 import type { UniswapTokenMaterial } from "./token-material.js";
@@ -20,14 +21,17 @@ export class UniswapTokenUsage {
 
   async admitQuote(request: UniswapTokenQuoteRequest, now: Date): Promise<string> {
     const active = await this.active(request.profile, request.account), identity = usageIdentity(request.account, request.sourceToken);
-    const current = await this.ledger.usage(identity, now);
-    const source = evaluateAssetPolicy(active.registry, { chain: identity.chain, asset: identity.asset, rail: "swap", amountAtomic: request.amountAtomic,
-      dailyUsageAtomic: current.amountAtomic, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-    const destination = evaluateAssetPolicy(active.registry, { chain: "eip155:1", asset: { kind: "token", identifier: request.outputToken },
-      rail: "swap", amountAtomic: request.minimumOutputAtomic, dailyUsageAtomic: "0",
-      asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-    if (!assetAdmitsSwapMechanism(source.asset, UNISWAP_TOKEN_MECHANISM_PIN) || !assetAdmitsSwapMechanism(destination.asset, UNISWAP_TOKEN_MECHANISM_PIN)) {
-      blocked("Token pair lacks the exact Uniswap mechanism admission.", "uniswap_token_policy_mechanism");
+    const current = await this.ledger.usage(identity, now), at = now.toISOString();
+    // A token the active policy does not list, admit for the swap rail or admit with this route refuses as
+    // swap_owner_admission_required and names the token, like the other guarded swap lanes at prepare.
+    const subject = (side: SwapAssetSide, token: string) => ({ profile: request.profile, side, inventory: "apn swap ethereum uniswap-token inventory",
+      asset: { chain: "eip155:1", kind: "token" as const, identifier: token } });
+    const source = evaluateSwapAssetAdmission(active.registry, subject("source", request.sourceToken),
+      { amountAtomic: request.amountAtomic, dailyUsageAtomic: current.amountAtomic }, at);
+    const destination = evaluateSwapAssetAdmission(active.registry, subject("destination", request.outputToken),
+      { amountAtomic: request.minimumOutputAtomic, dailyUsageAtomic: "0" }, at);
+    for (const [side, token, admission] of [["source", request.sourceToken, source], ["destination", request.outputToken, destination]] as const) {
+      if (!assetAdmitsSwapMechanism(admission.asset, UNISWAP_TOKEN_MECHANISM_PIN)) throw swapOwnerAdmissionRequired(subject(side, token), "swap_route_not_admitted");
     }
     assertRecipientAdmitted({ admission: source, recipient: request.recipient });
     assertRecipientAdmitted({ admission: destination, recipient: request.recipient });

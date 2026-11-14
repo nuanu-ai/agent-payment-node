@@ -190,7 +190,14 @@ the minimum output; the daily caps are enforced by the shared usage ledger
 when the approval reserves the input. The caps above are examples; nothing
 defaults to them. Without an active admission `prepare` refuses with
 `swap_owner_admission_required`, and a policy changed after `prepare` refuses
-with `swap_policy_drift`.
+with `swap_policy_drift`. An active policy that does not admit TRX or USDT
+also refuses with `swap_owner_admission_required`. Its `details` name the
+`side` (`source` or `destination`), the `chain`, the `asset` (`native` or the
+token address) and the `admissionGap`: `network_not_listed`,
+`asset_not_listed`, `swap_rail_not_admitted` (listed without the `swap` rail)
+or `swap_route_not_admitted` (admitted for `swap` with another route). Its
+`next_actions` are `apn allowlist policy status --profile <profile>` and
+`apn swap tron sunswap inventory`.
 
 ## Approve, execute, status
 
