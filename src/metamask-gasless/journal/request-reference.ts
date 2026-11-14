@@ -45,6 +45,10 @@ export class EncryptedMetaMaskGaslessRequestReferenceStore implements MetaMaskGa
     this.files = new RequestReferenceFiles(state.root);
   }
 
+  async ready(): Promise<void> {
+    (await loadOrCreateWrappingSecret(this.files, this.wrappingSecret)).fill(0);
+  }
+
   /**
    * The caller holds the operation's lock and no journal exists for it yet, so a record found here is only what an
    * interrupted earlier prepare of the same operation left; it is replaced, and its id was never sent or saved anywhere.

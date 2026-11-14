@@ -66,6 +66,9 @@ export class MetaMaskGaslessPreparation {
         }
         const rpc = this.o.rpcFor(request.chainId);
         if (rpc.chainId !== request.chainId) mmFail("mm_gasless_rpc_binding");
+        // The wrapping secret that seals the request id is read before any provider or chain read: a missing secret over
+        // sealed state or a refusing Keychain refuses here, at no provider cost. The seal below reads the command's copy.
+        await this.o.references.ready(); clock.check();
         return await state.withLocks(["provider-session:metamask-agent-wallet"], async () => {
           clock.check();
           const binding = await this.o.provider.inspect(owner); clock.check();

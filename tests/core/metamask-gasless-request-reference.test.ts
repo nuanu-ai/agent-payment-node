@@ -213,3 +213,34 @@ test("after dispatch a sealed id that cannot be opened is a failed provider read
     assert.equal(f.provider.submissions.length, 1, "never a second request");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("prepare reads the wrapping secret before any provider or chain read: a refusing Keychain or a secret missing over sealed state costs none", async (t) => {
+  const root = await sandbox();
+  try {
+    const cases: ReadonlyArray<readonly [string, (f: Fixture) => Promise<void>, string, string | undefined]> = [
+      ["Keychain refused", async (f) => { f.wrapping.failure = new ApnError("APN_NATIVE_REJECTED", "The APN login-Keychain wrapping secret is unavailable.",
+        { nativeCode: "APN_KEYCHAIN_UNAVAILABLE" }); }, "APN_NATIVE_REJECTED", undefined],
+      ["secret missing over sealed state", async (f) => {
+        const other = "12345678-1234-4234-8234-123456789abc";
+        await f.references.seal({ profileHash: f.state.profileHash(f.profile), operationId: "e".repeat(64),
+          requestIdHash: mmPrivateHash("request-id", other) }, other);
+        f.wrapping.secret = null;
+      }, "APN_STATE_CORRUPT", "wrapping_secret_missing"],
+    ];
+    for (const [name, damage, code, reason] of cases) await t.test(name, async () => {
+      const f = await mmFixture(join(root, name.replaceAll(" ", "-")));
+      await damage(f);
+      const refused = await f.core.execute({ command: "gasless.transfer.prepare", profile: f.profile, request: f.request,
+        idempotencyKey: "mm-fixture-refused" });
+      assert.equal(refused.ok, false); assert.equal(refused.error?.code, code, JSON.stringify(refused.error));
+      if (reason !== undefined) assert.equal(refused.error?.details?.reason, reason);
+      assert.deepEqual(f.provider.calls, [], "no provider read before the wrapping secret is read");
+      assert.deepEqual(f.rpc.calls, [], "no chain read before the wrapping secret is read");
+      assert.deepEqual(await readdir(join(f.state.root, "metamask-gasless-operations")).catch(() => []), [], "no journal is written");
+      // With the Keychain item back, the same owner prepares as usual.
+      f.wrapping.failure = undefined; f.wrapping.secret = Buffer.alloc(32, 7);
+      const { operation } = await f.prepare();
+      assert.equal(operation.state, "awaiting_approval");
+    });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

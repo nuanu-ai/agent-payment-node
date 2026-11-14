@@ -43,6 +43,11 @@ export interface MetaMaskGaslessRequestBinding {
  * (journal/request-reference.ts): sealed once at prepare, opened only to send the request or to read its job.
  */
 export interface MetaMaskGaslessRequestReferencePort {
+  /**
+   * Loads the wrapping secret, or creates the first one for a state that holds nothing sealed, before prepare reads the
+   * provider or the chain: a missing secret or a refusing Keychain costs no provider read.
+   */
+  ready(): Promise<void>;
   seal(binding: MetaMaskGaslessRequestBinding, requestId: string): Promise<void>;
   open(binding: MetaMaskGaslessRequestBinding): Promise<string>;
 }

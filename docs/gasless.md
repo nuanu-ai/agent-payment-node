@@ -855,8 +855,10 @@ reason instead of replacing it with `mm_gasless_provider_unavailable`, `mm_gasle
 MetaMask files the relay job, and the MFA approval it waits on, under a request UUID that APN chooses at prepare. APN
 keeps that UUID encrypted. Prepare seals it under the login-Keychain wrapping secret, with the same custody envelope as
 wallets and MetaMask x402 authorizations, in `metamask-gasless-request-references/<profile-hash>/<operation-id>.json`.
-Prepare creates the wrapping secret if the state holds nothing sealed yet. The operation journal keeps only the UUID's
-hash, and status, receipts and output show only that hash (`provider_request_id_hash`).
+Prepare reads the wrapping secret before any provider or chain read, and creates it if the state holds nothing sealed
+yet. A secret missing over sealed state (`APN_STATE_CORRUPT / wrapping_secret_missing`) or a refusing Keychain
+(`APN_NATIVE_REJECTED`) refuses prepare there: no provider or chain read runs and no operation exists. The operation
+journal keeps only the UUID's hash, and status, receipts and output show only that hash (`provider_request_id_hash`).
 
 APN opens the sealed UUID only to send the request and to read its job:
 
@@ -872,6 +874,13 @@ APN opens the sealed UUID only to send the request and to read its job:
 
 Operations prepared by APN 0.5.106 or earlier keep the UUID itself in their journal. They load, resume and project
 exactly as before, and reading them never rewrites them.
+
+APN never deletes a sealed request reference, not even after its operation ends, and a prepare interrupted between its
+seal and its journal leaves one that belongs to no operation. Each counts as sealed custody, so after the first gasless
+transfer a lost wrapping secret refuses every command that would create a new one with `wrapping_secret_missing`,
+including the next gasless prepare. The owner's options (restore the Keychain item, or move the request-reference
+directories aside when nothing else is sealed) and what each does to unresolved operations are in the README section on
+the wrapping secret.
 
 ### Recovery
 
