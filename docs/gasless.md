@@ -971,15 +971,15 @@ both `facilitatorAddresses` and `signers` of its `/supported`: `0x254db96f…380
 `0xb4827a2a…1cc7`. If `/supported` publishes another set of `facilitatorAddresses`, or a signer (`eip155:*` or
 `eip155:8453`) outside the pin, prepare stops before signing with `sa_gasless_facilitator_set`; a new release updates
 the pin. Up to 0.5.105 the pin held only `0xb4827a2a…1cc7`, and the child named only that address while the facilitator
-published three. A transfer prepared under that pin and approved after the upgrade ends `failed_before_effect` with the
-same reason before its child is signed or disclosed.
+published three. A transfer prepared under that pin ends `failed_before_effect` with the same reason after the upgrade:
+before the approval prompt if it still awaits approval, and otherwise before its child is disclosed.
 
 A refused verification is saved, not repeated. The operation becomes `unknown_finality` with `sa_gasless_verify_rejected`
 (`isValid` false) or `sa_gasless_verify_payer_mismatch` (valid for another payer), and `status`, `resume` and the receipt
 show `provider_verify`: `is_valid`, the claimed `payer`, `invalid_reason` and the response hash. `invalid_reason` is the
 facilitator's `invalidReason` only when it is a closed snake_case token (all lower or all upper case, up to 64
-characters, no run of 12 hex characters or 6 digits), so an address, hash, UUID or request id never fits; otherwise it
-is `null`. `invalidMessage` is never stored. APN does not call settle, and the first next action says until when the
+characters, no run of 12 hex characters or 6 digits), so addresses, hashes, UUIDs, hostnames and mixed-case ids do
+not fit; otherwise it is `null`. `invalidMessage` is never stored. APN does not call settle, and the first next action says until when the
 facilitator still holds the signed child.
 
 After disclosure, `apn operation resume --operation <operation-id>` only reads independent RPC evidence; omit

@@ -35,6 +35,8 @@ export class SmartAccountGaslessExecution {
     if (op.terminal || op.state !== "awaiting_approval") return { operation: op };
     let now: number;
     try { now = this.clock.live(op); } catch (error) { return await this.halt(op, error); }
+    // A transfer prepared under another facilitator pin is closed before the owner is asked to approve it.
+    if (!pinned(op)) return await this.halt(op, saError("sa_gasless_facilitator_set"));
     let accepted: boolean;
     try {
       accepted = await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
@@ -69,10 +71,8 @@ export class SmartAccountGaslessExecution {
     };
     try {
       this.clock.check(op);
-      // A transfer prepared under another facilitator pin (0.5.105 and earlier) ends before its child is signed or disclosed.
-      if (!saSame(op.intent.requirements.extra.facilitatorAddresses, saRegistry(op.intent.request.chainId).facilitatorAddresses)) {
-        saFail("sa_gasless_facilitator_set");
-      }
+      // A transfer prepared under another facilitator pin (0.5.105 and earlier) ends before its child is disclosed.
+      if (!pinned(op)) saFail("sa_gasless_facilitator_set");
       let sealed: SmartAccountGaslessSealedMaterial;
       if (op.signingAttempts === 1) {
         const recovered = await this.material.load(op); this.clock.check(op);
@@ -222,6 +222,10 @@ export class SmartAccountGaslessExecution {
   }
 }
 
+/** The child would name exactly the facilitator signers this release pins. */
+function pinned(op: SmartAccountGaslessOperationRecord): boolean {
+  return saSame(op.intent.requirements.extra.facilitatorAddresses, saRegistry(op.intent.request.chainId).facilitatorAddresses);
+}
 /** An owner-named observation RPC with the environment variable that named it. */
 export interface SmartAccountGaslessObserver {
   readonly rpc: SmartAccountGaslessRpcPort;
