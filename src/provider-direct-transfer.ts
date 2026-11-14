@@ -195,6 +195,9 @@ export class ProviderDirectTransferService {
       await this.operations.assertProviderAccountAvailable(binding.providerId, binding.accountBindingHash,
         operation.walletAddress, operation.operationId);
       await this.assertFrozenPreconditions(operation, binding);
+      // The wrapping secret that will seal the provider's request id is read before the owner is asked: a refusal
+      // comes before the approval code and changes nothing.
+      await readyProviderEffectReferences(this.context, binding);
       if (binding.coinbaseGasless !== undefined) {
         try { await new CoinbaseGaslessPolicy(this.context).assert(operation); }
         catch (error) { await this.failBeforeEffect(operation, coinbaseGaslessPolicyFailureReason(error), error instanceof ApnError ? error : undefined); }
@@ -230,11 +233,7 @@ export class ProviderDirectTransferService {
         );
         throw error;
       }
-      if (binding.executionMode === "provider_atomic_send") {
-        await this.reobserveProvider(operation, binding, adapter);
-        // The wrapping secret that seals the provider's request id is read before any effect: a refusal changes nothing.
-        await readyProviderEffectReferences(this.context, adapter);
-      }
+      if (binding.executionMode === "provider_atomic_send") await this.reobserveProvider(operation, binding, adapter);
       if (binding.coinbaseGasless !== undefined) {
         try { await new CoinbaseGaslessPolicy(this.context).reserve(operation); }
         catch (error) { await this.failBeforeEffect(operation, coinbaseGaslessPolicyFailureReason(error), error instanceof ApnError ? error : undefined); }
@@ -446,12 +445,14 @@ export class ProviderDirectTransferService {
     if (result.disposition === "rejected") return publicOperation(await this.durable.transition(
       operation, "failed_provider_rejected", true, result.reason, "provider_terminal_no_transaction",
     ));
-    if (result.disposition === "pending") return publicOperation(await this.durable.transition(
-      operation, "provider_pending", false,
-      binding.executionMode === "delegated_session_transaction" ? "delegated_submission_ambiguous" : "provider_approval_pending",
-      "provider_request_reference",
-      { providerEffect: await providerEffectReferenceFor(this.context, operation, binding, result.recoveryToken, result.providerState) },
-    ));
+    if (result.disposition === "pending") {
+      const providerEffect = await providerEffectReferenceFor(this.context, operation, binding, result.recoveryToken, result.providerState);
+      return publicOperation(await (providerEffect === null
+        ? this.durable.transition(operation, "ambiguous_effect", false, "provider_recovery_unavailable", "provider_effect_no_replay")
+        : this.durable.transition(operation, "provider_pending", false,
+          binding.executionMode === "delegated_session_transaction" ? "delegated_submission_ambiguous" : "provider_approval_pending",
+          "provider_request_reference", { providerEffect })));
+    }
     const acknowledged = await this.durable.transition(
       operation, "provider_acknowledged", false, "provider_transaction_identity_acknowledged",
       "provider_transaction_hash_only", { transactionHash: result.transactionHash },

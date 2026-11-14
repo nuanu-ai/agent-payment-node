@@ -354,7 +354,7 @@ test("a sealed request id that cannot be opened refuses resume precisely: nothin
   });
 });
 
-test("a Keychain that refuses before the hand-off leaves the transfer awaiting approval; nothing is sent", async (t) => {
+test("a Keychain that refuses is met before the owner is asked: the transfer stays awaiting approval and nothing is sent", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const wrapping = new ReferenceTestSecret(), runner = new FixtureRunner(), approval = new Approval();
   const first = core(temporary.root, runner, new TestRpc(), approval, wrapping);
@@ -363,15 +363,34 @@ test("a Keychain that refuses before the hand-off leaves the transfer awaiting a
   wrapping.failure = new ApnError("APN_NATIVE_REJECTED", "The APN login-Keychain wrapping secret is unavailable.");
   const refusedApprove = await first.execute({ command: "transfer.approve", operationId });
   assert.equal(refusedApprove.error?.code, "APN_NATIVE_REJECTED", JSON.stringify(refusedApprove));
+  assert.equal(approval.calls.length, 0, "the owner is never asked to approve before the wrapping secret is read");
   assert.equal(runner.calls.filter((call) => call.argv[0] === "transfer").length, 0, "nothing is handed to MetaMask");
-  assert.equal((await new StateStore(temporary.root).findOperation(operationId))?.state, "awaiting_approval");
+  const untouched = await new StateStore(temporary.root).findOperation(operationId);
+  assert.equal(untouched?.state, "awaiting_approval"); assert.equal(untouched?.transitions.length, 1, "a refusal changes no state");
   wrapping.failure = undefined;
   const approved = await core(temporary.root, runner, new TestRpc(), approval, wrapping).execute({ command: "transfer.approve", operationId });
   assert.equal((approved.operation as { state?: unknown }).state, "provider_pending", JSON.stringify(approved));
   assert.equal(runner.calls.filter((call) => call.argv[0] === "transfer").length, 1, "one hand-off in all");
+  assert.equal(approval.calls.length, 1);
   const again = await core(temporary.root, runner, new TestRpc(), approval, wrapping).execute({ command: "transfer.approve", operationId });
   assert.equal((again.operation as { state?: unknown }).state, "provider_pending");
   assert.equal(runner.calls.filter((call) => call.argv[0] === "transfer").length, 1, "restart once-only: an approved transfer is never sent again");
+  assert.equal(approval.calls.length, 1);
+});
+
+test("a provider-atomic send whose provider cannot observe a request seals nothing and keeps no id, without reading the Keychain", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const wrapping = new ReferenceTestSecret(), runner = new FixtureRunner();
+  const blind = core(temporary.root, runner, new TestRpc(), new Approval(), wrapping, false);
+  await connect(blind);
+  const operationId = await prepare(blind, IDEMPOTENCY);
+  const approved = await blind.execute({ command: "transfer.approve", operationId });
+  assert.equal((approved.operation as { state?: unknown }).state, "ambiguous_effect", JSON.stringify(approved));
+  const saved = await new StateStore(temporary.root).findOperation(operationId);
+  assert.equal(saved?.reason, "provider_recovery_unavailable"); assert.equal(saved?.providerEffect, undefined);
+  assert.equal(wrapping.loads, 0, "readiness and seal follow one condition: nothing is sealed, so nothing is read");
+  assert.equal(runner.calls.filter((call) => call.argv[0] === "transfer").length, 1);
+  for (const [path, text] of await stateFiles(temporary.root)) assert.equal(text.includes(TOKEN), false, `${path} keeps the request id in plaintext`);
 });
 
 test("a reference 0.5.106 wrote keeps its plaintext id: it projects the same hash, resumes with that id and needs no wrapping secret", async (t) => {
@@ -405,8 +424,9 @@ test("a reference 0.5.106 wrote keeps its plaintext id: it projects the same has
   assert.deepEqual((await state.findOperation(operationId))?.providerEffect, legacy.providerEffect, "it is never migrated");
 });
 
+/** `observable` false: the same provider without `observe`, which can never be asked about a request it returned. */
 function core(root: string, runner: FixtureRunner, rpc: TestRpc, approval: Approval,
-  wrapping: ReferenceTestSecret = new ReferenceTestSecret()): ApnCore {
+  wrapping: ReferenceTestSecret = new ReferenceTestSecret(), observable = true): ApnCore {
   const state = new StateStore(root, { lockWaitMs: 1_000 });
   return new ApnCore({
     state,
@@ -414,7 +434,11 @@ function core(root: string, runner: FixtureRunner, rpc: TestRpc, approval: Appro
     profileRepository: new StateProfileRepository(state),
     providerRegistry: new ProviderRegistry([{
       provider_id: METAMASK_AGENT_WALLET_PROVIDER_ID,
-      create: () => new MetaMaskProcessAdapter(runner, async (work) => await work(), () => new Date("2026-09-02T00:00:00.000Z")).bundle(),
+      create: () => {
+        const bundle = new MetaMaskProcessAdapter(runner, async (work) => await work(), () => new Date("2026-09-02T00:00:00.000Z")).bundle();
+        const direct = bundle.direct!;
+        return observable ? bundle : { ...bundle, direct: { mode: direct.mode, execute: async (input) => await direct.execute!(input) } };
+      },
     }]),
     foregroundAuthentication: foreground,
     transferApproval: approval,

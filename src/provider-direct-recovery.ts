@@ -73,8 +73,20 @@ export async function sealProviderEffectReference(
 }
 
 /**
- * The reference a direct execution result is kept as: a provider-atomic send's request id is the provider's own and is
- * sealed; a delegated send's is the APN operation id, which every output already names, and is kept as is.
+ * Whether a direct send returns a provider request id that APN seals: a provider-atomic send whose provider can be asked
+ * to observe its requests (MetaMask Guard MFA). One condition decides both the readiness before approval and the seal
+ * after the effect, so no request id is ever sealed without the wrapping secret having been read first.
+ */
+export function providerSealsRequests(context: RuntimeContext, binding: ProviderDirectBinding): boolean {
+  return binding.executionMode === "provider_atomic_send" &&
+    context.requireProviderRegistry().resolve(binding.providerId).direct?.observe !== undefined;
+}
+
+/**
+ * The reference a pending direct result is kept as: a delegated send's id is the APN operation id, which every output
+ * already names, and is kept as is; a provider's own request id is sealed. Null for a provider-atomic send whose provider
+ * cannot be asked about a request: APN could never read it again, so no id is kept (the caller records
+ * `provider_recovery_unavailable`).
  */
 export async function providerEffectReferenceFor(
   context: RuntimeContext,
@@ -82,18 +94,18 @@ export async function providerEffectReferenceFor(
   binding: ProviderDirectBinding,
   recoveryToken: string,
   providerState: string,
-): Promise<ProviderEffectReference> {
-  return binding.executionMode === "delegated_session_transaction"
-    ? createProviderEffectReference(recoveryToken, providerState)
-    : await sealProviderEffectReference(context.requireProviderRequestReferences(), operation, recoveryToken, providerState);
+): Promise<ProviderEffectReference | null> {
+  if (binding.executionMode === "delegated_session_transaction") return createProviderEffectReference(recoveryToken, providerState);
+  if (!providerSealsRequests(context, binding)) return null;
+  return await sealProviderEffectReference(context.requireProviderRequestReferences(), operation, recoveryToken, providerState);
 }
 
 /**
- * Before the owner approves a provider-atomic send whose provider names its requests (it can be asked to observe one),
- * the wrapping secret that will seal that request id is read: a refusal here leaves the operation awaiting approval.
+ * Before the owner is asked to approve a send whose request id will be sealed, the wrapping secret that seals it is read
+ * (or created for a state that holds nothing sealed). A refusal leaves the operation awaiting approval, untouched.
  */
-export async function readyProviderEffectReferences(context: RuntimeContext, adapter: ProviderAdapterBundle): Promise<void> {
-  if (adapter.direct?.observe !== undefined) await context.requireProviderRequestReferences().ready();
+export async function readyProviderEffectReferences(context: RuntimeContext, binding: ProviderDirectBinding): Promise<void> {
+  if (providerSealsRequests(context, binding)) await context.requireProviderRequestReferences().ready();
 }
 
 /** The stored request id: kept by a version 1 reference, or opened from the seal of a version 2 one. */
