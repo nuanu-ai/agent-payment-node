@@ -310,7 +310,7 @@ export class RailOperationLifecycle {
       }
       return await this.allowlist.reserve(railAllowlistSubject(operation), operation.allowlist);
     } catch (error) {
-      await this.move(operation, "failed_before_effect", "allowlist_refused_at_approval", "durable_pre_effect");
+      await this.move(operation, "failed_before_effect", railReservationFailureReason(error), "durable_pre_effect");
       throw error;
     }
   }
@@ -321,6 +321,16 @@ export class RailOperationLifecycle {
     }
     return operation;
   }
+}
+
+/**
+ * The saved cause of a usage reservation that ended the approval before signing. Only the owner allowlist's own refusal
+ * is `allowlist_refused_at_approval`; a ledger or state failure (for example `APN_STATE_SECURITY`) names its code, as the
+ * Stargate token rail does. Records written before this distinction keep `allowlist_refused_at_approval` for every cause.
+ */
+export function railReservationFailureReason(error: unknown): string {
+  if (!(error instanceof ApnError)) return "usage_reservation_failed";
+  return error.code === "APN_ALLOWLIST_REFUSED" ? "allowlist_refused_at_approval" : `usage_reservation_${error.code.toLowerCase()}`;
 }
 
 /** Expiry, funding, fee, owner-policy or custody refusals prove the frozen effect must not be sent; RPC failures prove nothing. */

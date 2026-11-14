@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdir, unlink } from "node:fs/promises";
+import { chmod, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
@@ -12,10 +12,12 @@ import type { OutputEnvelope } from "../../src/commands.js";
 import { DIRECT_ALLOWLIST_SCHEMA, DirectAllowlistGate, requireListedDirectAsset, type DirectAllowlistSubject } from "../../src/direct-allowlist-gate.js";
 import type { DirectAssetUsageLease } from "../../src/direct-asset-usage.js";
 import type { DirectRailPort } from "../../src/direct-rail-ports.js";
+import { ApnError } from "../../src/errors.js";
 import { createMcpServer } from "../../src/mcp-server.js";
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
 import { requireListedRailAsset } from "../../src/rail-direct-allowlist.js";
-import { newRailOperation, type RailOperationRecord } from "../../src/rail-operation-model.js";
+import { railReservationFailureReason } from "../../src/rail-operation-lifecycle.js";
+import { newRailOperation, transitionRail, type RailOperationRecord } from "../../src/rail-operation-model.js";
 import { SOLANA_CHAIN, TRON_CHAIN, activateDirectPolicy, directAdmission, directUsage, reserveRailLease, revokeDirectPolicy } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
 import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
@@ -218,4 +220,65 @@ test("Solana USDT uses its pinned mint beside USDC: CLI and MCP bind it, owner c
   const lease = (await findStored(s.core.rails.records, id))!.allowlistLease!;
   assert.equal((await new AssetUsageLedger(temporary.root).load(lease.reservation, lease.reservation.reservationId))?.state, "finalized");
   assert.equal(await directUsage(temporary.root, s.account.address, SOLANA_CHAIN, SOLANA_USDT, s.now), "1250000");
+});
+
+test("a usage-ledger state failure at approval ends a TRON or Solana transfer before signing under its own cause, not as an allowlist refusal", async (t) => {
+  for (const rail of ["tron", "solana"] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    let s: Fixture, id: string;
+    if (rail === "tron") { const fixture = await tronFixture(temporary.root); s = fixture; id = await fixture.prepare("trx", "tron-reserve-security-0001"); }
+    else { const fixture = await solanaFixture(temporary.root); s = fixture; id = await fixture.prepare("sol", "solana-reserve-security-0001"); }
+    // Prepare created the ledger directory; opening it to the group makes every ledger read refuse with APN_STATE_SECURITY.
+    const usage = join(temporary.root, "asset-usage");
+    await chmod(usage, 0o750);
+    const approved = await s.core.execute({ command: "transfer.approve", operationId: id });
+    await chmod(usage, 0o700);
+    assert.equal(approved.error?.code, "APN_STATE_SECURITY", rail);
+    const ended = (await findStored(s.core.rails.records, id))!;
+    assert.equal(ended.state, "failed_before_effect", rail); assert.equal(ended.reason, "usage_reservation_apn_state_security", rail);
+    assert.equal(ended.allowlistLease, undefined, rail);
+    assert.equal(ended.transitions.some((entry) => entry.state === "signing_started"), false, rail);
+    assert.equal(s.rpc.submissions.length, 0, rail);
+    assert.equal(await directUsage(temporary.root, s.account.address, rail === "tron" ? TRON_CHAIN : SOLANA_CHAIN, null, s.now), "0", rail);
+    const status = await s.core.execute({ command: "operation.status", operationId: id });
+    assert.equal(status.ok, true, status.error?.message);
+    assert.equal((status.operation as { reason: string }).reason, "usage_reservation_apn_state_security", rail);
+  }
+});
+
+test("a TRON owner-cap refusal at the reservation keeps the allowlist reason; a reserve failure an older release saved under it still reads unchanged", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await tronFixture(temporary.root);
+  const prepared = await s.core.execute({ command: "transfer.prepare-tron", profile: s.account.profile, asset: "trx", recipient: TRON_RECIPIENT,
+    amount: "1.5", maximumFee: "30", idempotencyKey: "tron-reserve-cap-0001" });
+  assert.equal(prepared.ok, true, prepared.error?.message);
+  const id = (prepared.operation as { operation_id: string }).operation_id; s.rpc.prepared = (await findStored(s.core.rails.records, id))!.prepared;
+  // Another approval reserved on the same account and asset after this preparation; only the reservation sees today's total.
+  await seedUsage(temporary.root, s, TRON_CHAIN, "2000000", s.now);
+  refusal(await s.core.execute({ command: "transfer.approve", operationId: id }), "allowlist_daily_cap_exceeded");
+  const ended = (await findStored(s.core.rails.records, id))!;
+  assert.equal(ended.state, "failed_before_effect"); assert.equal(ended.reason, "allowlist_refused_at_approval");
+  assert.equal(ended.allowlistLease, undefined); assert.equal(s.rpc.submissions.length, 0);
+
+  // 0.5.106 and earlier saved every reserve failure, a ledger state failure included, as this exact transition.
+  const legacyId = await s.prepare("trx", "tron-reserve-legacy-0001");
+  const open = (await findStored(s.core.rails.records, legacyId))!;
+  await s.core.rails.records.persist(transitionRail(open, { state: "failed_before_effect", at: new Date(s.now).toISOString(),
+    reason: "allowlist_refused_at_approval", proofClass: "durable_pre_effect" }));
+  const saved = (await findStored(s.core.rails.records, legacyId))!;
+  const status = await s.core.execute({ command: "operation.status", operationId: legacyId });
+  assert.equal(status.ok, true, status.error?.message); assert.equal((status.operation as { reason: string }).reason, "allowlist_refused_at_approval");
+  const receipt = await s.core.execute({ command: "receipt.get", operationId: legacyId });
+  assert.equal(receipt.ok, true, receipt.error?.message); assert.equal((receipt.receipt as { reason: string }).reason, "allowlist_refused_at_approval");
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: legacyId })).ok, true);
+  assert.deepEqual(await findStored(s.core.rails.records, legacyId), saved);
+});
+
+test("only the allowlist's own refusal is recorded as allowlist_refused_at_approval; every other reserve failure names its cause", () => {
+  assert.equal(railReservationFailureReason(new ApnError("APN_ALLOWLIST_REFUSED", "refused", { reason: "allowlist_daily_cap_exceeded" })), "allowlist_refused_at_approval");
+  assert.equal(railReservationFailureReason(new ApnError("APN_STATE_SECURITY", "unsafe")), "usage_reservation_apn_state_security");
+  assert.equal(railReservationFailureReason(new ApnError("APN_STATE_CORRUPT", "corrupt")), "usage_reservation_apn_state_corrupt");
+  assert.equal(railReservationFailureReason(new ApnError("APN_STATE_BUSY", "busy")), "usage_reservation_apn_state_busy");
+  assert.equal(railReservationFailureReason(new ApnError("APN_OPERATION_BLOCKED", "crossed")), "usage_reservation_apn_operation_blocked");
+  assert.equal(railReservationFailureReason(new Error("EIO")), "usage_reservation_failed");
 });

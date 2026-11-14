@@ -97,6 +97,18 @@ anything is signed.
 - On EVM, the native signer approves and signs in one call, so the lease is written with `started` immediately before
   that call.
 
+**A failed reservation.** Nothing is signed or sent.
+
+| Rail | Cause | Journal |
+| --- | --- | --- |
+| TRON, Solana | The owner policy refuses (`APN_ALLOWLIST_REFUSED`) | `failed_before_effect`, reason `allowlist_refused_at_approval` |
+| TRON, Solana | Any other error, for example a ledger file or directory that fails its permission check (`APN_STATE_SECURITY`) | `failed_before_effect`, reason `usage_reservation_<error code in lower case>`, here `usage_reservation_apn_state_security` |
+| EVM | The owner policy refuses (`APN_ALLOWLIST_REFUSED`) | `failed_before_effect`, reason `allowlist_refused_at_approval` |
+| EVM | Any other error | Stays `awaiting_approval`; the command returns the error |
+
+TRON and Solana records written by 0.5.106 and earlier keep `allowlist_refused_at_approval` for every cause, a ledger
+state error included.
+
 **Transitions.** The ledger follows the journal forward, idempotently, after each durable write and on every resume.
 
 | Journal state | Ledger |
