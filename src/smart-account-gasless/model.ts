@@ -147,6 +147,27 @@ export interface SmartAccountGaslessVerification {
   readonly isValid: true;
   readonly responseHash: string;
 }
+/**
+ * A verify answer APN refused: `isValid` false, or valid for another payer. It keeps the facilitator's claimed payer
+ * and its `invalidReason` only when that is a closed token (never `invalidMessage` or other free text).
+ */
+export interface SmartAccountGaslessVerifyRejection {
+  readonly observedAt: string;
+  readonly payer: Address | null;
+  readonly isValid: boolean;
+  readonly invalidReason: string | null;
+  readonly responseHash: string;
+}
+export type SmartAccountGaslessVerifyAnswer = SmartAccountGaslessVerification | SmartAccountGaslessVerifyRejection;
+/** The only answer that lets an operation reach settle. */
+export function saVerifyAccepted(value: SmartAccountGaslessVerifyAnswer): value is SmartAccountGaslessVerification {
+  return !Object.hasOwn(value, "invalidReason");
+}
+/** A closed provider reason token: no spaces, no hex run long enough to carry an address, hash or id. */
+export function saProviderReasonToken(value: unknown): string | null {
+  return typeof value === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u.test(value) && !/[0-9a-fA-F]{16}|\d{8}/u.test(value)
+    ? value : null;
+}
 export interface SmartAccountGaslessProviderSettlement {
   readonly observedAt: string;
   readonly transactionHash: Hex | null;
@@ -229,7 +250,7 @@ export interface SmartAccountGaslessMutable {
   readonly submissionAttempts: 0 | 1;
   readonly exposureStartedAt: string | null;
   readonly dispatchStartedAt: string | null;
-  readonly verification: SmartAccountGaslessVerification | null;
+  readonly verification: SmartAccountGaslessVerifyAnswer | null;
   readonly providerSettlement: SmartAccountGaslessProviderSettlement | null;
   readonly cursor: SmartAccountGaslessCursor;
   readonly observation: SmartAccountGaslessObservation | null;

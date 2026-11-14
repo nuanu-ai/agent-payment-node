@@ -29,7 +29,8 @@ import {
 } from "@metamask/smart-accounts-kit/utils";
 import { encodePacked, keccak256, pad, toHex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { canonicalJson, sha256 } from "../../src/canonical.js";
+import { canonicalJson, domainHash, sha256 } from "../../src/canonical.js";
+import { SA_FACILITATORS } from "../../src/smart-account-gasless/registry-data.js";
 import { ApnCore } from "../../src/core.js";
 import { runCli } from "../../src/cli.js";
 import { BASE_USDC } from "../../src/constants.js";
@@ -51,6 +52,7 @@ import {
   type SmartAccountDelegationEnginePort,
 } from "../../src/metamask-smart-account-direct.js";
 import {
+  APPROVED_METAMASK_FACILITATORS,
   MetaMaskSmartAccountX402Adapter,
   OfficialSmartAccountX402Engine,
   type SmartAccountX402EnginePort,
@@ -1604,6 +1606,26 @@ test("Smart Account ERC-7710 freezes the approved facilitator set independent of
   } finally { await fixture.temporary.cleanup(); }
 });
 
+test("Smart Account ERC-7710 admits the Base signers MetaMask's facilitator publishes beyond the SDK list", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const offered = [...SA_FACILITATORS].reverse();
+    const runtime = smartAccountX402Runtime(
+      fixture,
+      new SmartAccountX402Rpc(),
+      new QueuedHttp([smartAccountX402Challenge({ extra: { assetTransferMethod: "erc7710", facilitatorAddresses: offered } })]),
+      new MutableSmartAccountClock(),
+      new RecordingSmartAccountX402Engine(),
+      { approvedFacilitators: APPROVED_METAMASK_FACILITATORS },
+    );
+    const prepared = await runtime.core.execute(smartAccountX402Prepare("smart-account-x402-base-signers-0001"));
+    assert.equal(prepared.ok, true, JSON.stringify(prepared));
+    const frozen = await runtime.state.findX402Operation(publicOperationId(prepared.operation));
+    assert.deepEqual(frozen?.delegatedMaterial?.facilitatorAddresses, [...SA_FACILITATORS].sort());
+  } finally { await fixture.temporary.cleanup(); }
+});
+
 test("Smart Account ERC-7710 reloads a legacy default facilitator binding after the official set expands", async () => {
   const fixture = await makeFixture();
   try {
@@ -1611,7 +1633,8 @@ test("Smart Account ERC-7710 reloads a legacy default facilitator binding after 
     const runtime = smartAccountX402Runtime(
       fixture,
       new SmartAccountX402Rpc(),
-      new QueuedHttp([smartAccountX402Challenge({ extra: { assetTransferMethod: "erc7710" } })]),
+      new QueuedHttp([smartAccountX402Challenge({ extra: { assetTransferMethod: "erc7710",
+        facilitatorAddresses: ALL_METAMASK_FACILITATOR_ADDRESSES } })]),
       new MutableSmartAccountClock(),
       new RecordingSmartAccountX402Engine(),
       { approvedFacilitators: ALL_METAMASK_FACILITATOR_ADDRESSES as readonly Address[] },
@@ -1623,10 +1646,16 @@ test("Smart Account ERC-7710 reloads a legacy default facilitator binding after 
       current.selectedOffer.resolved.assetTransferMethod === "erc7710");
     const legacy = METAMASK_FACILITATOR_ADDRESSES.map((value) => value.toLowerCase() as Address);
     const { integrityHash: _integrity, ...currentBody } = current;
+    // Before 0.5.106 an offer that named no facilitatorAddresses was frozen with a default list; such records still load.
+    const declared = JSON.parse(current.selectedOffer.declaredCanonicalJson) as { extra: Record<string, unknown> };
+    delete declared.extra.facilitatorAddresses;
+    const declaredCanonicalJson = canonicalJson(declared);
     const legacyBody = {
       ...currentBody,
       selectedOffer: {
         ...current.selectedOffer,
+        declaredCanonicalJson,
+        offerHash: domainHash("apn.x402.offer.v1", declaredCanonicalJson),
         resolved: { ...current.selectedOffer.resolved, facilitatorAddresses: legacy },
       },
       delegatedMaterial: { ...current.delegatedMaterial, facilitatorAddresses: legacy },
@@ -1685,6 +1714,11 @@ test("Smart Account x402 rejects non-explicit, malformed and unapproved offers b
       label: "non-approved facilitator",
       extra: { assetTransferMethod: "erc7710", facilitatorAddresses: [SMART_X402_FACILITATOR] },
       approved: [otherFacilitator],
+    },
+    { label: "no facilitator list", extra: { assetTransferMethod: "erc7710" } },
+    {
+      label: "partly approved facilitator list",
+      extra: { assetTransferMethod: "erc7710", facilitatorAddresses: [SMART_X402_FACILITATOR, otherFacilitator] },
     },
   ];
   for (const item of cases) await t.test(item.label, async () => {

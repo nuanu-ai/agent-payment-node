@@ -94,10 +94,10 @@ test("The real pinned allowance SDK uses UINT256_MAX duration and cannot become 
   (changed as any).policyHash = saPolicyHash(changed.binding, changed.request);
   rejected(() => validateSmartAccountGaslessIntent(changed), "APN_STATE_CORRUPT");
 });
-test("All 25 public reasons use actual ErrorCode members and discard untrusted error text", async () => {
+test("All 27 public reasons use actual ErrorCode members and discard untrusted error text", async () => {
   const source = await readFile(new URL("../../../src/errors.ts", import.meta.url), "utf8");
   const actual = new Set([...source.matchAll(/\|\s*"(APN_[A-Z0-9_]+)"/gu)].map(x => x[1]));
-  assert.equal(Object.keys(SA_REASON_CODES).length, 25);
+  assert.equal(Object.keys(SA_REASON_CODES).length, 27);
   for (const [reason, code] of Object.entries(SA_REASON_CODES)) {
     assert(actual.has(code), `${reason}: ${code}`);
     const error = saError(reason as keyof typeof SA_REASON_CODES);
@@ -133,7 +133,8 @@ test("The immutable operation and request domains distinguish changed input and 
 test("Static deployment admission has no executable wider-chain fallback", () => {
   const registry = saRegistry(8453);
   assert.equal(registry.token.decimals, 6);
-  assert.equal(registry.facilitatorAddresses.length, 1);
+  assert.deepEqual(registry.facilitatorAddresses, ["0x254db96f4c2e666e8a99c4ce96a8421e343b380a",
+    "0x6da7c5ff4217adc1b7a57551cb2ee3687fb86f9f", "0xb4827a2a066cd2ef88560efdf063dd05c6c41cc7"]);
   assert(Object.isFrozen(registry) && Object.isFrozen(registry.protocol));
   for (const chain of [1, 137, 143, 1329, 42161, 84532, 0, NaN]) {
     rejected(() => saRegistry(chain), "APN_PROVIDER_CAPABILITY_UNAVAILABLE");

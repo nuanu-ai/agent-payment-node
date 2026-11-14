@@ -42,7 +42,8 @@ async function fixture(root: string, create = true) {
   const counterPath = join(root, "fixture-counts.json"), materialPath = join(root, "fixture-material.json");
   if (!create) Object.assign(calls, JSON.parse(await readFile(counterPath, "utf8")));
   let now = when(create ? 0 : Number(process.env.APN_SA_TEST_NOW_SECONDS ?? "60")), observation: "pending" | "success" | "unused" = "pending";
-  let accepted = true, failInspect = false, failVerify = false, failSettle = false, corruptMaterial = false;
+  let accepted = true, failInspect = false, failSettle = false, corruptMaterial = false;
+  let failVerify: false | "throw" | "invalid" | "payer" = false;
   let materialGone = false, freezeBinding = binding;
   let snapshotChange: "allowance" | "nonce" | "deployment" | null = null;
   let hook: (name: string) => Promise<void> = async () => {};
@@ -100,7 +101,11 @@ async function fixture(root: string, create = true) {
       const durable = await records.findOperation(op.operationId); assert.equal(durable?.state, "exposure_pending");
       assert.equal(durable.exposureAttempts, 1); assert.equal((await loadMaterial())?.phase, "exposed");
       assert.equal(value.phase, "exposed"); await call("verify");
-      if (failVerify) throw saError("sa_gasless_verify_rejected");
+      if (failVerify === "throw") throw saError("sa_gasless_verify_rejected");
+      if (failVerify === "invalid") return { observedAt: now.toISOString(), payer: binding.ownerAddress, isValid: false,
+        invalidReason: "invalid_exact_evm_payload_redeemer", responseHash: "5".repeat(64) };
+      if (failVerify === "payer") return { observedAt: now.toISOString(), payer: binding.sessionAddress, isValid: true,
+        invalidReason: null, responseHash: "5".repeat(64) };
       return { observedAt: now.toISOString(), payer: binding.ownerAddress, isValid: true, responseHash: "5".repeat(64) };
     },
     settle: async op => {
@@ -137,7 +142,7 @@ async function fixture(root: string, create = true) {
     id: state.operationId(PROFILE, KEY), input: { profile: PROFILE, request: original.request, idempotencyKey: KEY },
     setHook(value: typeof hook) { hook = value; }, setNow(value: Date) { now = value; },
     phase(value: typeof observation) { observation = value; }, refuse() { accepted = false; }, noPermission() { failInspect = true; },
-    rejectVerify() { failVerify = true; }, loseSettle() { failSettle = true; }, wrongMaterial() { corruptMaterial = true; },
+    rejectVerify(kind: "throw" | "invalid" | "payer" = "throw") { failVerify = kind; }, loseSettle() { failSettle = true; }, wrongMaterial() { corruptMaterial = true; },
     loseMaterial() { materialGone = true; }, replaceBinding() { freezeBinding = { ...binding, permissionRevision: binding.permissionRevision + 1 }; },
     changeSnapshot(value: typeof snapshotChange) { snapshotChange = value; },
   };
@@ -244,6 +249,37 @@ test("verification rejection or lost settlement never proves no effects and neve
     assert.equal(JSON.stringify(closed).includes("synthetic-secret"), false);
   }
 });
+test("a refused verify answer is journaled with its closed reason, never settles and closes only from the chain", async t => {
+  const root = await temporary(t);
+  for (const kind of ["invalid", "payer"] as const) {
+    const f = await fixture(join(root, kind)); await f.service.prepare(f.input);
+    f.rejectVerify(kind);
+    const unknown = await f.service.approve(f.id);
+    assert.equal(unknown.state, "unknown_finality");
+    assert.equal(unknown.reason, kind === "invalid" ? "sa_gasless_verify_rejected" : "sa_gasless_verify_payer_mismatch");
+    assert.equal(unknown.submission_attempts, 0); assert.equal(f.calls.verify, 1); assert.equal(f.calls.settle, 0);
+    assert.deepEqual(unknown.provider_verify, kind === "invalid"
+      ? { is_valid: false, payer: f.binding.ownerAddress, invalid_reason: "invalid_exact_evm_payload_redeemer",
+        observed_at: unknown.provider_verify?.observed_at, response_hash: "5".repeat(64) }
+      : { is_valid: true, payer: f.binding.sessionAddress, invalid_reason: null,
+        observed_at: unknown.provider_verify?.observed_at, response_hash: "5".repeat(64) });
+    assert.equal(typeof unknown.provider_verify?.observed_at, "string");
+    assert.match(unknown.next_actions[0]!, /refused this transfer at verify/u);
+    assert.equal(unknown.next_actions.at(-1), `apn operation resume --operation ${f.id}`);
+    const saved = await f.records.findOperation(f.id);
+    assert.equal(saved?.state, "unknown_finality"); assert.equal(saved?.observation?.phase, "pending");
+    const again = await f.restart().resume(f.id);
+    assert.equal(again.state, "unknown_finality"); assert.deepEqual(again.provider_verify, unknown.provider_verify);
+    f.setNow(when(600)); f.phase("unused");
+    const closed = await f.restart().resume(f.id);
+    assert.equal(closed.state, "expired_unused"); assert.equal(f.calls.verify, 1); assert.equal(f.calls.settle, 0);
+    assert.deepEqual(closed.provider_verify, unknown.provider_verify);
+    assert.deepEqual(closed.next_actions, [`apn receipt get --operation ${f.id}`]);
+    const receipt = await f.restart().receipt(f.id);
+    assert.deepEqual((receipt as { provider_verify?: unknown }).provider_verify, unknown.provider_verify);
+  }
+});
+
 test("authority, expiry, clock and spent-map changes at awaited boundaries prevent the next external effect", async t => {
   const root = await temporary(t);
   for (const change of ["before-sign", "before-exposure", "after-verify", "expired-seal", "rollback", "spent"] as const) {

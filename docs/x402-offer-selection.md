@@ -83,6 +83,12 @@ Accepted transaction fields are described in [settlement fields](x402-settlement
   never as settled. The scan proves "unused" only when the authorization window holds no `Transfer` of the token from
   the wallet to the payee of any value. The delegation caps a cumulative amount, so a redemption of less than the price,
   or in two parts, keeps the operation unresolved (owner abandon keeps the hold).
+  The offer must name `extra.facilitatorAddresses`, and every address in it must be a MetaMask facilitator APN knows:
+  the SDK list (`ALL_METAMASK_FACILITATOR_ADDRESSES`) plus the Base signers MetaMask's facilitator publishes in its own
+  `/supported`. Otherwise prepare refuses with `APN_X402_UNSUPPORTED_OFFER` before anything is signed. The facilitator
+  may redeem with any address the seller names, so a delegation narrowed to some of them, or to a guessed list for a
+  seller that named none, can be refused after its one exposure. Before 0.5.106 APN signed for such offers; their saved
+  records still load and resolve as before.
 - **Native Keychain agent** (`native/src/x402.rs`). It is not part of the CLI payment path: the npm CLI signs every x402
   payment through its own local wallet custody and never calls it. The agent keeps its own narrower bounds (Base
   EIP-3009 only, a window of 30–300 seconds).

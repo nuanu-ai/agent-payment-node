@@ -2,8 +2,8 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonica
 import { GaslessHttps, type GaslessTransport } from "../gasless/https.js";
 import type { Address, Hex } from "../model.js";
 import { parseJsonWithDuplicateRejection } from "../x402-strict-json.js";
-import type { SmartAccountGaslessProviderBinding, SmartAccountGaslessProviderSettlement,
-  SmartAccountGaslessSealedMaterial, SmartAccountGaslessVerification } from "./model.js";
+import { saProviderReasonToken, type SmartAccountGaslessProviderBinding, type SmartAccountGaslessProviderSettlement,
+  type SmartAccountGaslessSealedMaterial, type SmartAccountGaslessVerifyAnswer } from "./model.js";
 import type { SmartAccountGaslessOperationRecord } from "./operation-model.js";
 import type { SmartAccountGaslessProviderPort } from "./ports.js";
 import { saFail } from "./reasons.js";
@@ -35,17 +35,23 @@ export class MetaMaskSmartAccountGaslessProvider implements SmartAccountGaslessP
       observedAt: instant(this.now()) };
   }
 
+  /** A refused answer is returned, not thrown, so the journal keeps what the facilitator said without asking again. */
   async verify(operation: SmartAccountGaslessOperationRecord,
-    material: SmartAccountGaslessSealedMaterial): Promise<SmartAccountGaslessVerification> {
+    material: SmartAccountGaslessSealedMaterial): Promise<SmartAccountGaslessVerifyAnswer> {
     const value = await this.post("verify", operation, material);
     if (!isPlainRecord(value) || !knownKeys(value, ["isValid", "invalidReason", "invalidMessage", "payer", "extensions", "extra"]) ||
       typeof value.isValid !== "boolean" || !optionalString(value.invalidReason) || !optionalString(value.invalidMessage) ||
       !optionalRecord(value.extensions) || !optionalRecord(value.extra)) saFail("sa_gasless_provider_protocol");
-    if (value.isValid !== true) saFail("sa_gasless_verify_rejected");
+    const observedAt = instant(this.now()), responseHash = domainHash(VERIFY_DOMAIN, canonicalJson(value));
+    if (value.isValid !== true) {
+      return { observedAt, payer: claimedPayer(value.payer), isValid: false,
+        invalidReason: saProviderReasonToken(value.invalidReason), responseHash };
+    }
     const payer = payerAddress(value.payer);
-    if (payer !== operation.intent.binding.ownerAddress) saFail("sa_gasless_verify_rejected");
-    return { observedAt: instant(this.now()), payer, isValid: true,
-      responseHash: domainHash(VERIFY_DOMAIN, canonicalJson(value)) };
+    if (payer !== operation.intent.binding.ownerAddress) {
+      return { observedAt, payer, isValid: true, invalidReason: saProviderReasonToken(value.invalidReason), responseHash };
+    }
+    return { observedAt, payer, isValid: true, responseHash };
   }
 
   async settle(operation: SmartAccountGaslessOperationRecord,
@@ -94,15 +100,16 @@ function supportedFacilitators(value: unknown): readonly Address[] {
   }
   const offered = row.extra.facilitatorAddresses.map((address: unknown) => payerAddress(address));
   if (new Set(offered).size !== offered.length) saFail("sa_gasless_provider_protocol");
-  const registry = saRegistry(8453), approved = new Set<Address>(registry.facilitatorAddresses as readonly Address[]);
-  const intersection = offered.filter((address: Address) => approved.has(address)).sort();
-  if (intersection.length === 0) saFail("sa_gasless_capability");
   const wildcard = value.signers["eip155:*"];
-  if (!Array.isArray(wildcard) || !wildcard.map((address: unknown) => payerAddress(address))
-    .some((address: Address) => intersection.includes(address))) {
-    saFail("sa_gasless_provider_protocol");
-  }
-  return intersection;
+  if (!Array.isArray(wildcard) || wildcard.length === 0) saFail("sa_gasless_provider_protocol");
+  const signers = wildcard.map((address: unknown) => payerAddress(address));
+  if (new Set(signers).size !== signers.length) saFail("sa_gasless_provider_protocol");
+  // The facilitator may redeem with any address it publishes. A delegation that names only some of them can be refused at
+  // verify after its one exposure, so a published set other than the pinned one stops the transfer before signing.
+  const pinned = [...saRegistry(8453).facilitatorAddresses as readonly Address[]].sort();
+  if (canonicalJson([...offered].sort()) !== canonicalJson(pinned) ||
+    !signers.every((address: Address) => pinned.includes(address))) saFail("sa_gasless_facilitator_set");
+  return pinned;
 }
 
 function knownKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
@@ -110,6 +117,10 @@ function knownKeys(value: Record<string, unknown>, allowed: readonly string[]): 
 }
 function optionalString(value: unknown): boolean { return value === undefined || typeof value === "string"; }
 function optionalRecord(value: unknown): boolean { return value === undefined || isPlainRecord(value); }
+/** A refused answer may name no payer or a malformed one; that is recorded as none, never as a protocol failure. */
+function claimedPayer(value: unknown): Address | null {
+  return typeof value === "string" && /^0x[0-9a-fA-F]{40}$/u.test(value) ? value.toLowerCase() as Address : null;
+}
 function payerAddress(value: unknown): Address {
   if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(value)) saFail("sa_gasless_provider_protocol");
   return value.toLowerCase() as Address;

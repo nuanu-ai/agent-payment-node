@@ -2,6 +2,15 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.106 — 2026-11-14
+
+QA's Smart Account gasless transfer on 0.5.105 was refused at verify after its one disclosure, and the reason was lost. No money moved: APN never asked to settle, and the signed child expired on chain.
+
+- **The child names every facilitator signer.** MetaMask's Base facilitator now publishes three addresses in `/supported`, in both `facilitatorAddresses` and `signers`: `0x254db96f…380a`, `0x6da7c5ff…6f9f` and `0xb4827a2a…1cc7`. APN pinned only the last, so the child let only that address redeem it, while the facilitator may use any of the three. All three are pinned now. A `/supported` that names any other set stops prepare before signing (`sa_gasless_facilitator_set`, `APN_PROVIDER_CAPABILITY_UNAVAILABLE`) instead of narrowing the child. The facilitator's code is closed, so the cause of QA's refusal is inferred, not proven.
+- **A refused verify is saved.** The answer is journaled once with `isValid`, the claimed `payer`, `invalidReason` (only a closed token; never `invalidMessage`) and its hash, and shown as `provider_verify` in status, resume and the receipt. An answer valid for another payer has its own reason, `sa_gasless_verify_payer_mismatch`. The first next action says the facilitator still holds the signed child until its expiry and that resume then proves the outcome from the chain. APN still never repeats verify and never settles a refused answer.
+- **x402 ERC-7710 offers must name their facilitators.** A Smart Account x402 offer without `extra.facilitatorAddresses` used to be signed for the SDK's MetaMask list, and an offer naming some unknown addresses was signed for the known ones only. Both are now refused before signing (`APN_X402_UNSUPPORTED_OFFER`). The known set adds the three Base signers above to the SDK list. Saved x402 records load unchanged.
+- **Stale Smart Account receipts are checked against their own step.** A receipt sidecar saved before `provider_verify` appeared is compared with the receipt of the step it names, so it is still repaired rather than called corrupt.
+
 ## 0.5.105 — 2026-11-13
 
 QA's open items on 0.5.104, in four parts: a MetaMask Agent transfer whose request is in another login project, a delegation disable that MetaMask did not confirm, native transfers MetaMask closed at the MFA step, and a Smart Account connect that MetaMask refused with 4100. No money was at risk; nothing here sends more than before.

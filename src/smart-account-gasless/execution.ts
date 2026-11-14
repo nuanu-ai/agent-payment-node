@@ -1,8 +1,8 @@
-import type { SmartAccountGaslessObservationSource } from "./model.js";
 import type { ClockPort } from "../ports.js";
 import type { StateStore } from "../state.js";
 import { saPolicyHash, saSame } from "./integrity.js";
-import type { SmartAccountGaslessMutable, SmartAccountGaslessRpcObservation, SmartAccountGaslessSealedMaterial } from "./model.js";
+import { saVerifyAccepted, type SmartAccountGaslessMutable, type SmartAccountGaslessObservationSource,
+  type SmartAccountGaslessRpcObservation, type SmartAccountGaslessSealedMaterial } from "./model.js";
 import type { SmartAccountGaslessOperationRecord } from "./operation-model.js";
 import { assertSmartAccountGaslessBinding, smartAccountGaslessOwner } from "./owner.js";
 import { SmartAccountGaslessClock, smartAccountGaslessApprovalPhrase, smartAccountGaslessApprovalSummary,
@@ -96,15 +96,21 @@ export class SmartAccountGaslessExecution {
         !saSame(exposed.paymentPayload, sealed.paymentPayload)) saFail("sa_gasless_state_corrupt");
       const verification = await this.provider.verify(op, exposed);
       this.clock.check(op, [verification.observedAt]);
-      await persist({ state: "verified_pending", verification });
-      // Only the immediate call that received this verify response may reach settle.
-      await this.guard(op, false, exposed);
-      const dispatchAt = new Date(this.clock.live(op)).toISOString();
-      await persist({ state: "dispatch_pending", submissionAttempts: 1, dispatchStartedAt: dispatchAt }, dispatchAt);
-      this.clock.live(op);
-      const providerSettlement = await this.provider.settle(op, exposed);
-      this.clock.check(op, [providerSettlement.observedAt]);
-      await persist({ state: "submitted_pending", providerSettlement });
+      if (!saVerifyAccepted(verification)) {
+        // The refused answer is kept with its closed reason; the delegation stays exposed until its on-chain expiry.
+        await persist({ state: "unknown_finality", verification, failure: saFailure(verification.isValid
+          ? "sa_gasless_verify_payer_mismatch" : "sa_gasless_verify_rejected") });
+      } else {
+        await persist({ state: "verified_pending", verification });
+        // Only the immediate call that received this verify response may reach settle.
+        await this.guard(op, false, exposed);
+        const dispatchAt = new Date(this.clock.live(op)).toISOString();
+        await persist({ state: "dispatch_pending", submissionAttempts: 1, dispatchStartedAt: dispatchAt }, dispatchAt);
+        this.clock.live(op);
+        const providerSettlement = await this.provider.settle(op, exposed);
+        this.clock.check(op, [providerSettlement.observedAt]);
+        await persist({ state: "submitted_pending", providerSettlement });
+      }
     } catch (error) {
       const failure = saClassify(error, "sa_gasless_internal");
       // An operation-first write may already be durable. A rejected write never authorizes another write or effect here.
