@@ -2,20 +2,25 @@
  * QA F26 on the MetaMask native lane: the MetaMask request id the owner's pending MFA approval waits on is sealed, and
  * a new journal keeps only its hash. The no-send observer opens the seal before it reads the request; a seal that
  * cannot be opened refuses that read precisely and changes nothing. A journal 0.5.106 or earlier wrote keeps its
- * plaintext id and projects and observes exactly as before. The vendor read is a double; the Keychain is never touched.
+ * plaintext id and projects and observes exactly as before. A seal that fails after the hand-off keeps every other field
+ * the hand-off returned. The vendor read is a double; the Keychain is never touched. Nothing here imports helpers.ts:
+ * it loads src/core.js, and with it the real vendor adapter, before the adapter mock below could take its place.
  */
 import assert from "node:assert/strict";
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import test, { mock } from "node:test";
 import { ApnError } from "../../src/errors.js";
+import type { MetaMaskNativeDiagnostic } from "../../src/metamask-native-diagnostic.js";
 import { MetaMaskNativeJournal, metaMaskNativeMfaTask, metaMaskNativeRequestIdHash, metaMaskNativeRequestReference,
   metaMaskNativeSealedMfaTask, patchMetaMaskNativeOperation as patch, publicMetaMaskNativeOperation as publicView,
   type MetaMaskNativeOperation } from "../../src/metamask-native-journal.js";
-import type { MetaMaskNativeRequestObservation } from "../../src/metamask-native-transfer-adapter.js";
-import { EncryptedProviderRequestReferenceStore, providerRequestReferenceHash } from "../../src/provider-request-reference-store.js";
-import { temporaryState } from "./helpers.js";
-import { ReferenceTestSecret, flipped, rewrite, stateFiles } from "./provider-request-reference-helpers.js";
+import { keepMetaMaskNativeRequest, metaMaskNativeHandoffFields } from "../../src/metamask-native-request-reference.js";
+import type { MetaMaskNativeRequestObservation, MetaMaskNativeSubmission } from "../../src/metamask-native-transfer-adapter.js";
+import { EncryptedProviderRequestReferenceStore, providerRequestReferenceHash,
+  type ProviderRequestReferencePort } from "../../src/provider-request-reference-store.js";
+import { ReferenceTestSecret, flipped, referenceTemporaryState as temporaryState, rewrite,
+  stateFiles } from "./provider-request-reference-helpers.js";
 
 const RID = "8cc50f3c-ca4e-41d1-98bb-b30f7bcaa3aa", EXPIRES = "2099-10-20T09:51:13.922Z";
 const EVIDENCE = "8aeaabee731ce6e603fddc324702a37abb45dd59d434101acabfab015027d46a";
@@ -157,4 +162,44 @@ test("each stored shape keeps its own keys: mixed, malformed or rebound referenc
   const kept = await plain.persist(patch(legacy, { providerRequestId: RID }));
   await assert.rejects(plain.persist(patch(kept, { mfaTask: metaMaskNativeSealedMfaTask(HASH, evidence, "watch") })), { code: "APN_STATE_CORRUPT" });
   await assert.rejects(plain.persist(patch(legacy, { providerRequestIdHash: HASH, state: "prepared", effectAttempts: 0 })), { code: "APN_STATE_CORRUPT" });
+});
+
+test("a seal that fails after the hand-off keeps the transaction hash and every other field it returned, never the id", async (t) => {
+  const DIAGNOSTIC: MetaMaskNativeDiagnostic = { stage: "sdk_send", code: "ok", exitCode: 0, signal: null, durationMs: 3860, remainingMs: 25349,
+    stderrClass: "unclassified", providerCode: "other" };
+  const TX = `0x${"e".repeat(64)}` as const, mfa = { expiresAt: EXPIRES, authMethod: "social", evidenceHash: EVIDENCE };
+  const failing: ProviderRequestReferencePort = { ready: async () => {}, open: async () => assert.fail("no sealed id to open"),
+    seal: async () => { throw new Error("TEST the seal write failed after the hand-off"); } };
+  const results: ReadonlyArray<readonly [string, MetaMaskNativeSubmission]> = [
+    ["no transaction hash", { disposition: "pending", requestId: RID, mfa, diagnostic: DIAGNOSTIC }],
+    ["a transaction hash", { disposition: "unknown", reason: "provider_private_handoff_outcome_unknown", transactionHash: TX, requestId: RID, mfa,
+      diagnostic: DIAGNOSTIC }],
+  ];
+  for (const [name, result] of results) await t.test(name, async (sub) => {
+    const temporary = await temporaryState(); sub.after(temporary.cleanup);
+    reads = []; answer = undefined;
+    const journal = new MetaMaskNativeJournal(temporary.root); await journal.initialize();
+    const started = await journal.persist(patch(legacy, { state: "effect_started" }));
+    const kept = await keepMetaMaskNativeRequest(failing, started, RID);
+    assert.deepEqual(kept, { unsealed: true });
+    const op = await journal.persist(patch(started, metaMaskNativeHandoffFields(result, kept)));
+    const hash = result.transactionHash ?? null;
+    assert.equal(op.state, "unknown"); assert.equal(op.transactionHash, hash, "the hand-off's transaction hash is kept");
+    assert.deepEqual(op.diagnostic, DIAGNOSTIC);
+    assert.equal(op.providerRequestId, null); assert.equal(op.providerRequestIdHash, undefined); assert.equal(op.mfaTask, undefined);
+    assert.equal(op.providerRequestReason, "provider_request_reference_unsealed");
+    const status = await readMetaMaskNativeTransfer(temporary.root, id);
+    assert.equal(status.provider_request_reason, "provider_request_reference_unsealed"); assert.equal(status.transaction_hash, hash);
+    assert.deepEqual(status.next_actions, hash === null ? [] : [observe], "only a kept transaction hash can still be observed");
+    if (hash === null) {
+      const observed = await readMetaMaskNativeTransfer(temporary.root, id, true, failing);
+      assert.equal(observed.read_observation?.stage, "not_requested");
+      assert.equal(observed.read_observation?.reason, "provider_request_reference_unsealed"); assert.deepEqual(reads, []);
+    }
+    for (const output of [status]) assert.equal(JSON.stringify(output).includes(RID), false);
+    for (const [path, text] of await stateFiles(temporary.root)) assert.equal(text.includes(RID), false, `${path} keeps the request id in plaintext`);
+    // A record that dropped its request id never gains a hash or an MFA task afterwards.
+    await assert.rejects(journal.persist(patch(op, { providerRequestIdHash: HASH })), { code: "APN_STATE_CORRUPT" });
+    await assert.rejects(journal.persist(patch(op, { mfaTask: metaMaskNativeSealedMfaTask(HASH, mfa, "watch") })), { code: "APN_STATE_CORRUPT" });
+  });
 });

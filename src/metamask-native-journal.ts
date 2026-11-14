@@ -70,6 +70,11 @@ export interface MetaMaskNativeOperation {
    * null. Absent from a record that holds no request and from every record 0.5.106 or earlier wrote.
    */
   readonly providerRequestIdHash?: string;
+  /**
+   * Why a record a later release wrote keeps no request although the hand-off returned one: the id could not be sealed
+   * after the hand-off, so it was dropped, never kept in plaintext. Everything else the hand-off returned is kept.
+   */
+  readonly providerRequestReason?: typeof METAMASK_NATIVE_REQUEST_UNSEALED;
   readonly receiptEvidence: MetaMaskNativeFeeReceiptEvidence | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -78,6 +83,8 @@ export interface MetaMaskNativeOperation {
   readonly recordHash: string;
 }
 export const METAMASK_NATIVE_OPERATION_SCHEMA = V2;
+/** The only `providerRequestReason`: the hand-off returned a request id that could not be sealed. */
+export const METAMASK_NATIVE_REQUEST_UNSEALED = "provider_request_reference_unsealed";
 
 /**
  * The owner's MetaMask approval this transfer waits on: a verified AWAITING_MFA notice (or request status) for its own
@@ -127,7 +134,7 @@ const instant = (value: unknown): boolean => typeof value === "string" && Number
 
 /** Checked against the record's own seal and fields only (R2): a changed constant or a moved APN home never voids it. */
 function validateOperation(value: unknown): MetaMaskNativeOperation {
-  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion","operationId","requestHash","context","reservations","state","effectAttempts","transactionHash","providerRequestId","receiptEvidence","createdAt","updatedAt","recordHash",...(value.diagnostic===undefined?[]:["diagnostic"]),...(value.mfaTask===undefined?[]:["mfaTask"]),...(value.providerRequestIdHash===undefined?[]:["providerRequestIdHash"])])) corrupt("Native transfer journal schema is invalid.");
+  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion","operationId","requestHash","context","reservations","state","effectAttempts","transactionHash","providerRequestId","receiptEvidence","createdAt","updatedAt","recordHash",...(value.diagnostic===undefined?[]:["diagnostic"]),...(value.mfaTask===undefined?[]:["mfaTask"]),...(value.providerRequestIdHash===undefined?[]:["providerRequestIdHash"]),...(value.providerRequestReason===undefined?[]:["providerRequestReason"])])) corrupt("Native transfer journal schema is invalid.");
   const o = value as unknown as MetaMaskNativeOperation, { recordHash, ...body } = o, v2 = o.schemaVersion === V2, c = o.context;
   if ((o.schemaVersion !== V1 && !v2) || recordHash !== hashObject(body)) corrupt("Native transfer journal schema is invalid.");
   if (o.diagnostic !== undefined) validateMetaMaskNativeDiagnostic(o.diagnostic);
@@ -161,6 +168,9 @@ function validateOperation(value: unknown): MetaMaskNativeOperation {
   // A sealed request exists only after the hand-off, and the record then never keeps the id itself.
   if (o.providerRequestIdHash !== undefined && (!digest(o.providerRequestIdHash) || o.providerRequestId !== null || o.effectAttempts !== 1))
     corrupt("Native transfer sealed provider request reference is invalid.");
+  // A request whose id could not be sealed is named by nothing: no id, no hash, no MFA task.
+  if (o.providerRequestReason !== undefined && (o.providerRequestReason !== METAMASK_NATIVE_REQUEST_UNSEALED || o.providerRequestId !== null ||
+    o.providerRequestIdHash !== undefined || o.mfaTask !== undefined || o.effectAttempts !== 1)) corrupt("Native transfer provider request reason is invalid.");
   validateMfaTask(o);
   return o;
 }
@@ -220,6 +230,7 @@ export class MetaMaskNativeJournal extends SecureStateStore {
     if (old !== null && (old.schemaVersion !== next.schemaVersion || old.requestHash !== next.requestHash || canonicalJson(old.context) !== canonicalJson(next.context) ||
       old.diagnostic !== undefined && canonicalJson(old.diagnostic) !== canonicalJson(next.diagnostic) || old.createdAt !== next.createdAt || old.effectAttempts > next.effectAttempts || old.transactionHash !== null && old.transactionHash !== next.transactionHash ||
       old.providerRequestIdHash !== undefined && old.providerRequestIdHash !== next.providerRequestIdHash ||
+      old.providerRequestReason !== undefined && old.providerRequestReason !== next.providerRequestReason ||
       RESOLVED.includes(old.state))) blocked("Native transfer journal cannot replace an existing outcome.");
     await this.ensureDirectory(DIRECTORY);
     await this.writeJson(`${DIRECTORY}/${next.operationId}.json`, next, old === null);
@@ -300,6 +311,7 @@ export function publicMetaMaskNativeOperation(o: MetaMaskNativeOperation, now = 
     maximum_native_fee_atomic: o.context.quote.feeQuote.totalQuoteWei, transaction_hash: o.transactionHash,
     effect_attempts: o.effectAttempts, proof_class: o.state === "confirmed" ? receipt?.transferAccepted ? "canonical_native_fee_transfer" : "canonical_reverted_native_fee" : "durable_public_state",
     ...(o.diagnostic === undefined ? {} : { diagnostic: o.diagnostic }),
+    ...(o.providerRequestReason === undefined ? {} : { provider_request_reason: o.providerRequestReason }),
     ...(receipt === null ? {} : { receipt }), ...publicMfaTask(o, now),
     next_actions: observable ? [metaMaskNativeObserveCommand(o.operationId)] : [] };
 }

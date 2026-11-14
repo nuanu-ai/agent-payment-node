@@ -31,8 +31,8 @@ import { prepareMetaMaskNativeQuote, readMetaMaskNativeFunding, observeMetaMaskN
 import { MetaMaskNativeJournal, METAMASK_NATIVE_OPERATION_SCHEMA, loadMetaMaskNativeOwner, metaMaskNativeExpiredBeforeEffect, metaMaskNativeRequestHash,
   metaMaskNativeHasRequest, metaMaskNativeObserveCommand, metaMaskNativeRequestLabel, metaMaskNativeRequestMatches, patchMetaMaskNativeOperation as patch,
   publicMetaMaskNativeOperation as publicOperation, type MetaMaskNativeOperation as NativeOperation, type MetaMaskNativeOwnedContext } from "./metamask-native-journal.js";
-import { metaMaskNativeRequestTask, openMetaMaskNativeRequest, publicMetaMaskNativeReadObservation, sealMetaMaskNativeRequest,
-  type MetaMaskNativePublicReadObservation } from "./metamask-native-request-reference.js";
+import { keepMetaMaskNativeRequest, metaMaskNativeHandoffFields, metaMaskNativeRequestTask, openMetaMaskNativeRequest,
+  publicMetaMaskNativeReadObservation, type MetaMaskNativePublicReadObservation } from "./metamask-native-request-reference.js";
 import type { ProviderRequestReferencePort } from "./provider-request-reference-store.js";
 import { assetUsageReservationId } from "./asset-usage-ledger.js";
 import { refreshOperationIndex } from "./operation-index/refresh.js";
@@ -235,13 +235,12 @@ export async function runMetaMaskNativeTransfer(stateRoot: string, input: MetaMa
       scope = Object.freeze({}) as MetaMaskNativeOwnedScope;
       scopes.set(scope,{root:stateRoot,context,journal,reservations,state:"issued",lockActive:true,monotonicDeadline:performance.now()+Math.min(60000,Date.parse(expires)-Date.now()),lastNow:Date.now(),guardStage:"sdk_resolver",startedAt:performance.now()});
       const result = await submitOwnedMetaMaskNative(scope,context);
-      // The request id is sealed before the journal names its hash; the journal never keeps the id itself.
-      const requestIdHash = result.disposition !== "acknowledged" && result.requestId !== undefined
-        ? await sealMetaMaskNativeRequest(references,op,result.requestId) : undefined;
-      // A pending or unknown hand-off stays financially UNKNOWN; an owner approval the provider waits on is kept beside it.
-      const mfa = result.disposition !== "acknowledged" && result.mfa !== undefined && requestIdHash !== undefined && result.transactionHash === undefined
-        ? {mfaTask:metaMaskNativeRequestTask({providerRequestId:null,providerRequestIdHash:requestIdHash},result.mfa,"send")} : {};
-      op = await journal.persist(patch(op,{...(result.diagnostic===undefined?{}:{diagnostic:result.diagnostic}),...(result.disposition === "acknowledged" ? {state:"acknowledged",transactionHash:result.transactionHash} : {state:"unknown",transactionHash:"transactionHash" in result ? result.transactionHash ?? null : null,providerRequestId:null,...(requestIdHash===undefined?{}:{providerRequestIdHash:requestIdHash}),...mfa})}));
+      // The request id is sealed before the journal names its hash; the journal never keeps the id itself. A seal that
+      // fails here keeps every other field the hand-off returned (its transaction hash above all) and says why no
+      // request is stored.
+      const kept = result.disposition !== "acknowledged" && result.requestId !== undefined
+        ? await keepMetaMaskNativeRequest(references,op,result.requestId) : undefined;
+      op = await journal.persist(patch(op,metaMaskNativeHandoffFields(result,kept)));
       for (const r of reservations) await ledger.transition({...transitionIdentity(r),state:result.disposition==="acknowledged"?"submitted":"unknown_finality",now:new Date()});
       return publicOperation(op);
     } catch (error) {
@@ -331,7 +330,7 @@ export async function readMetaMaskNativeTransfer(stateRoot:string,idInput:string
     let readObservation: MetaMaskNativePublicReadObservation | undefined = observe ? publicMetaMaskNativeReadObservation(Object.freeze({stage:"not_requested",guard_step:null,
       request_id:op.providerRequestId,watch_returned:false,before_guard_verified:false,after_guard_verified:false,
       request_identity_verified:false,provider_status:null,transaction_hash:op.transactionHash,chain_id:op.context.quote.chainId,
-      response_hash:null,reason:metaMaskNativeHasRequest(op)?"stored_transaction_or_confirmed":"no_stored_request_id",error_code:null,diagnostic:null}),op) : undefined;
+      response_hash:null,reason:metaMaskNativeHasRequest(op)?"stored_transaction_or_confirmed":op.providerRequestReason??"no_stored_request_id",error_code:null,diagnostic:null}),op) : undefined;
     if(observe && op.transactionHash===null && metaMaskNativeHasRequest(op) && op.effectAttempts===1) {
       const requestId=await openMetaMaskNativeRequest(references,op);
       // The transfer's own sender and chain bind a server read, should mm's local request list no longer hold the request.

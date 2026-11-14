@@ -124,6 +124,19 @@ opened, the read is refused and nothing is read or written:
 The transfer keeps its state and its reserves. `native-transfer-status` and `apn operation status` never open the
 sealed ID and still answer. `apn operation abandon` still asks for consent after a refused observation.
 
+If the seal fails after the hand-off (the wrapping secret was read before consent, so only its write can fail), APN
+drops the ID, never keeps it in plaintext, and records everything else the hand-off returned, its transaction hash
+included. The journal then holds `providerRequestReason: "provider_request_reference_unsealed"` with no request, and the
+output shows `provider_request_reason`. A kept transaction hash is still observed on chain. Without one, observe reads
+nothing (`read_observation.reason: "provider_request_reference_unsealed"`) and the exit is
+`apn operation abandon` once the quote has expired.
+
+APN never deletes a sealed request reference, not even after its transfer ends. Each counts as sealed custody, so after
+the first native transfer that sealed a request ID a lost wrapping secret refuses every command that would create a new
+one with `wrapping_secret_missing`, including the next native transfer (before consent). The owner's options (restore
+the Keychain item, or move the request-reference directories aside when nothing else is sealed) and what each does to
+unresolved transfers are in the README section on the wrapping secret.
+
 Transfers saved by APN 0.5.106 or earlier keep the request ID itself in their journal. They load, observe and project
 exactly as before, need no wrapping secret, and a read never rewrites them. APN 0.5.106 and earlier cannot read a
 journal that holds `providerRequestIdHash` (`APN_STATE_CORRUPT`). Do not downgrade to 0.5.106 or earlier once such a

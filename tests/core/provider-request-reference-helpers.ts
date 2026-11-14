@@ -1,5 +1,6 @@
 /** Shared doubles for the sealed provider request reference tests (QA F26). Synthetic wrapping secret only. */
-import { chmod, readdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalJson } from "../../src/canonical.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
@@ -47,4 +48,13 @@ export function flipped(encoded: string): string {
   const bytes = Buffer.from(encoded, "base64");
   bytes[0] = bytes[0]! ^ 1;
   return bytes.toString("base64");
+}
+
+/**
+ * A state root under the canonical temporary directory. Kept apart from helpers.ts, which loads src/core.js and with it
+ * the MetaMask native owner and vendor adapter: a test that mocks that adapter must not load it first.
+ */
+export async function referenceTemporaryState(): Promise<{ readonly base: string; readonly root: string; cleanup(): Promise<void> }> {
+  const base = await mkdtemp(join(await realpath(tmpdir()), "apn-reference-"));
+  return { base, root: join(base, "state"), cleanup: async () => await rm(base, { recursive: true, force: true }) };
 }
