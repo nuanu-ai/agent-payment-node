@@ -1,5 +1,5 @@
-import { constants } from "node:fs";
-import { lstat, open } from "node:fs/promises";
+import type { Stats } from "node:fs";
+import { lstat } from "node:fs/promises";
 import { isAbsolute, join, normalize, parse, resolve, sep } from "node:path";
 import type { CommandOutcome, CommandRequest } from "./commands.js";
 import { ApnError } from "./errors.js";
@@ -13,6 +13,7 @@ import {
 } from "./allowlist-policy-activation.js";
 import { AllowlistPolicyStore, stagedRecordAccounts, type StagedAllowlistPolicyRecord } from "./allowlist-policy-store.js";
 import { parseAllowlistPolicyFile, type AllowlistPolicyFile } from "./allowlist-policy-v2.js";
+import { nonRegularFileLabel, nonRegularFileType, openExpectedRegularFile } from "./operator-file.js";
 import type { ClockPort } from "./ports.js";
 
 const MAX_POLICY_FILE_BYTES = 256 * 1024;
@@ -124,18 +125,16 @@ async function readPolicyFile(path: string): Promise<AllowlistPolicyFile> {
   if (!isAbsolute(path) || normalize(path) !== path || resolve(path) !== path) {
     invalid("The policy file path must be absolute and canonical.", "invalid_policy_file_path");
   }
-  let component = parse(path).root;
-  try {
-    for (const part of path.slice(component.length).split(sep).filter(Boolean)) {
-      component = join(component, part);
-      if ((await lstat(component)).isSymbolicLink()) unsafe("The policy file path traverses a symbolic link; pass the real path.");
-    }
-  } catch (error) {
-    if (error instanceof ApnError) throw error;
-    invalid("The policy file cannot be found.", "policy_file_missing");
+  const entry = await policyFileEntry(path);
+  // Refused before any open: a FIFO would block a reading open until some writer appeared.
+  const type = nonRegularFileType(entry);
+  if (type !== null) {
+    throw new ApnError("APN_STATE_SECURITY", `The policy file is ${nonRegularFileLabel(type)}, not a regular file; nothing was read from it.`,
+      { reason: "policy_file_not_regular", file_type: type });
   }
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  const handle = await openExpectedRegularFile(path, entry)
     .catch(() => unsafe("The policy file cannot be opened as a regular file without following links."));
+  if (handle === null) unsafe("The policy file changed while it was opened.");
   try {
     const before = await handle.stat();
     if (!before.isFile() || before.uid !== process.geteuid?.() || (before.mode & 0o022) !== 0 || before.nlink !== 1 ||
@@ -152,6 +151,23 @@ async function readPolicyFile(path: string): Promise<AllowlistPolicyFile> {
     catch { return invalid("The policy file is not strict UTF-8 JSON.", "invalid_policy_file"); }
     return parseAllowlistPolicyFile(value);
   } finally { await handle.close(); }
+}
+
+/** The policy file's own `lstat`, after every component of its path is proven not to be a symbolic link. */
+async function policyFileEntry(path: string): Promise<Stats> {
+  let component = parse(path).root;
+  try {
+    let entry = await lstat(component);
+    for (const part of path.slice(component.length).split(sep).filter(Boolean)) {
+      component = join(component, part);
+      entry = await lstat(component);
+      if (entry.isSymbolicLink()) unsafe("The policy file path traverses a symbolic link; pass the real path.");
+    }
+    return entry;
+  } catch (error) {
+    if (error instanceof ApnError) throw error;
+    return invalid("The policy file cannot be found.", "policy_file_missing");
+  }
 }
 
 function outcome(data: unknown, proofClass: string): CommandOutcome {

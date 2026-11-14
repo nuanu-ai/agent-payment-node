@@ -12,8 +12,7 @@ import { signedDirectTransaction } from "./local-wallet-direct-signed.js";
 import { parseX402Create, parseX402Recovery, x402RecoveryBinding, publicAuthorization, type X402CustodyMethod } from "./local-wallet-native-x402-fields.js";
 import { x402Eip2612TypedData, x402Permit2TypedData } from "./x402-permit2-exact.js";
 import { assertWallet, ensureX402Live, effectSlot, requestProfile, protocol, rejected } from "./local-wallet-native-fields.js";
-import { constants } from "node:fs";
-import { lstat, open } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import { join, normalize, parse, resolve, sep } from "node:path";
 import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -30,6 +29,7 @@ import {
 } from "./encrypted-wallet-store.js";
 import { ApnError } from "./errors.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "./evm-asset.js";
+import { nonRegularFileLabel, nonRegularFileType, openExpectedRegularFile, type NonRegularFileType } from "./operator-file.js";
 import { evmNativeCustody, assertEvmNativeCustody } from "./evm-native-custody.js";
 import { parseEvmNativeIntent, snapshotEvmNativePayload } from "./evm-native-intent.js";
 import type { Hex } from "./model.js";
@@ -156,13 +156,19 @@ export class LocalWalletNative implements NativePort {
       throw new ApnError("APN_STATE_SECURITY", "Wallet key file path must be canonical.");
     }
     let component = parse(keyFile).root;
+    let entry = await lstat(component).catch(keyFileAccessFailure);
     for (const part of keyFile.slice(component.length).split(sep).filter(Boolean)) {
       component = join(component, part);
-      if ((await lstat(component).catch(keyFileAccessFailure)).isSymbolicLink()) {
+      entry = await lstat(component).catch(keyFileAccessFailure);
+      if (entry.isSymbolicLink()) {
         throw new ApnError("APN_STATE_SECURITY", "Wallet key file path traverses a symbolic link.");
       }
     }
-    const handle = await open(keyFile, constants.O_RDONLY | constants.O_NOFOLLOW).catch(keyFileAccessFailure);
+    // A FIFO would block a reading open until some writer appeared; a device, socket or directory holds no key file.
+    const type = nonRegularFileType(entry);
+    if (type !== null) throw keyFileNotRegular(type);
+    const handle = await openExpectedRegularFile(keyFile, entry).catch(keyFileAccessFailure);
+    if (handle === null) throw new ApnError("APN_STATE_SECURITY", "Wallet key file changed during import.", { reason: "key_file_changed" });
     let bytes: Buffer = Buffer.alloc(0);
     try {
       const before = await handle.stat();
@@ -388,4 +394,10 @@ function keyFileAccessFailure(error: unknown): never {
   if (code === "EACCES" || code === "EPERM") throw new ApnError("APN_INVALID_INPUT", "Wallet key file cannot be read by this user.");
   if (code === "ELOOP") throw new ApnError("APN_STATE_SECURITY", "Wallet key file path traverses a symbolic link.");
   throw error;
+}
+
+/** Refused from its `lstat`, before any open, so a FIFO never blocks the import; the message names no path. */
+function keyFileNotRegular(type: NonRegularFileType): ApnError {
+  return new ApnError("APN_STATE_SECURITY", `Wallet key file is ${nonRegularFileLabel(type)}, not a regular file; nothing was read from it.`,
+    { reason: "key_file_not_regular", file_type: type });
 }

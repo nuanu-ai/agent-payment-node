@@ -179,7 +179,8 @@ every staged revision, even a revoked or replaced one. Do not downgrade a profil
 
 The file must be a regular file with an absolute canonical path and no symbolic links in the path. It must be owned by
 you, not writable by group or others, and at most 256 KiB. On macOS, `/tmp` and `/var` are symbolic links, so pass the
-`/private/...` path.
+`/private/...` path. A FIFO, device, socket or directory is refused at once, before any open, with `APN_STATE_SECURITY`,
+`details.reason: "policy_file_not_regular"` and `details.file_type` (CLI and MCP alike); nothing waits for a writer.
 
 ### Example caps
 

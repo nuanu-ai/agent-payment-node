@@ -538,6 +538,11 @@ unwrap it fails with `APN_STATE_CORRUPT` without that reason. Its successful ans
 without a wallet it answers `status: "absent"` with `wrapping_secret: "present"` or `"missing"`, and for a missing secret
 it suggests `apn wallet ensure` only when nothing encrypted exists, otherwise the restore step.
 
+`wallet import --key-file` reads only an owner-only (mode 0600), single-link regular file of at most 64 KiB, reached
+without symbolic links. A FIFO, device, socket or directory is refused at once from its `lstat`, before any open, with
+`APN_STATE_SECURITY`, `details.reason: "key_file_not_regular"` and `details.file_type`; nothing waits for a writer and no
+key is written. The open itself is non-blocking and must reach the same regular file.
+
 Foreground approval requires stdin and stderr attached to real TTYs and an exact operation-bound code within 60 seconds;
 a timeout or interruption writes nothing. It is a human-confirmation boundary, not protection against a compromised user
 session.
