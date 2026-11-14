@@ -208,6 +208,8 @@ export async function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc,
     const dropTopics = encodeEventTopics({ abi: LAYERZERO_EXECUTOR_ABI, eventName: "NativeDropApplied" }), oftBlock = quantity(oft.log.blockNumber);
     const fromReceipt = receiptLogs.filter(log => isAt(log, STARGATE_TOKEN_DESTINATION_EXECUTOR));
     // An Executor that applied the drop in an earlier transaction is found in the one window ending at the delivery block.
+    // A drop outside baseline..delivery block (a provider that ignores fromBlock) predates the operation or follows the
+    // delivery, so it is no candidate, even when no source packet nonce binds it.
     const candidates = fromReceipt.length > 0 ? fromReceipt : await scanStargateLogs(call, { address: STARGATE_TOKEN_DESTINATION_EXECUTOR, topics: [dropTopics[0]!] },
       oftBlock >= baselineNumber + STARGATE_POLYGON_SCAN_WINDOW ? oftBlock - STARGATE_POLYGON_SCAN_WINDOW + 1n : baselineNumber, oftBlock, STARGATE_POLYGON_SCAN_WINDOW, undefined, 1);
     const matches: { log: Record<string, unknown>; nonce: bigint }[] = [];
@@ -215,7 +217,8 @@ export async function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc,
       const nonce = packet?.nonceAtomic; if (isAt(log, STARGATE_TOKEN_DESTINATION_EXECUTOR) && event.origin.srcEid === 30111 &&
         event.origin.sender.toLowerCase() === pad(STARGATE_TOKEN_SOURCE_MESSAGING, { size: 32 }).toLowerCase() && (nonce === undefined || event.origin.nonce.toString() === nonce) &&
         event.dstEid === 30109 && getAddress(event.oapp) === STARGATE_TOKEN_DESTINATION_MESSAGING && event.params.length === 1 && event.success.length === 1 && event.success[0] === true &&
-        getAddress(event.params[0]!.receiver) === input.recipient && event.params[0]!.amount.toString() === input.nativeDropAtomic && await isCanonical(log)) matches.push({ log, nonce: event.origin.nonce });
+        getAddress(event.params[0]!.receiver) === input.recipient && event.params[0]!.amount.toString() === input.nativeDropAtomic &&
+        stargateLogInScan(quantity(log.blockNumber), baselineNumber, oftBlock) && await isCanonical(log)) matches.push({ log, nonce: event.origin.nonce });
     } catch { /* unrelated candidate */ } }
     if (matches.length !== 1 || !atOrBefore(matches[0]!.log, oft.log)) return null; const match = matches[0]!;
     nativeDrop = { executor: STARGATE_TOKEN_DESTINATION_EXECUTOR, nonceAtomic: match.nonce.toString(), success: true,

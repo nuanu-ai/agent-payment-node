@@ -143,13 +143,13 @@ test("service status and receipt reconcile legal terminal targets and reject ill
 
 type DestinationMutation = "nonce" | "sender" | "oapp" | "guid" | "duplicate-drop" | "duplicate-delivery" | "failed-drop" |
   "noncanonical" | "bad-order" | "baseline" | "provider-error" | "dedup" | "low-balances" | "receipt-hash" | "receipt-block" | "receipt-status" |
-  "unbounded-logs" | "unbounded-early-head";
+  "unbounded-logs" | "unbounded-early-head" | "stale-drop";
 const TEST_CODE = "0x6001" as Hex, TEST_CODE_HASH = keccak256(TEST_CODE), PACKET_NONCE = 27308n;
 const sourcePacket = { srcEid: 30111 as const, sender: pad(STARGATE_TOKEN_SOURCE_MESSAGING, { size: 32 }), nonceAtomic: PACKET_NONCE.toString(),
   dstEid: 30109 as const, receiver: pad(STARGATE_TOKEN_DESTINATION_MESSAGING, { size: 32 }) };
 function destinationRpc(mode: "split" | "combined" = "split", mutation?: DestinationMutation) {
   const ranges: { from: bigint; to: bigint }[] = [], codeReads: unknown[][] = [], transactionReads: unknown[][] = [], deliveryBlock = 304n;
-  const dropBlock = mutation === "bad-order" ? 305n : (mode === "combined" ? deliveryBlock : 209n);
+  const dropBlock = mutation === "bad-order" ? 305n : mutation === "stale-drop" ? 5n : (mode === "combined" ? deliveryBlock : 209n);
   const dropTx = mode === "combined" ? TX : OTHER_TX;
   const oftTopics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: GUID, toAddress: OWNER } });
   const oftData = encodeAbiParameters(parseAbiParameters("uint32 srcEid,uint256 amountReceivedLD"), [30111, 100n]);
@@ -185,9 +185,9 @@ function destinationRpc(mode: "split" | "combined" = "split", mutation?: Destina
       if (to - from + 1n > 100n) throw new Error("provider rejects ranges above 100 blocks");
       if (mutation === "provider-error" && from === 209n) throw new Error("provider range failure");
       // A filtered provider returns only the requested emitter's rows matching every given topic; an unbounded one
-      // ignores fromBlock and toBlock.
-      const unbounded = mutation === "unbounded-logs" || mutation === "unbounded-early-head";
-      return (byAddress[filter.address] ?? []).filter(row => (unbounded || (BigInt(row.blockNumber) >= from && BigInt(row.blockNumber) <= to)) &&
+      // ignores fromBlock and toBlock, and the stale-drop one ignores fromBlock.
+      const unbounded = mutation === "unbounded-logs" || mutation === "unbounded-early-head", ignoresFrom = unbounded || mutation === "stale-drop";
+      return (byAddress[filter.address] ?? []).filter(row => (ignoresFrom || BigInt(row.blockNumber) >= from) && (unbounded || BigInt(row.blockNumber) <= to) &&
         (filter.topics as (Hex | null)[]).every((topic, index) => topic === null || row.topics[index] === topic));
     }
     if (method === "eth_getTransactionByHash") { transactionReads.push([...params]); throw new Error("delivery transaction is not read"); }
@@ -273,4 +273,14 @@ test("a provider that ignores the log block bounds cannot prove delivery outside
   const late = destinationRpc("split", "unbounded-logs");
   assert.equal(await observeStargateTokenDestination(late as any, { ...destinationInput, fromBlockNumberAtomic: "305", fromBlockHash: SAFE }), null);
   assert.deepEqual(late.transactionReads, []);
+});
+
+test("without a source packet nonce, a drop before the frozen baseline from a provider that ignores fromBlock is no proof", async () => {
+  const { sourcePacket: _packet, ...unbound } = destinationInput;
+  // Control: the in-window drop at block 209 still binds the delivery when no packet nonce is frozen.
+  assert.equal((await observeStargateTokenDestination(destinationRpc("split") as any, unbound))?.nativeDrop?.blockNumberAtomic, "209");
+  // The only drop the provider returns is an identical one at block 5, before baseline 9: it predates the operation.
+  const stale = destinationRpc("split", "stale-drop");
+  assert.equal(await observeStargateTokenDestination(stale as any, unbound), null);
+  assert.ok(stale.ranges.some(row => row.from === 205n && row.to === 304n));
 });
