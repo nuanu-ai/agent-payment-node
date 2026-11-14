@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { createRequire, syncBuiltinESMExports } from "node:module";
+import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { readFixture, respond, trace } from "./responses.mjs";
+import { readFixture, respond, trace, writeFixture } from "./responses.mjs";
 
 // External fixture boundary only. The actual archive, helper, SDK, journal,
 // runtime factory, parser and approval implementation remain untouched.
@@ -81,7 +82,41 @@ https.request = (urlInput, options, onResponse) => {
   return req;
 };
 
+// The login Keychain of this offline fixture: one synthetic wrapping secret kept in the control file, so every process of
+// a scenario (CLI, MCP and the approval terminal) reads the same item. APN seals the MetaMask request reference under it.
+// The real Keychain and security(1) are never reached.
+function keychainCommand(args) {
+  const fixture = readFixture(fixturePath);
+  if (args[0] === "find-generic-password") {
+    return fixture.keychainSecret === undefined ? { code: 44, output: "" } : { code: 0, output: `${fixture.keychainSecret}\n` };
+  }
+  const index = args[0] === "add-generic-password" ? args.indexOf("-w") + 1 : 0, encoded = args[index];
+  if (index <= 0 || typeof encoded !== "string" || Buffer.from(encoded, "base64").length !== 32 || fixture.keychainSecret !== undefined) {
+    return { code: 45, output: "" };
+  }
+  writeFixture(fixturePath, { ...fixture, keychainSecret: encoded });
+  return { code: 0, output: "" };
+}
+function keychain(args) {
+  const child = new EventEmitter(), input = [];
+  child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+  child.kill = () => true;
+  child.stdin.on("data", chunk => { input.push(Buffer.from(chunk)); });
+  child.stdin.on("end", () => {
+    // security -i reads one command per line, each word bare or double-quoted.
+    const interactive = args.length === 1 && args[0] === "-i";
+    const lines = interactive ? Buffer.concat(input).toString("utf8").split("\n").filter(line => line.length > 0)
+      .map(line => line.match(/"[^"]*"|[^\s"]+/gu).map(word => word.startsWith("\"") ? word.slice(1, -1) : word)) : [args];
+    const results = lines.map(keychainCommand);
+    child.stdout.once("end", () => child.emit("close", interactive ? 0 : results[0].code, null));
+    child.stdout.end(results.map(result => result.output).join(""));
+    child.stderr.end();
+  });
+  return child;
+}
+
 childProcess.spawn = (executable, args, options) => {
+  if (executable === "/usr/bin/security") return keychain(args);
   if (executable === "/usr/bin/lockf") {
     assert.deepEqual(args, ["-s", "-t", "0", "3"]); assert.equal(options.shell, false);
     return actualSpawn(executable, args, options);

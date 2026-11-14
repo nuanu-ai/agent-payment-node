@@ -837,6 +837,29 @@ Once MetaMask reports a closed status, a later failed provider read (such as an 
 reason instead of replacing it with `mm_gasless_provider_unavailable`, `mm_gasless_session_expired` or
 `mm_gasless_session_unavailable`.
 
+### The sealed request reference
+
+MetaMask files the relay job, and the MFA approval it waits on, under a request UUID that APN chooses at prepare. APN
+keeps that UUID encrypted. Prepare seals it under the login-Keychain wrapping secret, with the same custody envelope as
+wallets and MetaMask x402 authorizations, in `metamask-gasless-request-references/<profile-hash>/<operation-id>.json`.
+Prepare creates the wrapping secret if the state holds nothing sealed yet. The operation journal keeps only the UUID's
+hash, and status, receipts and output show only that hash (`provider_request_id_hash`).
+
+APN opens the sealed UUID only to send the request and to read its job:
+
+- `approve` opens it before the approval screen. If it cannot be opened (the file is missing or damaged, it belongs to
+  another operation, it was sealed under another secret, or the Keychain refuses), approve refuses, nothing is sent,
+  and the operation stays `awaiting_approval` until its deadline ends it. A missing, damaged or foreign file is
+  `APN_STATE_CORRUPT / mm_gasless_state_corrupt`; a missing wrapping secret is `APN_STATE_CORRUPT /
+  wrapping_secret_missing` with the step to restore the Keychain item.
+- The dispatch opens it again just before the marker. The same failure there stops the operation before any effect.
+- `resume` opens it to read the job. If it cannot, `provider_job_read` reports a failed read and the chain is still
+  observed; the outcome still comes from the chain.
+- `operation abandon` observes first, as resume does. Status, receipts and `revoke` never open it.
+
+Operations prepared by APN 0.5.106 or earlier keep the UUID itself in their journal. They load, resume and project
+exactly as before, and reading them never rewrites them.
+
 ### Recovery
 
 Continue with `apn operation resume --operation <operation-id>`, without `--wait-seconds`, including after the APN
@@ -1015,9 +1038,9 @@ bodies. Unknown amounts remain unknown.
 
 ## State and upgrades
 
-The gasless journal, receipts and encrypted effects use separate files under the existing APN state directory; wallet
-and earlier operation formats are preserved. Reinstalling or upgrading must preserve that directory and its existing
-wrapping secret. Recover an unresolved operation with the same release that wrote it or a compatible newer one; an older
+The gasless journal, receipts, encrypted effects and sealed MetaMask request references use separate files under the
+existing APN state directory; wallet and earlier operation formats are preserved. Reinstalling or upgrading must
+preserve that directory and its existing wrapping secret. Recover an unresolved operation with the same release that wrote it or a compatible newer one; an older
 binary does not provide gasless recovery. Do not delete unresolved state or create a replacement payment to work around
 it. `apn operation status` and `apn operation resume` read the saved journal without running any other binary.
 
@@ -1068,6 +1091,10 @@ These notes matter only for operations prepared by older releases.
 - **Observation RPC.** `--observation-rpc-env` needs APN 0.5.12 or later for Local operations and 0.5.16 or later for
   MetaMask Agent and Smart Account operations. Readers from 0.5.11 and earlier reject records containing the
   `observation_source` field, so do not downgrade below 0.5.12 once an operation has been observed this way.
+- **MetaMask request reference.** Readers from 0.5.106 and earlier reject a MetaMask Agent operation prepared by a later
+  release, whose journal keeps `requestIdHash` in place of `requestId`. Do not downgrade to 0.5.106 or earlier once
+  such an operation exists. Operations prepared by 0.5.106 or earlier keep their plaintext `requestId` and are never
+  migrated.
 - **Smart Account verify answers.** Readers from 0.5.105 and earlier reject a record that holds a refused verify answer
   (`provider_verify`), so do not downgrade below 0.5.106 once one is saved. Operations prepared with the one-address pin
   load and resolve unchanged.

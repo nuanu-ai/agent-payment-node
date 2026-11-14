@@ -7,7 +7,7 @@ import { readProjectWallets, type ProjectWallets } from "./project-wallets.js";
 import { request as httpsRequest } from "node:https";
 import { canonicalJson, exactKeys, isPlainRecord } from "../../canonical.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, type PinnedAddress } from "../../network-policy.js";
-import type { MetaMaskGaslessIntent, MetaMaskGaslessQuote } from "../model.js";
+import type { MetaMaskGaslessProviderIntent, MetaMaskGaslessQuote } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
 import { MM_SENTINEL_SLUG, mmRegistry } from "../registry.js";
 import { mmFail } from "../reasons.js";
@@ -38,7 +38,7 @@ export type ModeContext =
   | { readonly mode: "inspect" | "buildUnsigned" }
   | { readonly mode: "quote"; readonly input: MetaMaskGaslessQuoteInput; readonly owner: string; readonly authToken: string;
       readonly projectId: string }
-  | { readonly mode: "submit" | "observe"; readonly intent: MetaMaskGaslessIntent; readonly projectId: string;
+  | { readonly mode: "submit" | "observe"; readonly intent: MetaMaskGaslessProviderIntent; readonly projectId: string;
       readonly token: string; readonly now: () => Date };
 
 export class HelperNetworkPolicy {
@@ -333,7 +333,7 @@ function validateSentinelBody(body: string, context: Extract<ModeContext, { mode
     mmFail("mm_gasless_provider_unavailable");
   }
 }
-function validateSubmitBody(body: string, intent: MetaMaskGaslessIntent, expected: unknown): void {
+function validateSubmitBody(body: string, intent: MetaMaskGaslessProviderIntent, expected: unknown): void {
   const value = parseBody(body);
   if (!isPlainRecord(expected) || canonicalJson(value) !== canonicalJson(expected)) mmFail("mm_gasless_submit_unknown");
   if (!exactKeys(value, ["requestId", "method", "encoding", "tx", "executions", "delegation"]) || value.requestId !== intent.requestId ||
@@ -432,6 +432,6 @@ function sendHttps(url: URL, input: FetchExchangeRequest, addresses: readonly Pi
 export function networkContextQuote(input: MetaMaskGaslessQuoteInput, owner: string, authToken: string, projectId: string): ModeContext {
   return { mode: "quote", input: structuredClone(input), owner, authToken, projectId };
 }
-export function networkContextRequest(mode: "submit" | "observe", intent: MetaMaskGaslessIntent, projectId: string,
+export function networkContextRequest(mode: "submit" | "observe", intent: MetaMaskGaslessProviderIntent, projectId: string,
   token: string, now: () => Date): ModeContext { return { mode, intent, projectId, token, now }; }
 export function networkContextEmpty(mode: "inspect" | "buildUnsigned"): ModeContext { return { mode }; }

@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { ApnCore } from "../../src/core.js";
 import { ApnError } from "../../src/errors.js";
 import { MetaMaskGaslessOperationRepository } from "../../src/metamask-gasless/journal/repository.js";
+import { mmPrivateHash } from "../../src/metamask-gasless/identity.js";
 import { mmError } from "../../src/metamask-gasless/reasons.js";
 import { mmSessionGuidance } from "../../src/metamask-gasless/session-guidance.js";
 import { MM_CHAINS } from "../../src/metamask-gasless/model.js";
@@ -33,7 +34,11 @@ test("MM eight-chain preparation binds exact economics and reuses stored idempot
       assert.deepEqual(await f.state.loadProviderProfile(f.state.profileHash(f.profile)), before);
       const receipt = await f.core.execute({ command: "receipt.get", operationId: id });
       const safe = JSON.stringify([repeated, receipt]);
-      for (const forbidden of ["private_rpc_canary", operation.intent.requestId, "unsignedDelegation", "signingDigest", "private_identity_canary"]) {
+      // The journal keeps only the request id's hash; the id itself is sealed apart.
+      assert.equal(operation.intent.requestId, undefined); assert.match(operation.intent.requestIdHash ?? "", /^[0-9a-f]{64}$/u);
+      const requestId = await f.references.open({ profileHash: operation.profileHash, operationId: id,
+        requestIdHash: operation.intent.requestIdHash ?? "" });
+      for (const forbidden of ["private_rpc_canary", requestId, "unsignedDelegation", "signingDigest", "private_identity_canary"]) {
         assert.equal(safe.includes(forbidden), false, forbidden);
       }
     }
@@ -71,7 +76,8 @@ test("MM approval persists one marker before submit; lost response, restart and 
     f.provider.beforeSubmit = async intent => {
       const saved = await new MetaMaskGaslessOperationRepository(root).findOperation(id);
       assert.equal(saved?.state, "dispatch_pending"); assert.equal(saved?.submissionAttempts, 1);
-      assert.equal(saved?.intent.requestId, intent.requestId); assert.ok(saved?.approval);
+      assert.equal(saved?.intent.requestId, undefined); assert.ok(saved?.approval);
+      assert.equal(saved?.intent.requestIdHash, mmPrivateHash("request-id", intent.requestId));
     };
     const approved = await f.core.execute({ command: "gasless.transfer.approve", operationId: id });
     assert.equal(approved.ok, true, JSON.stringify(approved.error)); assert.equal((await f.record(id)).state, "unknown_finality");

@@ -1,7 +1,8 @@
 import type { Address, Hex } from "../model.js";
 import type { MetaMaskGaslessBalance, MetaMaskGaslessBinding, MetaMaskGaslessChainId, MetaMaskGaslessCursor,
-  MetaMaskGaslessExecutions, MetaMaskGaslessIntent, MetaMaskGaslessProfileIdentity, MetaMaskGaslessProviderObservation,
-  MetaMaskGaslessQuote, MetaMaskGaslessRpcObservation, MetaMaskGaslessSnapshot, MetaMaskGaslessUnsignedResult } from "./model.js";
+  MetaMaskGaslessExecutions, MetaMaskGaslessIntent, MetaMaskGaslessProfileIdentity, MetaMaskGaslessProviderIntent,
+  MetaMaskGaslessProviderObservation, MetaMaskGaslessQuote, MetaMaskGaslessRpcObservation, MetaMaskGaslessSnapshot,
+  MetaMaskGaslessUnsignedResult } from "./model.js";
 import type { MetaMaskGaslessOperationRecord, MetaMaskGaslessReceipt } from "./operation-model.js";
 import type { MmDeploymentView } from "./recorded.js";
 import type { MetaMaskDisableCall } from "./revocation/call.js";
@@ -28,8 +29,22 @@ export interface MetaMaskGaslessProviderPort {
   inspect(expected: MetaMaskGaslessProfileIdentity): Promise<MetaMaskGaslessBinding>;
   quote(input: MetaMaskGaslessQuoteInput): Promise<MetaMaskGaslessQuote>;
   buildUnsigned(input: MetaMaskGaslessUnsignedInput): Promise<MetaMaskGaslessUnsignedResult>;
-  submit(intent: MetaMaskGaslessIntent): Promise<MetaMaskGaslessProviderObservation>;
-  observe(intent: MetaMaskGaslessIntent): Promise<MetaMaskGaslessProviderObservation>;
+  submit(intent: MetaMaskGaslessProviderIntent): Promise<MetaMaskGaslessProviderObservation>;
+  observe(intent: MetaMaskGaslessProviderIntent): Promise<MetaMaskGaslessProviderObservation>;
+}
+/** The operation a sealed provider request id belongs to, and the hash its intent keeps in place of the id. */
+export interface MetaMaskGaslessRequestBinding {
+  readonly profileHash: string;
+  readonly operationId: string;
+  readonly requestIdHash: string;
+}
+/**
+ * Custody of the provider request id of an operation whose intent keeps only its hash
+ * (journal/request-reference.ts): sealed once at prepare, opened only to send the request or to read its job.
+ */
+export interface MetaMaskGaslessRequestReferencePort {
+  seal(binding: MetaMaskGaslessRequestBinding, requestId: string): Promise<void>;
+  open(binding: MetaMaskGaslessRequestBinding): Promise<string>;
 }
 export interface MetaMaskGaslessRpcPort {
   readonly chainId: MetaMaskGaslessChainId;

@@ -151,11 +151,19 @@ export interface MetaMaskGaslessIntent extends MetaMaskGaslessUnsignedResult {
   readonly initialSnapshot: MetaMaskGaslessSnapshot;
   readonly preparedGrossAtomic?: string;
   readonly quote: MetaMaskGaslessQuote;
-  readonly requestId: string;
+  /**
+   * The request id APN chose at prepare: MetaMask's id for this relay job, the one the owner's MFA approval waits on.
+   * A record that an earlier release wrote keeps the id itself here. A newer record keeps only `requestIdHash` and seals
+   * the id under the Keychain wrapping secret (journal/request-reference.ts). A saved intent holds exactly one of the two.
+   */
+  readonly requestId?: string;
+  readonly requestIdHash?: string;
   readonly preparedAt: string;
   readonly expiresAt: string;
   readonly policyHash: string;
 }
+/** What the provider helper is handed: the intent with the request id itself, never its hash (client/protocol.ts). */
+export type MetaMaskGaslessProviderIntent = Omit<MetaMaskGaslessIntent, "requestId" | "requestIdHash"> & { readonly requestId: string };
 /**
  * The exact batch and delegation actually dispatched, when the provider's price at the guard differed from the
  * prepared one. Written once, in the same durable transition as the dispatch marker, and never afterwards.

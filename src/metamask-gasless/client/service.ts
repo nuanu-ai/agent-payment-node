@@ -9,7 +9,7 @@ import { encodeFunctionData, hashTypedData, parseAbi } from "viem";
 import { isPlainRecord } from "../../canonical.js";
 import { mmQuoteHash } from "../economics.js";
 import { mmPrivateHash } from "../identity.js";
-import type { MetaMaskGaslessBinding, MetaMaskGaslessIntent, MetaMaskGaslessProviderObservation,
+import type { MetaMaskGaslessBinding, MetaMaskGaslessProviderIntent, MetaMaskGaslessProviderObservation,
   MetaMaskGaslessQuote, MetaMaskGaslessUnsignedResult } from "../model.js";
 import { mmRegistry } from "../registry.js";
 import { mmClassify, mmFail, mmFailure } from "../reasons.js";
@@ -206,7 +206,7 @@ async function buildUnsigned(input: Extract<HelperRequest, { mode: "buildUnsigne
 interface ResponseProgress { check: SubmitCheck | undefined; providerStatus: string | null; tx: MetaMaskJobTx | undefined }
 interface SubmitProgress extends ResponseProgress { stage: SubmitStage }
 
-async function submit(intent: MetaMaskGaslessIntent, first: PrivateState, home: string, now: () => Date,
+async function submit(intent: MetaMaskGaslessProviderIntent, first: PrivateState, home: string, now: () => Date,
   policy: HelperNetworkPolicy, firstObservedAt: Date, sent: SubmitProgress): Promise<MetaMaskGaslessProviderObservation> {
   sent.stage = "sdk_load";
   const evm = await foxEvm();
@@ -242,7 +242,7 @@ async function submit(intent: MetaMaskGaslessIntent, first: PrivateState, home: 
   return providerObservation(status, intent, now(), "mm_gasless_submit_unknown", sent);
 }
 
-async function observe(intent: MetaMaskGaslessIntent, state: PrivateState, policy: HelperNetworkPolicy,
+async function observe(intent: MetaMaskGaslessProviderIntent, state: PrivateState, policy: HelperNetworkPolicy,
   now: () => Date, seen: ResponseProgress): Promise<MetaMaskGaslessProviderObservation> {
   const evm = await foxEvm();
   const keyrings = await foxKeyring();
@@ -280,7 +280,7 @@ function validateSdkQuote(value: unknown, input: Extract<HelperRequest, { mode: 
   return { ...material, hash: mmQuoteHash(material) };
 }
 
-function providerObservation(value: unknown, intent: MetaMaskGaslessIntent, now: Date,
+function providerObservation(value: unknown, intent: MetaMaskGaslessProviderIntent, now: Date,
   reason: "mm_gasless_submit_unknown" | "mm_gasless_provider_unavailable", sent?: ResponseProgress): MetaMaskGaslessProviderObservation {
   // Each refusal names its check for the submit's or the observation's diagnostic; the conditions are one compound test.
   const refuse = (check: SubmitCheck): never => { if (sent !== undefined) sent.check = check; return mmFail(reason); };
@@ -311,7 +311,7 @@ function unknownStatus(status: string, sent: ResponseProgress | undefined, reaso
   if (sent !== undefined) { sent.check = "response_status"; sent.providerStatus = submitToken(status); }
   return mmFail(reason);
 }
-function unavailable(intent: MetaMaskGaslessIntent, now: Date): MetaMaskGaslessProviderObservation {
+function unavailable(intent: MetaMaskGaslessProviderIntent, now: Date): MetaMaskGaslessProviderObservation {
   return { observedAt: now.toISOString(), requestIdHash: mmPrivateHash("request-id", intent.requestId), status: "unavailable", txHash: null };
 }
 function formatSix(value: string): string {

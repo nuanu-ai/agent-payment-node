@@ -30,8 +30,16 @@ test("installed MetaMask CLI proves G=N+F and provider gas payment on all eight 
         assert.equal(record.state, "awaiting_approval"); assert.equal(record.submissionAttempts, 0);
         assert.equal(BigInt(record.intent.quote.netAtomic) + BigInt(record.intent.quote.feeAtomic), 1000000n);
         assert.equal(record.intent.quote.feeAtomic, chain === 1 ? "1050" : "1000");
+        // QA F26: the journal names the provider request by its hash only; the id is sealed in its own encrypted record.
+        assert.equal(record.intent.requestId, undefined); assert.match(record.intent.requestIdHash, /^[0-9a-f]{64}$/u);
+        const journalPath = join(s.stateRoot, "metamask-gasless-operations", record.profileHash, `${id}.json`);
+        const sealedPath = join(s.stateRoot, "metamask-gasless-request-references", record.profileHash, `${id}.json`);
+        assert.equal(JSON.parse(await readFile(sealedPath, "utf8")).binding.requestIdHash, record.intent.requestIdHash);
         const approved = await s.approve(id);
         assert.equal(approved.envelope.ok, true, JSON.stringify(approved.envelope));
+        for (const path of [journalPath, sealedPath]) {
+          assert.equal((await readFile(path, "utf8")).includes(s.fixture().effect.requestId), false, path);
+        }
         const completed = await s.record(id);
         assert.equal(completed.state, "completed", JSON.stringify(approved.envelope));
         assert.equal(completed.submissionAttempts, 1); assert.equal(s.fixture().postCount, 1);

@@ -2,7 +2,7 @@ import { readDataRecord, validateReadDiagnostic, type MetaMaskReadDiagnostic } f
 import { validateSubmitDiagnostic, type MetaMaskSubmitDiagnostic } from "./submit-diagnostic.js";
 import { validateObserveDiagnostic, type MetaMaskObserveDiagnostic } from "./observe-diagnostic.js";
 import { isPlainRecord } from "../../canonical.js";
-import type { MetaMaskGaslessBinding, MetaMaskGaslessIntent, MetaMaskGaslessProfileIdentity,
+import type { MetaMaskGaslessBinding, MetaMaskGaslessProviderIntent, MetaMaskGaslessProfileIdentity,
   MetaMaskGaslessProviderObservation, MetaMaskGaslessQuote, MetaMaskGaslessUnsignedResult } from "../model.js";
 import { MM_PROVIDER_STATUSES } from "../model.js";
 import type { MetaMaskGaslessQuoteInput, MetaMaskGaslessUnsignedInput } from "../ports.js";
@@ -20,7 +20,7 @@ export type HelperRequest =
   | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "inspect"; readonly expected: MetaMaskGaslessProfileIdentity }
   | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "quote"; readonly input: MetaMaskGaslessQuoteInput }
   | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "buildUnsigned"; readonly input: MetaMaskGaslessUnsignedInput }
-  | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "submit" | "observe"; readonly intent: MetaMaskGaslessIntent };
+  | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "submit" | "observe"; readonly intent: MetaMaskGaslessProviderIntent };
 export type HelperResult = MetaMaskGaslessBinding | MetaMaskGaslessQuote | MetaMaskGaslessUnsignedResult |
   MetaMaskGaslessProviderObservation;
 export type HelperResponse = { readonly version: typeof MM_HELPER_VERSION; readonly ok: true; readonly result: HelperResult } |
@@ -132,7 +132,7 @@ function quoteOutput(value: unknown, input: MetaMaskGaslessQuoteInput): MetaMask
   return mmQuote(quote, { chainId: input.chainId, recipient: input.recipient, grossAtomic: gross,
     maxFeeAtomic: quote.feeAtomic, minReceivedAtomic: quote.netAtomic }, input.binding, quote.netAtomic, "mm_gasless_provider_unavailable");
 }
-function intent(value: unknown): MetaMaskGaslessIntent {
+function intent(value: unknown): MetaMaskGaslessProviderIntent {
   const keys = ["profile", "request", "binding", "token", "decimals", "deploymentEvidenceHash", "initialSnapshot", "quote",
     "requestId", "preparedAt", "expiresAt", "policyHash", "unsignedDelegation", "delegationHash", "signingDigest", "relayTo", "mode"];
   const i = mmExact(value, [...keys, ...(isPlainRecord(value) && Object.hasOwn(value, "preparedGrossAtomic") ? ["preparedGrossAtomic"] : [])], "mm_gasless_state_corrupt");
@@ -143,7 +143,7 @@ function intent(value: unknown): MetaMaskGaslessIntent {
   mmIso(i.preparedAt, "mm_gasless_state_corrupt"); mmIso(i.expiresAt, "mm_gasless_state_corrupt");
   if (request.fixedNet ? typeof i.preparedGrossAtomic !== "string" : Object.hasOwn(i, "preparedGrossAtomic")) mmFail("mm_gasless_state_corrupt");
   if (request.fixedNet) mmUint(i.preparedGrossAtomic, true, "mm_gasless_state_corrupt");
-  const quote = quoteResult(i.quote), typed = i as unknown as MetaMaskGaslessIntent;
+  const quote = quoteResult(i.quote), typed = i as unknown as MetaMaskGaslessProviderIntent;
   const deployment = mmRegistry(request.chainId);
   if (i.token !== deployment.row.token || i.deploymentEvidenceHash !== deployment.deploymentEvidenceHash) mmFail("mm_gasless_state_corrupt");
   mmQuote(quote, request, binding, quote.netAtomic, "mm_gasless_state_corrupt");
@@ -176,7 +176,7 @@ function chainState(value: unknown, feeMode?: "sponsored"): void {
   if (s.tokenDecimals !== 6 || !["empty", "pinned"].includes(String(s.designation))) mmFail("mm_gasless_state_corrupt");
   mmUint(s.usdcBalanceAtomic, false, "mm_gasless_state_corrupt"); mmUint(s.counterAtomic, false, "mm_gasless_state_corrupt");
 }
-function observation(value: unknown, intentValue: MetaMaskGaslessIntent): MetaMaskGaslessProviderObservation {
+function observation(value: unknown, intentValue: MetaMaskGaslessProviderIntent): MetaMaskGaslessProviderObservation {
   const o = mmExact(value, ["observedAt", "requestIdHash", "status", "txHash"], "mm_gasless_provider_unavailable");
   mmIso(o.observedAt, "mm_gasless_provider_unavailable"); mmHash(o.requestIdHash, "mm_gasless_provider_unavailable");
   if (!(MM_PROVIDER_STATUSES as readonly string[]).includes(String(o.status)) ||

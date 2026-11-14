@@ -10,6 +10,8 @@ const slugs = { 1: "ethereum", 10: "optimism", 137: "polygon", 143: "monad", 132
 const quantity = value => `0x${BigInt(value).toString(16)}`;
 const word = value => `0x${BigInt(value).toString(16).padStart(64, "0")}`;
 const sha = value => createHash("sha256").update(value).digest("hex");
+// APN's journal names the provider request by this hash (mmPrivateHash "request-id"); the id itself is sealed apart.
+const requestIdHash = value => sha(JSON.stringify({ purpose: "apn.metamask-gasless.request-id.v1", value }));
 const read = path => JSON.parse(readFileSync(path, "utf8"));
 export function readFixture(path) { return read(path); }
 export function writeFixture(path, value) {
@@ -86,7 +88,8 @@ export async function respond(path, url, method, headers, body) {
     // Verify the authoritative record already contains the irreversible marker.
     const operation = read(f.operationPath);
     assert.equal(operation.submissionAttempts, 1); assert.equal(operation.state, "dispatch_pending");
-    assert.equal(operation.intent.requestId, request.requestId);
+    assert.equal(operation.intent.requestId, undefined, "the journal never keeps the request id itself");
+    assert.equal(operation.intent.requestIdHash, requestIdHash(request.requestId));
     const effect = await makeSignedEffect(f.packageRoot, f, request, { type: f.initialDesignation === "empty" ? 4 : 2 });
     const dispatched = operation.dispatch ?? operation.intent;
     assert.equal(effect.delegationHash, dispatched.delegationHash);
@@ -99,10 +102,13 @@ export async function respond(path, url, method, headers, body) {
     if (f.submitResponseLost) throw new Error("synthetic lost response");
     return json({ requestId: request.requestId, status: f.providerStatus ?? "BROADCASTED", tx: request.tx, txHash: effect.transaction.hash });
   }
-  const savedRequestId = f.operationPath === null ? null : read(f.operationPath).intent.requestId;
-  if (savedRequestId && url === `${collection}/${savedRequestId}` && method === "GET") {
+  const saved = f.operationPath === null ? null : read(f.operationPath).intent;
+  const readId = url.startsWith(`${collection}/`) ? url.slice(collection.length + 1) : null;
+  // A journal of an earlier release keeps the id itself; a current one keeps only its hash.
+  const savedHash = saved === null ? null : saved.requestIdHash ?? (saved.requestId === undefined ? null : requestIdHash(saved.requestId));
+  if (savedHash !== null && readId !== null && savedHash === requestIdHash(readId) && method === "GET") {
     assert.equal(body, null);
-    trace(path, { kind: "provider-get", requestIdHash: sha(savedRequestId) });
+    trace(path, { kind: "provider-get", requestIdHash: sha(readId) });
     if (!f.effect) return { status: 404, body: "{}" };
     if (f.observeUnauthorized) return { status: 401, body: "{}" };
     return json({ requestId: f.effect.requestId, status: f.providerStatus ?? "CONFIRMED", tx: f.effect.posted.tx,

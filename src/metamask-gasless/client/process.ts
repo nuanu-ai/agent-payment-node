@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ClockPort } from "../../ports.js";
-import type { MetaMaskGaslessBinding, MetaMaskGaslessIntent, MetaMaskGaslessProfileIdentity,
+import type { MetaMaskGaslessBinding, MetaMaskGaslessProviderIntent, MetaMaskGaslessProfileIdentity,
   MetaMaskGaslessProviderObservation, MetaMaskGaslessQuote, MetaMaskGaslessUnsignedResult } from "../model.js";
 import type { MetaMaskGaslessProviderPort, MetaMaskGaslessQuoteInput, MetaMaskGaslessUnsignedInput } from "../ports.js";
 import { mmClassify, mmError, mmFail } from "../reasons.js";
@@ -41,11 +41,11 @@ export class MetaMaskGaslessProviderClient implements MetaMaskGaslessProviderPor
   buildUnsigned(input: MetaMaskGaslessUnsignedInput): Promise<MetaMaskGaslessUnsignedResult> {
     return this.invoke({ version: MM_HELPER_VERSION, mode: "buildUnsigned", input }) as Promise<MetaMaskGaslessUnsignedResult>;
   }
-  async submit(intent: MetaMaskGaslessIntent): Promise<MetaMaskGaslessProviderObservation> {
+  async submit(intent: MetaMaskGaslessProviderIntent): Promise<MetaMaskGaslessProviderObservation> {
     assertBeforeDeadline(intent.expiresAt, this.clock.now());
     return await this.invoke({ version: MM_HELPER_VERSION, mode: "submit", intent }) as MetaMaskGaslessProviderObservation;
   }
-  observe(intent: MetaMaskGaslessIntent): Promise<MetaMaskGaslessProviderObservation> {
+  observe(intent: MetaMaskGaslessProviderIntent): Promise<MetaMaskGaslessProviderObservation> {
     return this.invoke({ version: MM_HELPER_VERSION, mode: "observe", intent }) as Promise<MetaMaskGaslessProviderObservation>;
   }
   private async invoke(request: HelperRequest): Promise<unknown> {

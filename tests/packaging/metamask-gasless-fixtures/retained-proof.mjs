@@ -267,10 +267,14 @@ async function ensureLocalWallet(s, state, m) {
 // Since 0.5.36 a local direct prepare cross-checks the public wallet against its encrypted envelope. As the shipped
 // local wallet native does, ensure seals the envelope through the installed store, here with the synthetic owner key
 // (the MetaMask account) under a synthetic wrapping secret in this scenario's state root; no Keychain, no signing.
+// The secret is also the scenario's emulated Keychain item (preload.mjs), as a real ensure leaves it: a MetaMask
+// gasless prepare later seals its request reference under that same secret.
 function localNative(s, state, m) {
   return { async request(request) {
     if (request.operation === "wallet.ensure") {
-      const wrapping = randomBytes(32), port = { load: async () => Buffer.from(wrapping), create: async () => Buffer.from(wrapping) };
+      const kept = s.fixture().keychainSecret, wrapping = kept === undefined ? randomBytes(32) : Buffer.from(kept, "base64");
+      if (kept === undefined) s.update({ keychainSecret: wrapping.toString("base64") });
+      const port = { load: async () => Buffer.from(wrapping), create: async () => Buffer.from(wrapping) };
       try {
         return publicIdentity(await new m.EncryptedWalletStore(state, port).importNew(s.profile, syntheticOwnerKey(), ownerChecksum(s)));
       } finally { wrapping.fill(0); }

@@ -4,9 +4,9 @@ import type { StateStore } from "../state.js";
 import { metaMaskGaslessApprovalPhrase, metaMaskGaslessApprovalSummary } from "./approval.js";
 import { validateMetaMaskGaslessSnapshot } from "./chain/snapshot.js";
 import { MetaMaskGaslessClock } from "./clock.js";
-import { mmDispatchIntent } from "./dispatch.js";
 import { mmActualGross, mmPolicyHash, mmRepriceWithinCap } from "./economics.js";
 import { mmAssertSameBinding } from "./identity.js";
+import { mmProviderIntent, mmRequestId } from "./journal/request-reference.js";
 import { assertMetaMaskGaslessDispatchCapacity } from "./journal/transitions.js";
 import { mmAssertUniqueDelegation } from "./siblings.js";
 import type { Hex } from "../model.js";
@@ -16,8 +16,8 @@ import type { MetaMaskGaslessOperationRecord } from "./operation-model.js";
 import { MetaMaskGaslessObservationService, metaMaskGaslessProviderObservation,
   type MetaMaskGaslessProviderRead, type MetaMaskGaslessSave, type MetaMaskGaslessStep } from "./observation.js";
 import { metaMaskGaslessOwner } from "./owner.js";
-import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMaskGaslessRpcFactory,
-  MetaMaskGaslessRpcPort } from "./ports.js";
+import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMaskGaslessRequestReferencePort,
+  MetaMaskGaslessRpcFactory, MetaMaskGaslessRpcPort } from "./ports.js";
 import { metaMaskGaslessQuote } from "./quotation.js";
 import { mmClassify, mmFail, mmFailure, type MetaMaskGaslessFailureReason } from "./reasons.js";
 import { mmValidateUnsigned } from "./unsigned.js";
@@ -40,10 +40,10 @@ export class MetaMaskGaslessExecution {
   private readonly clock: MetaMaskGaslessClock;
   private readonly observation: MetaMaskGaslessObservationService;
   constructor(private readonly state: StateStore, private readonly rpcFor: MetaMaskGaslessRpcFactory,
-    private readonly provider: MetaMaskGaslessProviderPort, clock: ClockPort,
-    private readonly save: MetaMaskGaslessSave, private readonly wait: WaitPort) {
+    private readonly provider: MetaMaskGaslessProviderPort, private readonly references: MetaMaskGaslessRequestReferencePort,
+    clock: ClockPort, private readonly save: MetaMaskGaslessSave, private readonly wait: WaitPort) {
     this.clock = new MetaMaskGaslessClock(clock);
-    this.observation = new MetaMaskGaslessObservationService(state, rpcFor, provider, this.clock, save);
+    this.observation = new MetaMaskGaslessObservationService(state, rpcFor, provider, references, this.clock, save);
   }
 
   /** `siblings` are the account's earlier unresolved transfers, collected by the caller before this approval screen. */
@@ -51,6 +51,10 @@ export class MetaMaskGaslessExecution {
     siblings: readonly MetaMaskGaslessOperationRecord[]): Promise<MetaMaskGaslessStep> {
     if (op.terminal || op.state !== "awaiting_approval") return { operation: op };
     let now: number;
+    try { this.clock.beforeApproval(op); } catch (error) { return await this.halt(op, error); }
+    // The sealed request id must open before the owner is asked: an approval it could never send is not requested.
+    // A refusal here leaves awaiting_approval untouched, so its own deadline still ends it.
+    await mmRequestId(this.references, op);
     try { now = this.clock.beforeApproval(op); } catch (error) { return await this.halt(op, error); }
     // A missing TTY/response throws from the port and leaves awaiting_approval untouched.
     let accepted: boolean;
@@ -88,6 +92,9 @@ export class MetaMaskGaslessExecution {
         const guarded = await this.steady(op, async () => await this.guard(op));
         mmAssertUniqueDelegation((guarded.dispatch ?? op.intent).delegationHash, siblings);
         assertMetaMaskGaslessDispatchCapacity(op);
+        // Opened before the marker: a sealed request id that cannot be opened stops the dispatch before any effect. The
+        // material is the very batch the marker records (the guard's reprice, or the prepared one).
+        const sent = mmProviderIntent({ intent: op.intent, dispatch: guarded.dispatch }, await mmRequestId(this.references, op));
         const at = new Date(this.clock.beforeDispatchAtCurrent(op, guarded.observedAt)).toISOString();
         // Persistence must finish before starting any relay-capable helper.
         markerWriteStarted = true;
@@ -96,7 +103,7 @@ export class MetaMaskGaslessExecution {
         try {
           const now = this.clock.check(op);
           if (now >= Date.parse(op.intent.expiresAt)) mmFail("mm_gasless_expired");
-          const value = await this.provider.submit(mmDispatchIntent(op)); this.clock.check(op);
+          const value = await this.provider.submit(sent); this.clock.check(op);
           const hint = metaMaskGaslessProviderObservation(value, op);
           this.clock.check(op, [hint.observedAt]);
           return { hint, failure: null } satisfies MetaMaskGaslessProviderRead;

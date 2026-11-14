@@ -530,11 +530,11 @@ macOS may show its unlock prompt; the command then waits up to 15 seconds (the `
 profile's locks, so another command for the same profile waits its five seconds and fails with `APN_STATE_BUSY`.
 
 APN creates a wrapping secret only for a state root that holds nothing encrypted. While the secret is missing and any
-record sealed under it exists (a wallet envelope, a Solana or TRON key, a smart-account permission, a profile policy or
-saved signed material), a command that would create one (`wallet ensure` or `wallet import` for any profile,
-`wallet ensure-solana`, `wallet ensure-tron`, a first `wallet policy set`, or the first sealed record of a provider
-payment) fails with the same reason and restore step instead of minting a secret that would orphan those records and
-collide with the restored item.
+record sealed under it exists (a wallet envelope, a Solana or TRON key, a smart-account permission, a profile policy,
+saved signed material or a MetaMask gasless request reference), a command that would create one (`wallet ensure` or
+`wallet import` for any profile, `wallet ensure-solana`, `wallet ensure-tron`, a first `wallet policy set`, or the first
+sealed record of a provider payment, such as a MetaMask gasless prepare) fails with the same reason and restore step
+instead of minting a secret that would orphan those records and collide with the restored item.
 
 `apn doctor keychain` reports the same two failures and also decrypts the wallet, so a secret that exists but does not
 unwrap it fails with `APN_STATE_CORRUPT` without that reason. Its successful answers carry `wrapping_secret: "present"`;

@@ -14,7 +14,7 @@ import type {
 } from "../model.js";
 import { MM_MIN_REMAINING_MS, MM_PROVIDER_STATUSES, MM_TTL_MS, MM_ZERO_ADDRESS } from "../model.js";
 import { mmActualGross, mmUnusedGross, mmAssertIntentEconomics, mmRepriceWithinCap } from "../economics.js";
-import { mmBinding, mmPrivateHash } from "../identity.js";
+import { mmBinding, mmRequestIdHash } from "../identity.js";
 import { mmRecordedDeployment } from "../recorded.js";
 import { MM_REASON_CODES, mmFail, type MetaMaskGaslessFailureReason } from "../reasons.js";
 import { mmValidateUnsigned } from "../unsigned.js";
@@ -79,14 +79,20 @@ function snapshot(value: unknown, chainId: MetaMaskGaslessIntent["request"]["cha
   return s as unknown as MetaMaskGaslessIntent["initialSnapshot"];
 }
 
+/**
+ * A record an earlier release wrote keeps the provider request id itself (`requestId`); a newer one keeps only its hash
+ * (`requestIdHash`), the id being sealed apart (request-reference.ts). Each shape keeps its exact key set.
+ */
 export function mmJournalIntent(value: unknown, profileHash: string): MetaMaskGaslessIntent {
+  const has = (key: string) => typeof value === "object" && value !== null && Object.hasOwn(value, key);
+  const sealed = has("requestIdHash");
   const i = mmExact(value, ["profile", "request", "binding", "token", "decimals", "deploymentEvidenceHash",
-    "initialSnapshot", "quote", "requestId", "unsignedDelegation", "delegationHash", "signingDigest", "relayTo",
-    "mode", "preparedAt", "expiresAt", "policyHash",
-    ...(typeof value === "object" && value !== null && Object.hasOwn(value, "preparedGrossAtomic") ? ["preparedGrossAtomic"] : [])]);
+    "initialSnapshot", "quote", sealed ? "requestIdHash" : "requestId", "unsignedDelegation", "delegationHash", "signingDigest", "relayTo",
+    "mode", "preparedAt", "expiresAt", "policyHash", ...(has("preparedGrossAtomic") ? ["preparedGrossAtomic"] : [])]);
   if (typeof i.profile !== "string" || !PROFILE.test(i.profile)) corrupt();
   const request = mmRequest(i.request, "mm_gasless_state_corrupt"), binding = mmBinding(i.binding, "mm_gasless_state_corrupt");
-  mmCanonicalAddress(i.token); mmHash(i.deploymentEvidenceHash); mmUuid(i.requestId);
+  mmCanonicalAddress(i.token); mmHash(i.deploymentEvidenceHash);
+  if (sealed) mmHash(i.requestIdHash); else mmUuid(i.requestId);
   const initial = snapshot(i.initialSnapshot, request.chainId, (i.quote as MetaMaskGaslessQuote).feeMode);
   const preparedAt = mmIso(i.preparedAt), expiresAt = mmIso(i.expiresAt);
   if (time(expiresAt) - time(preparedAt) !== MM_TTL_MS || time(initial.observedAt) > time(preparedAt)) corrupt();
@@ -134,7 +140,7 @@ function dispatchMaterial(value: unknown, intent: MetaMaskGaslessIntent): MetaMa
 function providerObservation(value: unknown, intent: MetaMaskGaslessIntent, at: string): MetaMaskGaslessProviderObservation | null {
   if (value === null) return null;
   const p = mmExact(value, ["observedAt", "requestIdHash", "status", "txHash"]);
-  if (time(mmIso(p.observedAt)) > time(at) || p.requestIdHash !== mmPrivateHash("request-id", intent.requestId) ||
+  if (time(mmIso(p.observedAt)) > time(at) || p.requestIdHash !== mmRequestIdHash(intent) ||
     !(MM_PROVIDER_STATUSES as readonly string[]).includes(p.status as string)) corrupt();
   if (p.txHash !== null) mmHex(p.txHash, 32);
   return p as unknown as MetaMaskGaslessProviderObservation;
