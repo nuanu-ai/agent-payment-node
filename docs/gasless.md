@@ -32,9 +32,14 @@ neither keyless sponsor accepts EIP-7702 there.
   and any permission granted, then asks for a six-character approval code typed in a foreground terminal. The code is
   derived from the full operation fingerprint, and for MetaMask also from the full operation ID, so it approves only
   that operation. MCP returns the exact CLI handoff and cannot satisfy the approval with injected automation.
-- One global idempotency key space and the profile guards cover direct transfers, x402, Solana/TRON, LI.FI and gasless
-  operations. Repeating an identical prepare returns the saved operation without another quote or signature; different
-  inputs under the same key are refused.
+- There is no single idempotency key space for every money family. A gasless transfer binds its key in APN's operation
+  index, together with the families that bind theirs there, for example direct transfers, x402 payments, Solana and
+  TRON transfers, and LI.FI and Relay routes. A key that one of them already holds is refused
+  (`APN_IDEMPOTENCY_CONFLICT`). Families with their own key journals are separate: a key first used by gasless USDT
+  ([Gasless USDT](gasless-usdt.md#prepare)), Stargate or a swap is not refused here. Gasless USDT checks the other way
+  only: its prepare refuses a key already held here. Repeating an identical prepare returns the saved operation without
+  another quote or signature; different inputs under the same key are refused.
+- The profile guards cover direct transfers, x402, Solana/TRON, LI.FI and gasless operations.
 - An approval never sends the same operation twice. A recorded signing, disclosure or send attempt is never repeated by
   approval replay, `operation resume` or any later command.
 - An operation from which nothing has left APN stops holding its address and profile ten minutes after its deadline,
