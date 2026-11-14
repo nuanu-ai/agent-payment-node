@@ -822,6 +822,11 @@ refused the helper's result. `provider_status` is MetaMask's own job status toke
 in the submit diagnostic. Apart from `provider_status`, a short upper-case token, no provider text is included. A
 refused read never decides the outcome: the chain still proves it.
 
+The same helper also reads one MetaMask native transfer request by its exact ID (a `readRequest` helper mode), when
+`mm`'s local request list no longer holds it. It makes the same job status GET with the same answer checks. Its network
+policy admits only that one GET, and only for a signed-in project that hashes to the transfer's stored project hash.
+See [metamask-native-cli-sourceprep.md](metamask-native-cli-sourceprep.md#observing-a-pending-metamask-request).
+
 ### MFA and provider outcomes
 
 If MetaMask requires MFA, the operation reports `mm_gasless_provider_approval`. Confirm the existing transaction in

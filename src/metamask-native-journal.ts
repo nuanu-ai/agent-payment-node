@@ -73,9 +73,10 @@ export const METAMASK_NATIVE_OPERATION_SCHEMA = V2;
 
 /**
  * The owner's MetaMask approval this transfer waits on: a verified AWAITING_MFA notice (or request status) for its own
- * stored request, from the hand-off (`send`) or a no-send watch (`watch`); `evidenceHash` is the SHA-256 of that vendor
- * output. Metadata only, kept apart from the financial state: it is never a payment, an outcome or a reason to release a
- * hold, and it goes when a transaction hash or the provider's own record shows the request past the approval.
+ * stored request, from the hand-off (`send`) or a no-send read (`watch`: `mm wallet requests watch`, or MetaMask's server
+ * answer when mm's local request list no longer held the request); `evidenceHash` is the SHA-256 of that vendor output.
+ * Metadata only, kept apart from the financial state: it is never a payment, an outcome or a reason to release a hold,
+ * and it goes when a transaction hash or the provider's own record shows the request past the approval.
  */
 export interface MetaMaskNativeMfaTask {
   readonly requestId: string;

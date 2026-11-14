@@ -10,6 +10,7 @@ import type { MetaMaskGaslessBinding, MetaMaskGaslessProviderIntent, MetaMaskGas
 import type { MetaMaskGaslessProviderPort, MetaMaskGaslessQuoteInput, MetaMaskGaslessUnsignedInput } from "../ports.js";
 import { mmClassify, mmError, mmFail } from "../reasons.js";
 import { helperResponse, MM_HELPER_VERSION, type HelperRequest } from "./protocol.js";
+import type { MetaMaskServerRequestQuery, MetaMaskServerRequestRead } from "./server-request.js";
 import { withMetaMaskProviderRefusal } from "./provider-refusal.js";
 
 const MAX_IO = 1024 * 1024;
@@ -47,6 +48,10 @@ export class MetaMaskGaslessProviderClient implements MetaMaskGaslessProviderPor
   }
   observe(intent: MetaMaskGaslessProviderIntent): Promise<MetaMaskGaslessProviderObservation> {
     return this.invoke({ version: MM_HELPER_VERSION, mode: "observe", intent }) as Promise<MetaMaskGaslessProviderObservation>;
+  }
+  /** A native transfer's server-wallet request by its exact id, in the same sandboxed helper (client/server-request.ts). */
+  readServerRequest(query: MetaMaskServerRequestQuery): Promise<MetaMaskServerRequestRead> {
+    return this.invoke({ version: MM_HELPER_VERSION, mode: "readRequest", query }) as Promise<MetaMaskServerRequestRead>;
   }
   private async invoke(request: HelperRequest): Promise<unknown> {
     const timeoutMs = request.mode === "submit" ? 120_000 : 60_000;

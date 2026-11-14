@@ -8,6 +8,7 @@ import { NodeMetaMaskProcessRunner, takeMetaMaskNativeProcessFailureIdentifiers,
 import { metaMaskCommand } from "./metamask-command.js";
 import { resolveMetaMaskBin } from "./metamask-package.js";
 import { parseMetaMaskProcessOutput, classifyMetaMaskPendingNotices, metaMaskMfaNotice, metaMaskWatchMissReason, type MetaMaskMfaNotice } from "./metamask-process-output.js";
+import { readMetaMaskNativeServerRequest, type MetaMaskNativeRequestBinding } from "./metamask-native-request-server-read.js";
 import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
 import { METAMASK_NATIVE_CHAINS, metaMaskNativeQuoteTransfer, validateMetaMaskNativeFeeQuote, type MetaMaskNativeFeeChainId } from "./metamask-native-fee-evidence.js";
 import { claimMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedContextCurrent,
@@ -232,7 +233,7 @@ async function prepareNativeHandoff(scope: MetaMaskNativeOwnedScope, context: Me
 
 /** Transient read evidence only. No field grants financial authority or changes a held journal. */
 export interface MetaMaskNativeReadObservation {
-  readonly stage: "not_requested" | "input" | "before_guard" | "watch" | "after_guard" | "complete";
+  readonly stage: "not_requested" | "input" | "before_guard" | "watch" | "server_read" | "after_guard" | "complete";
   /** Request reads bracket the watch with the session project only (`project_before`, `project_after`); other steps are kept for old outputs. */
   readonly guard_step: "project_before" | "address_before" | "trading_mode" | "vendor_policy" | "address_after" | "project_after" | null;
   readonly request_id: string | null;
@@ -247,6 +248,22 @@ export interface MetaMaskNativeReadObservation {
   readonly reason: string | null;
   readonly error_code: "APN_OPERATION_BLOCKED" | "APN_PROVIDER_PROTOCOL" | "APN_PROVIDER_UNAVAILABLE" | "APN_STATE_CORRUPT" | "unavailable" | null;
   readonly diagnostic: MetaMaskNativeDiagnostic | null;
+  /** Present only when the watch answered `metamask_request_not_in_local_state` and APN read the request from MetaMask's server. */
+  readonly server_read?: MetaMaskNativeServerReadObservation;
+}
+/**
+ * APN's own read of the request from MetaMask's server by its stored id (metamask-native-request-server-read.ts).
+ * `verified`: the answer named this request, kind transaction, the transfer's sender and chain; its status and hash are
+ * recorded above exactly as a watch's would be. `not_found`: the server answered 404, which proves nothing. `refused`:
+ * nothing usable was read; `reason` is a closed reason (`metamask_session_project_changed` for another signed-in
+ * project, an `mm_gasless_*` reason of the helper otherwise) and `check` the answer check that refused, when one did.
+ */
+export interface MetaMaskNativeServerReadObservation {
+  readonly outcome: "verified" | "not_found" | "refused";
+  /** The SHA-256 of the server's answer bytes, for a verified answer only. */
+  readonly response_hash: string | null;
+  readonly reason: string | null;
+  readonly check: string | null;
 }
 function readDiagnostic(value: unknown): MetaMaskNativeDiagnostic | null {
   try {return validateMetaMaskNativeDiagnostic(value);} catch {return null;}
@@ -261,9 +278,12 @@ export type MetaMaskNativeRequestObservation = RequestHint & {readonly readObser
 /**
  * Normal status READ only (three vendor processes): the session project before, the watch, the project after. The owner
  * supplies the request id and project hash from its authentic journal; a service hint is never chain evidence, so no
- * policy is read around it.
+ * policy is read around it. When the watch answers that mm's own local request list no longer holds the request (a
+ * new `mm login` starts that list empty) and the owner supplies the transfer's sender and chain, the request is read
+ * once from MetaMask's server instead, inside the same project bracket; that read never sends, signs or approves.
  */
-export async function readMetaMaskNativeRequest(requestId: string, vendorProjectHash: string): Promise<MetaMaskNativeRequestObservation> {
+export async function readMetaMaskNativeRequest(requestId: string, vendorProjectHash: string,
+  binding?: MetaMaskNativeRequestBinding): Promise<MetaMaskNativeRequestObservation> {
   const observation: MutableReadObservation = {stage:"input",guard_step:null,request_id:null,watch_returned:false,
     before_guard_verified:false,after_guard_verified:false,request_identity_verified:false,provider_status:null,
     transaction_hash:null,chain_id:null,response_hash:null,reason:null,error_code:null,diagnostic:null};
@@ -290,6 +310,11 @@ export async function readMetaMaskNativeRequest(requestId: string, vendorProject
       observation.diagnostic = result.nativeDiagnostic === undefined ? null : readDiagnostic(result.nativeDiagnostic);
       hint = requestHint(result, requestId, observation);
     } finally {result.stdout.fill(0);}
+    // The precise trigger only: mm itself said its local list does not hold this very request. No other answer is retried.
+    if (binding !== undefined && hint.disposition === "unknown" && hint.reason === "metamask_request_not_in_local_state") {
+      observation.stage = "server_read";
+      hint = await serverRequestHint(requestId, vendorProjectHash, binding, observation, hint);
+    }
     observation.stage = "after_guard"; observation.guard_step = "project_after";
     if (await project(runner) !== vendorProjectHash) refuse("metamask_session_project_changed");
     observation.after_guard_verified = true;
@@ -323,7 +348,30 @@ function requestHint(result: MetaMaskProcessResult, requestId: string, observati
     return {disposition: "pending", requestId, mfa: mfa()};
   }
   if (!isPlainRecord(data) || !isPlainRecord(data.request) || !isPlainRecord(data.status)) return unknown("provider_request_evidence_missing");
-  const request = data.request, status = data.status;
+  return jobHint(data.request, data.status, result.exitCode === 0 && parsed.envelope?.ok === true, requestId, observation, mfa());
+}
+
+/**
+ * The server's own record of the request, read when mm's local list lost it. A verified answer is classified by
+ * `jobHint` exactly as a watch's `request` and `status` of this very request; a 404 stays unknown, and a refused read
+ * keeps the watch's own reason.
+ */
+async function serverRequestHint(requestId: string, projectHash: string, binding: MetaMaskNativeRequestBinding,
+  observation: MutableReadObservation, missed: RequestHint): Promise<RequestHint> {
+  const answer = await readMetaMaskNativeServerRequest(requestId, projectHash, binding);
+  observation.server_read = Object.freeze({outcome: answer.outcome, response_hash: answer.outcome === "verified" ? answer.responseHash : null,
+    reason: answer.outcome === "refused" ? answer.reason : null, check: answer.outcome === "refused" ? answer.check : null});
+  if (answer.outcome === "not_found") return {disposition: "unknown", reason: "metamask_request_not_found_on_server", requestId};
+  if (answer.outcome === "refused") return missed;
+  return jobHint({pollingId: requestId, kind: "transaction", namespace: "evm", chainId: binding.chainId},
+    {status: answer.status, ...(answer.transactionHash === null ? {} : {txHash: answer.transactionHash})}, true, requestId, observation,
+    {expiresAt: null, authMethod: null, evidenceHash: answer.responseHash});
+}
+
+/** One provider record of the request (a watch's `request` and `status`): its identity, chain, hash and status. */
+function jobHint(request: Record<string, unknown>, status: Record<string, unknown>, settled: boolean, requestId: string,
+  observation: MutableReadObservation, mfa: MetaMaskNativeMfaEvidence): RequestHint {
+  const unknown = (reason: string): RequestHint => ({disposition: "unknown", reason, requestId});
   if (request.pollingId !== requestId || request.kind !== "transaction" || !isMetaMaskEvmNamespace(request.namespace))
     return unknown("provider_request_identity_conflict");
   const chainId = request.chainId;
@@ -340,12 +388,12 @@ function requestHint(result: MetaMaskProcessResult, requestId: string, observati
   const states = ["EVALUATING","AWAITING_MFA","SIGNING","BROADCASTING","CONFIRMED","FAILED","EXPIRED","DENIED","APPROVED","SIGNED","CANCELLED"] as const;
   observation.provider_status = typeof status.status === "string" && (states as readonly string[]).includes(status.status)
     ? status.status as typeof states[number] : typeof status.status === "string" ? "unrecognized" : null;
-  if (result.exitCode !== 0 || parsed.envelope?.ok !== true)
+  if (!settled)
     return {disposition: "unknown", reason: "provider_request_outcome_unknown", requestId, ...chainHint,
       ...(transactionHash === undefined ? {} : {transactionHash})};
   if (transactionHash !== undefined) return {disposition: "acknowledged", transactionHash, requestId, ...chainHint};
   if (typeof status.status === "string" && EFFECT_STATES.has(status.status))
-    return {disposition: "pending", requestId, ...chainHint, ...(status.status === "AWAITING_MFA" ? {mfa: mfa()} : {})};
+    return {disposition: "pending", requestId, ...chainHint, ...(status.status === "AWAITING_MFA" ? {mfa} : {})};
   return {disposition: "unknown", reason: "provider_request_outcome_unknown", requestId, ...chainHint};
 }
 

@@ -5,10 +5,11 @@ import { captureSponsoredQuote, parseSentinelResponse, sentinelFailure, sentinel
 import { MM_SENTINEL_NETWORKS_ENDPOINT, MM_SERVER_WALLET_NETWORKS_ENDPOINT, mmProjectWalletsUrl } from "./provider-endpoints.js";
 import { readProjectWallets, type ProjectWallets } from "./project-wallets.js";
 import { request as httpsRequest } from "node:https";
-import { canonicalJson, exactKeys, isPlainRecord } from "../../canonical.js";
+import { canonicalJson, exactKeys, isPlainRecord, sha256 } from "../../canonical.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, type PinnedAddress } from "../../network-policy.js";
 import type { MetaMaskGaslessProviderIntent, MetaMaskGaslessQuote } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
+import type { MetaMaskServerRequestQuery } from "./server-request.js";
 import { MM_SENTINEL_SLUG, mmRegistry } from "../registry.js";
 import { mmFail } from "../reasons.js";
 import { encodeFunctionData, parseAbi } from "viem";
@@ -39,13 +40,15 @@ export type ModeContext =
   | { readonly mode: "quote"; readonly input: MetaMaskGaslessQuoteInput; readonly owner: string; readonly authToken: string;
       readonly projectId: string }
   | { readonly mode: "submit" | "observe"; readonly intent: MetaMaskGaslessProviderIntent; readonly projectId: string;
-      readonly token: string; readonly now: () => Date };
+      readonly token: string; readonly now: () => Date }
+  | { readonly mode: "readRequest"; readonly query: MetaMaskServerRequestQuery; readonly projectId: string; readonly token: string };
 
 export class HelperNetworkPolicy {
   readonly fetch: typeof globalThis.fetch;
   private readonly counts = new Map<string, number>();
   private readonly successes = new Set<string>();
   private notFound = false;
+  #requestBodyHash: string | undefined;
   #sponsoredProof: MetaMaskGaslessQuote | undefined;
   #sponsoredAccepted = false;
   private expectedSubmitBody: unknown;
@@ -106,6 +109,8 @@ export class HelperNetworkPolicy {
     return quote;
   }
   didObserveNotFound(): boolean { return this.notFound; }
+  /** The SHA-256 of the server request read's 2xx answer bytes, once it came; never the answer itself. */
+  requestBodyHash(): string | undefined { return this.#requestBodyHash; }
   fixedFailure(): "mm_gasless_expired" | "mm_gasless_clock" | "mm_gasless_session_unavailable" | undefined {
     return this.deadlineFailure ?? (this.sessionFailure ? "mm_gasless_session_unavailable" : undefined);
   }
@@ -124,7 +129,8 @@ export class HelperNetworkPolicy {
   assertComplete(): void {
     const expected = this.context.mode === "quote" ? ["project-wallets", "mimir-networks", "accounts-networks", "sentinel-networks",
       "rpc-decimals", ...(this.#sponsoredAccepted ? [] : ["rpc-balance"]), "sentinel-quote"] :
-      this.context.mode === "submit" ? ["submit"] : this.context.mode === "observe" ? ["observe"] : [];
+      this.context.mode === "submit" ? ["submit"] : this.context.mode === "observe" ? ["observe"] :
+        this.context.mode === "readRequest" ? ["read-request"] : [];
     const walletListed = this.context.mode !== "quote" || this.#projectWallets?.listed === true;
     if (this.counts.size !== expected.length || expected.some((key) => this.counts.get(key) !== 1) || !walletListed) {
       this.submitRefused("incomplete");
@@ -170,7 +176,8 @@ export class HelperNetworkPolicy {
     if (response.status === 401 || response.status === 403) { this.sessionFailure = true; this.submitRefused("session"); mmFail("mm_gasless_session_unavailable"); }
     // The project's wallet list answers 200, or 404 for a project with none; any other status is refused with it recorded.
     if (key === "project-wallets" && response.status !== 200 && response.status !== 404) mmFail("mm_gasless_provider_unavailable");
-    if (this.context.mode === "observe" && response.status === 404) this.notFound = true;
+    if ((this.context.mode === "observe" || this.context.mode === "readRequest") && response.status === 404) this.notFound = true;
+    if (key === "read-request" && response.status >= 200 && response.status < 300) this.#requestBodyHash = sha256(response.body);
     if (response.status >= 200 && response.status < 300) {
       try {
         if (key === "sentinel-quote" && response.status === 200 && this.context.mode === "quote" && body !== null)
@@ -217,6 +224,13 @@ export class HelperNetworkPolicy {
   private classify(url: string, method: string, headers: Record<string, string>, body: string | null): string {
     if (this.context.mode === "inspect" || this.context.mode === "buildUnsigned") mmFail("mm_gasless_provider_unavailable");
     if (this.context.mode === "quote") return classifyQuote(this.context, url, method, headers, body);
+    if (this.context.mode === "readRequest") {
+      // One GET of this request's own status in the session's project; the query's UUID keeps the path exact.
+      exactProviderUrl(url); requireBearer(headers, this.context.token);
+      const own = `${MIMIR}/v1/projects/${encodeURIComponent(this.context.projectId)}/transaction-requests/${this.context.query.requestId}`;
+      if (url === own && method === "GET" && body === null) return "read-request";
+      return mmFail("mm_gasless_provider_unavailable");
+    }
     if (this.context.mode !== "submit" && this.context.mode !== "observe") return mmFail("mm_gasless_provider_unavailable");
     exactProviderUrl(url);
     const collection = `${MIMIR}/v1/projects/${encodeURIComponent(this.context.projectId)}/transaction-requests`;
@@ -435,3 +449,6 @@ export function networkContextQuote(input: MetaMaskGaslessQuoteInput, owner: str
 export function networkContextRequest(mode: "submit" | "observe", intent: MetaMaskGaslessProviderIntent, projectId: string,
   token: string, now: () => Date): ModeContext { return { mode, intent, projectId, token, now }; }
 export function networkContextEmpty(mode: "inspect" | "buildUnsigned"): ModeContext { return { mode }; }
+export function networkContextServerRequest(query: MetaMaskServerRequestQuery, projectId: string, token: string): ModeContext {
+  return { mode: "readRequest", query: structuredClone(query), projectId, token };
+}

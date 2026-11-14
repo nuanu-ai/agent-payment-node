@@ -1,6 +1,7 @@
 import { readDataRecord, validateReadDiagnostic, type MetaMaskReadDiagnostic } from "./read-diagnostic.js";
 import { validateSubmitDiagnostic, type MetaMaskSubmitDiagnostic } from "./submit-diagnostic.js";
 import { validateObserveDiagnostic, type MetaMaskObserveDiagnostic } from "./observe-diagnostic.js";
+import { serverRequestQuery, serverRequestRead, type MetaMaskServerRequestQuery, type MetaMaskServerRequestRead } from "./server-request.js";
 import { isPlainRecord } from "../../canonical.js";
 import type { MetaMaskGaslessBinding, MetaMaskGaslessProviderIntent, MetaMaskGaslessProfileIdentity,
   MetaMaskGaslessProviderObservation, MetaMaskGaslessQuote, MetaMaskGaslessUnsignedResult } from "../model.js";
@@ -15,14 +16,16 @@ import { mmAddress, mmCanonicalAddress, mmChain, mmExact, mmHash, mmHex, mmIso, 
   mmUuid } from "../validation.js";
 
 export const MM_HELPER_VERSION = "apn.metamask-gasless-helper.v1" as const;
-export type HelperMode = "inspect" | "quote" | "buildUnsigned" | "submit" | "observe";
+export type HelperMode = "inspect" | "quote" | "buildUnsigned" | "submit" | "observe" | "readRequest";
 export type HelperRequest =
   | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "inspect"; readonly expected: MetaMaskGaslessProfileIdentity }
   | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "quote"; readonly input: MetaMaskGaslessQuoteInput }
   | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "buildUnsigned"; readonly input: MetaMaskGaslessUnsignedInput }
-  | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "submit" | "observe"; readonly intent: MetaMaskGaslessProviderIntent };
+  | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "submit" | "observe"; readonly intent: MetaMaskGaslessProviderIntent }
+  /** A native transfer's server-wallet request, read by its exact id (client/server-request.ts). */
+  | { readonly version: typeof MM_HELPER_VERSION; readonly mode: "readRequest"; readonly query: MetaMaskServerRequestQuery };
 export type HelperResult = MetaMaskGaslessBinding | MetaMaskGaslessQuote | MetaMaskGaslessUnsignedResult |
-  MetaMaskGaslessProviderObservation;
+  MetaMaskGaslessProviderObservation | MetaMaskServerRequestRead;
 export type HelperResponse = { readonly version: typeof MM_HELPER_VERSION; readonly ok: true; readonly result: HelperResult } |
   { readonly version: typeof MM_HELPER_VERSION; readonly ok: false; readonly failure: MetaMaskGaslessFailure;
     readonly diagnostic?: MetaMaskReadDiagnostic; readonly submitDiagnostic?: MetaMaskSubmitDiagnostic;
@@ -46,6 +49,10 @@ export function helperRequest(value: unknown): HelperRequest {
     const r = mmExact(value, ["version", "mode", "intent"], "mm_gasless_input");
     return { version: MM_HELPER_VERSION, mode: value.mode, intent: intent(r.intent) };
   }
+  if (value.mode === "readRequest") {
+    const r = mmExact(value, ["version", "mode", "query"], "mm_gasless_input");
+    return { version: MM_HELPER_VERSION, mode: "readRequest", query: serverRequestQuery(r.query) };
+  }
   return mmFail("mm_gasless_input");
 }
 
@@ -56,7 +63,7 @@ export function helperResponse(value: unknown, request: HelperRequest): HelperRe
     const readMode = request.mode === "inspect" || request.mode === "quote" ? request.mode : null;
     const hasDiagnostic = readMode !== null && Object.hasOwn(value, "diagnostic");
     const hasSubmitDiagnostic = request.mode === "submit" && Object.hasOwn(value, "submitDiagnostic");
-    const hasObserveDiagnostic = request.mode === "observe" && Object.hasOwn(value, "observeDiagnostic");
+    const hasObserveDiagnostic = (request.mode === "observe" || request.mode === "readRequest") && Object.hasOwn(value, "observeDiagnostic");
     const r = mmExact(value, ["version", "ok", "failure", ...(hasDiagnostic ? ["diagnostic"] : []), ...(hasSubmitDiagnostic ? ["submitDiagnostic"] : []),
       ...(hasObserveDiagnostic ? ["observeDiagnostic"] : [])], responseReason(request.mode));
     const f = mmExact(readMode === null ? r.failure : readDataRecord(r.failure), ["code", "reason"], responseReason(request.mode));
@@ -76,6 +83,7 @@ export function helperResponse(value: unknown, request: HelperRequest): HelperRe
   if (request.mode === "inspect") mmAssertProfileBinding(mmBinding(r.result, responseReason(request.mode)), request.expected);
   else if (request.mode === "quote") quoteOutput(r.result, request.input);
   else if (request.mode === "buildUnsigned") mmValidateUnsigned(r.result, request.input, responseReason(request.mode));
+  else if (request.mode === "readRequest") serverRequestRead(r.result, request.query);
   else observation(r.result, request.intent);
   return value as HelperResponse;
 }

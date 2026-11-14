@@ -319,7 +319,8 @@ export async function readMetaMaskNativeTransfer(stateRoot:string,idInput:string
       request_identity_verified:false,provider_status:null,transaction_hash:op.transactionHash,chain_id:op.context.quote.chainId,
       response_hash:null,reason:op.providerRequestId===null?"no_stored_request_id":"stored_transaction_or_confirmed",error_code:null,diagnostic:null}) : undefined;
     if(observe && op.transactionHash===null && op.providerRequestId!==null && op.effectAttempts===1) {
-      const hint=await readMetaMaskNativeRequest(op.providerRequestId,op.context.vendorProjectHash);
+      // The transfer's own sender and chain bind a server read, should mm's local request list no longer hold the request.
+      const hint=await readMetaMaskNativeRequest(op.providerRequestId,op.context.vendorProjectHash,{sender:op.context.quote.sender,chainId:op.context.quote.chainId});
       readObservation = hint.readObservation;
       if(hint.requestId!==undefined&&hint.requestId!==op.providerRequestId||hint.chainId!==undefined&&hint.chainId!==op.context.quote.chainId)blocked("Native transfer stored provider request identity or chain changed.");
       const hash="transactionHash" in hint ? hint.transactionHash : undefined, mfa=hint.disposition==="pending"?hint.mfa:undefined;

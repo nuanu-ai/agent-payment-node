@@ -88,6 +88,56 @@ asks for the exact acknowledgement and records `abandoned_unknown`. MetaMask may
 transfer. An operation that never handed off and whose consent window has passed closes as `failed_before_effect`
 instead.
 
+## Observing a pending MetaMask request
+
+When a transfer has a stored MetaMask request ID and no transaction hash, `native-transfer-observe` reads that request
+once. It never sends, signs or approves anything.
+
+1. `mm auth status` confirms the signed-in project. Its SHA-256 must equal the project hash stored with the transfer.
+2. `mm wallet requests watch <request-id> --wallet-timeout 1` reads the request.
+3. `mm auth status` confirms the project again.
+
+`mm` 6.1.5 looks the request ID up in its own local request list (`pendingJobs` in `~/.metamask/wallets.json`) before it
+asks MetaMask. A new `mm login` starts that list empty. The watch then writes nothing to stdout and answers
+`REQUEST_NOT_FOUND` on stderr. APN records where the request was not found, never what happened to it:
+
+| `read_observation.reason` | Meaning |
+| --- | --- |
+| `metamask_request_not_in_local_state` | `mm`'s local request list does not hold this request ID (for example after a new `mm login`). The request itself may still exist. |
+| `metamask_request_not_found_on_server` | MetaMask's server answered not found for this request ID. |
+| `provider_request_not_found` | Another `REQUEST_NOT_FOUND` answer. |
+
+None of them is proof. The transfer stays `unknown`, its reserves stay charged, and APN never sends it again.
+
+**Server read.** After `metamask_request_not_in_local_state`, and only then, APN reads the request from MetaMask's
+server by its exact stored ID, between steps 2 and 3. The watch stays the first read, so every other answer is recorded
+as before. The read uses the sandboxed helper of the MetaMask gasless lane
+([gasless.md](gasless.md)): it uses `mm`'s own signed-in session from `~/.metamask`, and its network policy admits one
+GET of this request's status in the session's project only.
+
+- The session's project ID must hash to the project hash stored with the transfer. Another project refuses with
+  `metamask_session_project_changed` before anything is read.
+- The stored request ID must be a canonical UUID v4, the form `mm` gives its request IDs. Another form refuses with
+  `provider_request_binding_invalid`.
+- The answer must name this request ID, kind `transaction`, `tx.from` equal to the transfer's sender and `tx.chainId`
+  equal to its chain. A transaction hash, when present, must be 32 bytes of lowercase hex.
+
+A verified answer is recorded exactly as a `requests watch` answer of the same request: a transaction hash moves the
+transfer to receipt proof, `AWAITING_MFA` records the owner's approval task as a watch status does (its `expires_at`
+and `auth_method` are null), and `EXPIRED` or `DENIED` gives the same next actions as a watch. A 404 is recorded as
+`metamask_request_not_found_on_server`. A refused read keeps `metamask_request_not_in_local_state`.
+
+`read_observation.server_read` is present only when the server read ran:
+
+| Field | Value |
+| --- | --- |
+| `outcome` | `verified`, `not_found` or `refused` |
+| `response_hash` | SHA-256 of the server's answer bytes (`verified` only), otherwise `null` |
+| `reason` | Why a `refused` read read nothing: `metamask_session_project_changed`, `provider_request_binding_invalid`, `provider_request_identity_conflict`, an `mm_gasless_*` reason of the helper (for example `mm_gasless_session_expired` or `mm_gasless_provider_unavailable`), or `metamask_server_read_unclassified`; otherwise `null` |
+| `check` | The answer check that refused it (`response_request_id`, `response_kind`, `response_status`, `response_tx`, `response_hash`, `response_body`), otherwise `null` |
+
+While the read runs, `read_observation.stage` is `server_read`.
+
 ## Refusals and next steps
 
 Each vendor-check refusal happens before any operation exists. It is `APN_OPERATION_BLOCKED` with `details.reason`
@@ -128,6 +178,9 @@ A native fee quote above the owner's native cap refuses with `native_fee_quote_a
   recipient and amount in the quote and no APN home path, so moving or renaming the APN home does not invalidate them.
   Version 1 journals keep loading: their stored home path is kept as written and never compared, and their quote keeps
   its fixed recipient and amount.
+- **Request reads.** The `REQUEST_NOT_FOUND` reasons and the server read change only the live
+  `native-transfer-observe` output. Journals keep their schema, and an MFA task the server read records keeps
+  `source: "watch"`.
 
 ## For contributors
 
