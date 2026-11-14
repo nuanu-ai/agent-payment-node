@@ -160,12 +160,25 @@ function allowed(from: Permit2ProductionState, to: Permit2ProductionState): bool
 export function publicPermit2Production(record: Permit2ProductionRecord) {
   validatePermit2ProductionRecord(record);
   const p = reconstructPermit2ProductionMaterial(record.material), url = new URL(record.material.checked.request.url);
+  const { capability, blockerCodes } = productionCapability(record);
   return { lifecycle: record.exposureAt === null ? "unsigned" : record.state === "settled" ? "settled" :
       record.state === "expired_no_effect" ? "expired_no_effect" : record.exposureJournal?.request != null ? "request_attempted" : "exposed_held",
-    observeOnly: record.exposureAt !== null, operationId: record.operationId, state: record.state, terminal: record.terminal, capability: "execution_blocked",
+    observeOnly: record.exposureAt !== null, operationId: record.operationId, state: record.state, terminal: record.terminal, capability,
     chain: p.chain, payer: p.payer, token: p.token, recipient: p.payTo, amountAtomic: p.amountAtomic, deadline: p.expiresAtUnix,
     resource: { origin: url.origin, urlHash: sha256(url.toString()) },
-    blockerCodes: ["permit2_production_execution_not_wired"] };
+    blockerCodes };
+}
+/**
+ * What can still run for the record, a live view (nothing stores or hashes it). A terminal record (`settled`,
+ * `expired_no_effect`, `released_unsubmitted`) is `completed`: nothing runs for it again. An exposed one is `observe_only`:
+ * it was signed (and maybe requested) by the foreground CLI approve, and only observe ends it. Only an unsigned record keeps
+ * `execution_blocked` with `permit2_production_execution_not_wired`: no MCP tool and no generic approve executes it, only
+ * the foreground CLI `x402 permit2 approve`. Through 0.5.106 every record read `execution_blocked`, a settled payment too.
+ */
+function productionCapability(record: Permit2ProductionRecord): { readonly capability: string; readonly blockerCodes: string[] } {
+  if (record.terminal) return { capability: "completed", blockerCodes: [] };
+  if (record.exposureAt !== null) return { capability: "observe_only", blockerCodes: [] };
+  return { capability: "execution_blocked", blockerCodes: ["permit2_production_execution_not_wired"] };
 }
 function instant(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/u.test(value) &&
