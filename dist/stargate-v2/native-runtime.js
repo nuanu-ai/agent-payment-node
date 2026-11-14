@@ -275,8 +275,8 @@ export async function observeStargateDestination(rpc, input, cursor) {
         try {
             if (getAddress(String(log.address)) !== DESTINATION_POOL)
                 continue;
-            // An RPC that ignores the block bounds can answer a log outside baseline..safe head; a log above the head is no
-            // proof until a later observe sees it at or below the safe head, exactly as in the token path.
+            // An RPC that ignores the block bounds can answer a log at or before the baseline block or above the safe head; a
+            // log above the head is no proof until a later observe sees it at or below the safe head, exactly as in the token path.
             if (!stargateLogInScan(quantity(log.blockNumber), baselineNumber, head))
                 continue;
             const event = decodeEventLog({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", topics: log.topics, data: String(log.data) });

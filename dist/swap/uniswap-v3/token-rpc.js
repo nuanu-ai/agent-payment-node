@@ -49,7 +49,7 @@ export function createTokenRpc(input) {
     })();
     let effects = 0, selected = null;
     const attempts = [], tried = new Set();
-    const primaryBlocks = new Map(), archiveVerified = new Set();
+    const primaryBlocks = new PrimaryBlockHashes(), archiveVerified = new Set();
     const call = (async (method, params) => {
         if (selected === null)
             throw new ApnError("APN_RPC_CONFIG", "Uniswap token primary provider is not semantically selected.", { reason: "token_primary_not_selected" });
@@ -123,12 +123,12 @@ export function createTokenRpc(input) {
         rememberBlocks(items, values);
         return values;
     }
-    function rememberBlocks(items, values) { rememberPrimaryBlocks(primaryBlocks, items, values); }
+    function rememberBlocks(items, values) { primaryBlocks.remember(items, values); }
     async function verifyArchive(items) {
         const tags = [...new Set(items.map(archiveTag).filter((tag) => tag !== null && !archiveVerified.has(tag)))];
         if (tags.length === 0)
             return;
-        if (tags.length > 2 || tags.some((tag) => !primaryBlocks.has(tag)))
+        if (tags.length > 2 || tags.some((tag) => primaryBlocks.pinned(tag) === undefined))
             throw new ApnError("APN_RPC_CONFIG", "Uniswap token archive read lacks a primary block anchor.", { reason: "token_archive_block_unanchored" });
         const checks = [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
             ...tags.map((tag) => ({ method: "eth_getBlockByNumber", params: [tag, false], cachePolicy: "immutable", decoder: tokenBlock }))];
@@ -136,7 +136,7 @@ export function createTokenRpc(input) {
         tokenChain(values[0]);
         for (let index = 0; index < tags.length; index += 1) {
             const block = evmRpcRecord(values[index + 1]), observed = evmRpcHex(block.hash, 32);
-            if (observed !== primaryBlocks.get(tags[index]))
+            if (observed !== primaryBlocks.pinned(tags[index]))
                 throw new ApnError("APN_RPC_PROTOCOL", "Uniswap token archive block identity mismatched primary.", { reason: "token_archive_block_mismatch" });
             archiveVerified.add(tags[index]);
         }
@@ -189,7 +189,7 @@ function createLegacyTokenRpc(input) {
             archive: bridgeArchiveEndpoint(1, input.environment) !== null };
     })();
     let effects = 0, archiveVerified = false;
-    const primaryBlocks = new Map();
+    const primaryBlocks = new PrimaryBlockHashes();
     const call = (async (method, params) => {
         if (method === "eth_sendRawTransaction")
             return await submitDirect(method, params, async () => await resolve().session.externalAttempt(resolve().descriptor.origin, async () => { effects += 1; return await resolve().descriptor.attempt(method, params); }));
@@ -200,7 +200,7 @@ function createLegacyTokenRpc(input) {
                 const route = servedTokenRoute(requested, resolve().descriptor, resolve().archive);
                 if (route === "primary") {
                     const values = await resolve().batch(pinnedItems(items, primaryBlocks), route);
-                    rememberPrimaryBlocks(primaryBlocks, items, values);
+                    primaryBlocks.remember(items, values);
                     return values;
                 }
                 if (route === "archive" && !archiveVerified) {
@@ -239,18 +239,48 @@ function servedTokenRoute(route, descriptor, archive) {
 }
 /** The EIP-1898 block parameter of each state read that takes one. EIP-1898 defines none for eth_estimateGas. */
 const PINNABLE_STATE_READS = { eth_call: 1, eth_getCode: 1, eth_getStorageAt: 2, eth_getBalance: 1, eth_getTransactionCount: 1 };
-/** The blocks this command read from the primary by number: each block's hash, and its parent hash for the block before it. */
-function rememberPrimaryBlocks(blocks, items, values) {
-    for (let index = 0; index < items.length; index += 1)
-        if (items[index].method === "eth_getBlockByNumber") {
-            try {
-                const block = evmRpcRecord(values[index]), number = evmRpcQuantity(block.number), hash = evmRpcHex(block.hash, 32);
-                blocks.set(`0x${number.toString(16)}`, hash);
-                if (number > 0n && typeof block.parentHash === "string")
-                    blocks.set(`0x${(number - 1n).toString(16)}`, evmRpcHex(block.parentHash, 32));
+/**
+ * The blocks this command read from the primary by number. A block read directly keeps the first hash the primary
+ * answered for it; a later block's parent hash names the block before it only while that number was never read directly.
+ * Two different hashes for one number, from any two answers, leave it conflicted: a read pinned there refuses instead of
+ * choosing either, so state is never read at a block other than the one the command checked.
+ */
+class PrimaryBlockHashes {
+    rows = new Map();
+    remember(items, values) {
+        for (let index = 0; index < items.length; index += 1)
+            if (items[index].method === "eth_getBlockByNumber") {
+                let number, hash, parent;
+                try {
+                    const block = evmRpcRecord(values[index]);
+                    number = evmRpcQuantity(block.number);
+                    hash = evmRpcHex(block.hash, 32);
+                    parent = typeof block.parentHash === "string" ? evmRpcHex(block.parentHash, 32) : undefined;
+                }
+                catch {
+                    continue; /* The caller decoder owns the required block shape. */
+                }
+                this.record(`0x${number.toString(16)}`, hash, true);
+                if (number > 0n && parent !== undefined)
+                    this.record(`0x${(number - 1n).toString(16)}`, parent, false);
             }
-            catch { /* The caller decoder owns the required block shape. */ }
-        }
+    }
+    /** The hash reads at this block number are pinned to; undefined for a number this command never read. */
+    pinned(tag) {
+        const row = this.rows.get(tag);
+        if (row === "conflict")
+            throw new ApnError("APN_RPC_PROTOCOL", "The primary RPC answered two different hashes for a block this command reads state at; nothing is read there.", { reason: "token_primary_block_hash_conflict", blockNumber: BigInt(tag).toString() });
+        return row?.hash;
+    }
+    record(tag, hash, direct) {
+        const prior = this.rows.get(tag);
+        if (prior === undefined)
+            this.rows.set(tag, { hash, direct });
+        else if (prior !== "conflict" && prior.hash !== hash)
+            this.rows.set(tag, "conflict");
+        else if (prior !== "conflict" && direct && !prior.direct)
+            this.rows.set(tag, { hash, direct });
+    }
 }
 /**
  * A state read the primary serves at a block number this command read from it goes out pinned to that block's hash
@@ -259,7 +289,7 @@ function rememberPrimaryBlocks(blocks, items, values) {
  */
 function pinnedToHash(method, params, blocks) {
     const index = PINNABLE_STATE_READS[method], tag = index === undefined || params.length !== index + 1 ? undefined : params[index];
-    const hash = typeof tag === "string" && /^0x(?:0|[1-9a-f][0-9a-f]*)$/u.test(tag) ? blocks.get(tag) : undefined;
+    const hash = typeof tag === "string" && /^0x(?:0|[1-9a-f][0-9a-f]*)$/u.test(tag) ? blocks.pinned(tag) : undefined;
     return hash === undefined ? params : [...params.slice(0, index), { blockHash: hash, requireCanonical: true }];
 }
 function pinnedItems(items, blocks) {

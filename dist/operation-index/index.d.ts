@@ -108,6 +108,13 @@ export declare class OperationIndex {
      * beside its colliding claims; without, it only collects.
      */
     private inspect;
+    /**
+     * A read, a refresh or another admission's collection that finds a released entry whose record is open again reopens it
+     * only as an admission would: under the index lock, when no other open entry holds a claim colliding with what it
+     * would hold (its own quarantines and every family's included). Otherwise it stays released and holds nothing, until
+     * its own guard admits it again (readmitReleased) or a later collection finds the account free.
+     */
+    private reopenIfFree;
     /** After `work`: the admitted entry becomes the entry its record yields, keeping the admitted claims while unresolved. */
     private follow;
     /** Drops an entry whose record does not exist (a crashed or failed admission), unless it changed meanwhile. */

@@ -307,8 +307,9 @@ export async function observeStargateTokenDestination(rpc, input, tokenAt, curso
         const dropTopics = encodeEventTopics({ abi: LAYERZERO_EXECUTOR_ABI, eventName: "NativeDropApplied" }), oftBlock = quantity(oft.log.blockNumber);
         const fromReceipt = receiptLogs.filter(log => isAt(log, STARGATE_TOKEN_DESTINATION_EXECUTOR));
         // An Executor that applied the drop in an earlier transaction is found in the one window ending at the delivery block.
-        // A drop outside baseline..delivery block (a provider that ignores fromBlock) predates the operation or follows the
-        // delivery, so it is no candidate, even when no source packet nonce binds it.
+        // A drop at or before the baseline block (a provider that ignores fromBlock, or a stale drop in the very block whose
+        // balance was the baseline) predates the operation, and one after the delivery block follows it, so neither is a
+        // candidate, even when no source packet nonce binds it.
         const candidates = fromReceipt.length > 0 ? fromReceipt : await scanStargateLogs(call, { address: STARGATE_TOKEN_DESTINATION_EXECUTOR, topics: [dropTopics[0]] }, oftBlock >= baselineNumber + STARGATE_POLYGON_SCAN_WINDOW ? oftBlock - STARGATE_POLYGON_SCAN_WINDOW + 1n : baselineNumber, oftBlock, STARGATE_POLYGON_SCAN_WINDOW, undefined, 1);
         const matches = [];
         for (const log of candidates) {
