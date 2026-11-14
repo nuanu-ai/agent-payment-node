@@ -161,7 +161,9 @@ test("TRON checksum normalization binds the equivalent 41hex address and rejects
 // resource bounds, which only prepare-tron returns. Each entry of `apn help --json` now describes its own envelope.
 test("the JSON manifest describes the real wallet balance-tron output; only prepare-tron promises frozen resource bounds", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root);
-  const manifest = JSON.parse(dispatchDiscovery(["help", "--json"])!.output) as { commands: { path: string[]; output: { success: string } }[] };
+  const discovery = dispatchDiscovery(["help", "--json"]);
+  assert.ok(discovery?.ok);
+  const manifest = JSON.parse(discovery.output) as { commands: { path: string[]; output: { success: string } }[] };
   const success = (path: string) => manifest.commands.find((command) => command.path.join(" ") === path)!.output.success;
   for (const asset of ["trx", "usdt"] as const) {
     const balance = await s.core.execute({ command: "wallet.balance-tron", profile: s.account.profile, asset });

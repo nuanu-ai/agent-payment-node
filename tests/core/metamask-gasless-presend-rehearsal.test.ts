@@ -3,6 +3,7 @@ import test from "node:test";
 import { MetaMaskGaslessProviderClient, type MetaMaskGaslessHelperRunner } from "../../src/metamask-gasless/client/index.js";
 import type { HelperRequest } from "../../src/metamask-gasless/client/protocol.js";
 import { MetaMaskGaslessOperationRepository } from "../../src/metamask-gasless/journal/repository.js";
+import { mmProviderIntent, mmRequestId } from "../../src/metamask-gasless/journal/request-reference.js";
 import type { MetaMaskGaslessState } from "../../src/metamask-gasless/model.js";
 import type { MetaMaskGaslessOperationRecord } from "../../src/metamask-gasless/operation-model.js";
 import type { MetaMaskGaslessRepositoryPort } from "../../src/metamask-gasless/ports.js";
@@ -116,7 +117,8 @@ test("the rehearsal helper gate refuses the relay-capable modes before any child
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = await mmFixture(temporary.root);
   const { id } = await f.prepare("mm-presend-runner-0001");
-  const intent = (await f.record(id)).intent;
+  const op = await f.record(id);
+  const intent = mmProviderIntent(op, await mmRequestId(f.references, op));
   const runner = new PresendRunner();
   const client = new MetaMaskGaslessProviderClient({ environment: {}, clock: f.clock, runner });
 
