@@ -1,5 +1,6 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
+import { assertOwnClaimsAvailable } from "../../operation-index/admission.js";
 import type { NeverLandsCheck } from "../../evm-finalized-proof.js";
 import type { UniswapTokenAttempt, UniswapTokenOperation, UniswapTokenPhase, UniswapTokenReceipt, UniswapTokenRetiredEffect } from "./token-operation.js";
 import { abandonedPrincipalCandidate, principalReleaseCandidate, proveSwapNoncesUnusable, type TokenNonceConsumption, type TokenNonceUnused } from "./token-principal.js";
@@ -58,7 +59,10 @@ export class UniswapTokenExecution {
   constructor(private readonly journal: UniswapTokenJournal, private readonly ports: UniswapTokenExecutionPorts) {}
   async approve(id: string): Promise<UniswapTokenOperation> {
     let op = await this.retireExpiredPrepared(await this.required(id)); if (op.phase !== "prepared") blocked("Token swap is not prepared.", "uniswap_token_phase");
-    await this.ports.foregroundApprove(op); const usage = await this.ports.reserveUsage(op);
+    // `prepared` is the only phase the index lets go by the clock: before consent and again before it leaves that phase,
+    // the swap re-takes its account and another unresolved operation on it refuses it (QA F03).
+    await assertOwnClaimsAvailable(this.journal, op.operationId);
+    await this.ports.foregroundApprove(op); await assertOwnClaimsAvailable(this.journal, op.operationId); const usage = await this.ports.reserveUsage(op);
     op = await this.persist(transitionUniswapToken(op, "approved", usagePatch(usage), this.ports.now()));
     op = await this.advanceApproval(op);
     return approvalActive(op.phase) ? await this.observeApproval(await this.continueStart(op, "approval")) : op;

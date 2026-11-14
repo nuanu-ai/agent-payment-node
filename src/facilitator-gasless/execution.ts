@@ -5,6 +5,7 @@ import { assertGaslessOwner } from "../gasless/owner.js";
 import type { GaslessApprovalPort } from "../gasless/ports.js";
 import type { Hex } from "../model.js";
 import type { StateStore } from "../state.js";
+import { assertOwnClaimsAvailable } from "../operation-index/admission.js";
 import type { FacilitatorSignerPort } from "./custody.js";
 import type { FacilitatorPayment, FacilitatorPort } from "./facilitator.js";
 import { facilitatorFail, facilitatorReason } from "./failure.js";
@@ -35,6 +36,9 @@ export class FacilitatorExecution {
     const accepted = await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
       exactPhrase: approvalCode("gasless", op.fingerprint), summary: publicFacilitatorOperation(op) });
     if (!accepted) return await this.save(op, { state: "failed_before_effect", failure: "facilitator_gasless_approval_rejected" });
+    // Nothing is signed yet, and the index may have let this unapproved transfer go by the clock: it re-takes its account
+    // first, and another unresolved operation on it refuses it, leaving it awaiting approval (QA F03).
+    await assertOwnClaimsAvailable(this.state, op.operationId);
     let startBlock: GaslessBlock;
     try {
       startBlock = await this.guard(op);

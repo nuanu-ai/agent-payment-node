@@ -1,6 +1,6 @@
 import type { SecureStateStore } from "../secure-state-store.js";
 import { OperationIndex } from "./index.js";
-import type { OperationClaim, PrepareIdentity } from "./types.js";
+import type { OperationClaim, PrepareIdentity, WantedTag } from "./types.js";
 
 /**
  * Admits a new operation of a family outside the OperationService facade. Its claims are checked and written to the
@@ -16,4 +16,14 @@ export async function admitOperation<T>(state: SecureStateStore, identity: Prepa
 /** The same check without a write: a fail-fast refusal before work whose admission must wait for its operation ID. */
 export async function assertClaimsAvailable(state: SecureStateStore, profileHash: string, claims: readonly OperationClaim[]): Promise<void> {
   await new OperationIndex(state).assertAvailable({ family: null, profileHash, claims });
+}
+
+/**
+ * The approve-time account guard of a saved operation outside the OperationService facade, called right before its own
+ * approve or execute starts the effect (QA F03): an entry the index let go by the wall clock (a never-started record
+ * past its deadline plus the unstarted margin) holds its claims again if the clock went back, and any other unresolved
+ * operation on its accounts refuses it with APN_OPERATION_BLOCKED. Nothing is written to the family's record.
+ */
+export async function assertOwnClaimsAvailable(state: SecureStateStore, operationId: string, tag?: WantedTag): Promise<void> {
+  await new OperationIndex(state).assertOwnClaimsAvailable(operationId, tag);
 }

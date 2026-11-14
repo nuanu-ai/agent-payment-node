@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ApnCore } from "../../src/core.js";
+import { ApnError } from "../../src/errors.js";
 import { mmDispatchIntent } from "../../src/metamask-gasless/dispatch.js";
 import { mmActualGross } from "../../src/metamask-gasless/economics.js";
 import { MetaMaskGaslessOperationRepository } from "../../src/metamask-gasless/journal/repository.js";
@@ -9,6 +10,7 @@ import type { MetaMaskRevocationApprovalPort, MetaMaskRevocationSummary } from "
 import type { MetaMaskRevocationSubmission, MetaMaskRevocationWalletPort } from "../../src/metamask-gasless/revocation/wallet.js";
 import { evmClaim } from "../../src/operation-index/adapters/family-claims.js";
 import { admitOperation } from "../../src/operation-index/admission.js";
+import { OperationIndex } from "../../src/operation-index/index.js";
 import { OperationService } from "../../src/operation-service.js";
 import { StateProfileRepository } from "../../src/profile-repository.js";
 import { TestNative, TestRpc, temporaryState } from "./helpers.js";
@@ -231,4 +233,19 @@ test("an expired MetaMask approval that never dispatched stops holding the accou
   const record = await f.record(stale);
   assert.deepEqual([record.state, record.failure?.reason, record.submissionAttempts], ["failed_before_effect", "mm_gasless_expired", 0]);
   assert.equal(f.approval.calls.length, 0); assert.equal(f.provider.submissions.length, 0);
+});
+
+test("QA F03: the dispatch marker first re-takes the transfer's own account claim, beside dispatched siblings; a refusal dispatches nothing", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await mmFixture(temporary.root), prepared = await prepare(f, "mm-guard-first");
+  assert.equal(prepared.ok, true, JSON.stringify(prepared.error));
+  const id = idOf(prepared.operation);
+  // The guard (OperationIndex.reclaim, then the account check) refuses when another unresolved operation holds the account.
+  const seen: unknown[] = [], refusal = new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this network and account is not terminal.");
+  t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string, tag?: unknown) => { seen.push([operationId, tag]); throw refusal; });
+  const refused = await f.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(refused.error?.code, "APN_OPERATION_BLOCKED");
+  assert.deepEqual(seen, [[id, { kind: "metamask_gasless_beside_dispatched" }]]);
+  const record = await f.record(id);
+  assert.deepEqual([record.state, record.submissionAttempts], ["execution_pending", 0]);
 });

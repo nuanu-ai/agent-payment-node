@@ -108,3 +108,19 @@ test("reclaim leaves alone a record its family reads as terminal now, and an ent
   assert.deepEqual([await s.entry(open.operationId), await s.entry(first.operationId)], ["active", "terminal"]);
   await assert.rejects(s.approveCheck(first.operationId), blockedBy(open.operationId));
 });
+
+test("assertOwnClaimsAvailable, the families' shared approve-time guard: it re-takes the released claim, wants the record's accounts only", async t => {
+  const s = await setup(t), first = await s.save(1);
+  await s.index.reconcile();
+  s.clock.now = T0 + SKEW; await s.index.refresh(first.operationId);
+  const second = await s.save(2, { deadline: T0 + SKEW + 300_000 });
+  // Another account of the same profile: it holds the profile claim, which an approve's guard never wants.
+  const elsewhere = await s.save(3, { account: "0x1a642f0e3c3af545e7acbd38b07251b3990914f1", deadline: T0 + SKEW + 300_000 });
+  await s.index.reconcile();
+  s.clock.now = T0;
+  await assert.rejects(s.index.assertOwnClaimsAvailable(first.operationId), blockedBy(second.operationId));
+  assert.equal(await s.entry(first.operationId), "active");
+  await assert.rejects(s.index.assertOwnClaimsAvailable(second.operationId), blockedBy(first.operationId));
+  await s.index.assertOwnClaimsAvailable(elsewhere.operationId);
+  await assert.rejects(s.index.assertOwnClaimsAvailable(id(99)), (error: unknown) => (error as { code?: string }).code === "APN_OPERATION_NOT_FOUND");
+});

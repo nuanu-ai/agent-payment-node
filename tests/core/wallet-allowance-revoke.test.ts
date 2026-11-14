@@ -193,3 +193,23 @@ test("wallet allowance commands need the chain's own RPC setting and refuse by n
     process.env, { stateRoot: temporary.root });
   assert.deepEqual([unknown.error?.code, unknown.error?.details?.reason], ["APN_RPC_CONFIG", "wallet_allowance_chain_rpc_setting_unknown"]);
 });
+
+test("QA F03: a prepared revoke first re-takes its own account claim, before consent; a refusal asks, signs and sends nothing", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); await residualSwap(temporary.root);
+  const chain = movingNode({ account: ACCOUNT, allowance: "10000", pending: 10n }), terminal = typingTerminal(), posts: string[] = [];
+  const options = { stateRoot: temporary.root, wrappingSecret: WRAPPING, clock: { now: () => new Date() }, walletAllowanceRpc: () => allowanceRpc(chain, posts),
+    walletAllowanceTtyOptions: terminal.tty, finalizedRead: () => allowanceRpc(chain, posts) };
+  const revoke = ["wallet", "allowance", "revoke", "--profile", PROFILE, "--chain", "eip155:1", "--asset", ETHEREUM_USDT, "--spender", UNISWAP_V3_SWAP_ROUTER,
+    "--max-gas-limit", "60000", "--max-fee-per-gas-wei", "2000000000", "--max-priority-fee-per-gas-wei", "1000000"];
+  // The guard (OperationIndex.reclaim, then the account check) refuses when another unresolved operation holds the account.
+  const seen: string[] = [];
+  t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string) => {
+    seen.push(operationId); throw Object.assign(new Error("Another money operation for this network and account is not terminal."), { code: "APN_OPERATION_BLOCKED" });
+  });
+  const out = await runCli(revoke, process.env, options);
+  assert.equal(out.ok, false);
+  assert.equal(seen.length, 1);
+  assert.deepEqual([terminal.screens.length, chain.node.sends.length], [0, 0]);
+  const saved = await new WalletAllowanceRevokeRepository(temporary.root).required(seen[0]!);
+  assert.equal(saved.state, "prepared");
+});

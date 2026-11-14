@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { canonicalJson, sha256 } from "../../src/canonical.js";
 import type { Hex } from "../../src/model.js";
+import { ApnError } from "../../src/errors.js";
+import { OperationIndex } from "../../src/operation-index/index.js";
 import { OperationService } from "../../src/operation-service.js";
 import { capabilityHash, metamaskSmartAccountX402CapabilitySnapshot, PROVIDER_PROFILE_VERSION } from "../../src/provider-profile.js";
 import { RuntimeContext } from "../../src/runtime.js";
@@ -438,4 +440,13 @@ test("Smart Account observation RPC is ignored before exposure, validates names 
   await assert.rejects(rpc.assertUnspent({ binding: f.binding, material: {} as never, safeBlock: {} as never }),
     { details: { reason: "sa_gasless_rpc_binding" } });
   assert.deepEqual(methods, []);
+});
+test("QA F03: run first re-takes the transfer's own account claim before its markers; a refusal seals, exposes and settles nothing", async t => {
+  const f = await fixture(await temporary(t)); await f.service.prepare(f.input);
+  // The guard (OperationIndex.reclaim, then the account check) refuses when another unresolved operation holds the account.
+  const seen: string[] = [], refusal = new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this network and account is not terminal.");
+  t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string) => { seen.push(operationId); throw refusal; });
+  await assert.rejects(f.service.approve(f.id), (error: unknown) => error === refusal);
+  assert.deepEqual(seen, [f.id]);
+  assert.deepEqual([f.calls.approval, f.calls.seal, f.calls.expose, f.calls.verify, f.calls.settle], [1, 0, 0, 0, 0]);
 });

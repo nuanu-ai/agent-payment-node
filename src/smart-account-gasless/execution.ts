@@ -1,5 +1,6 @@
 import type { ClockPort } from "../ports.js";
 import type { StateStore } from "../state.js";
+import { assertOwnClaimsAvailable } from "../operation-index/admission.js";
 import { saPolicyHash, saSame } from "./integrity.js";
 import { saVerifyAccepted, type SmartAccountGaslessMutable, type SmartAccountGaslessObservationSource,
   type SmartAccountGaslessRpcObservation, type SmartAccountGaslessSealedMaterial } from "./model.js";
@@ -62,6 +63,9 @@ export class SmartAccountGaslessExecution {
     if (op.exposureAttempts === 1) return await this.observe(op);
     if (!["execution_pending", "material_pending", "material_sealed"].includes(op.state) || op.approval === null)
       saFail("sa_gasless_state_corrupt");
+    // Exposure is the first step that leaves APN, and the index may have let an unexposed transfer go by the clock: it
+    // re-takes its account first, and another unresolved operation on it refuses it (QA F03).
+    await assertOwnClaimsAvailable(this.state, op.operationId);
     let writing = false;
     const persist = async (patch: Partial<SmartAccountGaslessMutable>, at = new Date(this.clock.check(op)).toISOString()) => {
       writing = true;

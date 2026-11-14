@@ -371,3 +371,15 @@ test("BRDG-32: a source receipt already proven at safe finality is not re-read w
   const observed = await observeStargateV2Token(prepared.operationId, s.ports, s.journal);
   assert.equal(observed.phase, "observed"); assert.equal(receiptReads, before);
 });
+
+test("QA F03: execute re-takes the operation's own account claim before its first signature, approval or bridge; a refusal signs nothing", async () => {
+  for (const allowance of [0n, AMOUNT]) {
+    const s = setup({ allowance }), prepared = await prepareStargateV2Token(request({ idempotencyKey: `guard-token-${allowance}` }), s.ports, s.journal);
+    const refusal = Object.assign(new Error("Another money operation for this network and account is not terminal."), { code: "APN_OPERATION_BLOCKED" });
+    s.journal.guard = async () => { throw refusal; };
+    await assert.rejects(executeStargateV2Token(prepared.operationId, s.ports, s.journal), (error) => error === refusal);
+    assert.deepEqual(s.journal.guarded, [prepared.operationId]);
+    assert.deepEqual([s.counts().signs, s.counts().sends], [0, 0]);
+    assert.equal(s.journal.value?.phase, "approved", allowance === 0n ? "before the approval" : "an operation that needs no approval, before the bridge");
+  }
+});

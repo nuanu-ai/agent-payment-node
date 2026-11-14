@@ -4,6 +4,7 @@ import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { runCli } from "../../src/cli.js";
 import { ApnError } from "../../src/errors.js";
 import type { OperationAbandonIntent } from "../../src/operation-abandon-approval.js";
+import { OperationIndex } from "../../src/operation-index/index.js";
 import type { TtyTransferApprovalOptions } from "../../src/tty-approval.js";
 import { abandonSwapOperation } from "../../src/swap/abandon.js";
 import { ORCA_SOLANA_CHAIN } from "../../src/swap/orca-solana/pins.js";
@@ -95,4 +96,19 @@ test("apn operation abandon routes a swap through the exact owner consent and re
     operationAbandonApproval: { approve: async (intent: OperationAbandonIntent) => { screens++; assert.equal(intent.operationId, f.operation.operationId); } } });
   assert.equal(result.ok, true, JSON.stringify(result.error));
   assert.equal((result.operation as { state: string }).state, "abandoned_unknown"); assert.equal(screens, 1);
+});
+
+test("QA F03: the submission marker first re-checks the swap's own account claim; a refusal leaves it unmarked and unsent", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await marked(temporary.root, { send: false, mark: false });
+  const reserved = await f.runtime.approve(f.prepared.operationId, f.clock.now());
+  // The guard (OperationIndex.reclaim, then the account check) refuses when another unresolved operation holds the account.
+  const seen: string[] = [], refusal = new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this network and account is not terminal.");
+  t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string) => { seen.push(operationId); throw refusal; });
+  const calls = f.rpc.calls.length;
+  await assert.rejects(f.runtime.service.markSubmitting(reserved, f.clock.now()), (error) => error === refusal);
+  assert.deepEqual(seen, [reserved.operationId]);
+  const saved = await new SwapOperationRepository(temporary.root).load(reserved.ownerProfileHash, reserved.operationId);
+  assert.deepEqual([saved?.state, saved?.submissionMarker], ["reserved", null]);
+  assert.equal(f.rpc.calls.length, calls);
 });

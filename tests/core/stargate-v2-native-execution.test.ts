@@ -498,3 +498,17 @@ test("BRDG-35: the file journal owner lock is the kernel evmAddressLock held by 
   release(); await Promise.all([family, stargate]);
   assert.deepEqual(order, ["other-family", "other-family-done", "stargate"]);
 });
+
+test("QA F03: execute re-takes the operation's own account claim before its first signature; a refusal signs and sends nothing", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request(), s.ports, s.journal);
+  const refusal = Object.assign(new Error("Another money operation for this network and account is not terminal."), { code: "APN_OPERATION_BLOCKED" });
+  s.journal.guard = async () => { throw refusal; };
+  await assert.rejects(executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal), (error) => error === refusal);
+  assert.deepEqual(s.journal.guarded, [prepared.operationId]);
+  assert.deepEqual(s.counts(), { sends: 0, signs: 0, approvals: 1 });
+  assert.deepEqual(s.journal.history.map(x => x.phase), ["prepared", "approved"]);
+  // With the account free the same operation goes on to its one send.
+  s.journal.guard = async () => undefined;
+  assert.equal((await executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal)).phase, "observed");
+  assert.deepEqual(s.counts(), { sends: 1, signs: 1, approvals: 1 });
+});

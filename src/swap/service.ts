@@ -9,6 +9,7 @@ import { createSwapQuote, type SwapQuoteInput } from "./quote.js";
 import { newSwapOperation, SWAP_TERMINAL_STATES, validateSwapOperation, validateSwapReceiptProof, type SwapOperationRecord,
   type SwapReceiptProof } from "./model.js";
 import { SwapOperationRepository } from "./repository.js";
+import { assertOwnClaimsAvailable } from "../operation-index/admission.js";
 import { isOrcaStableGuardedMechanismDigest } from "../legacy/orca-stable/mechanism.js";
 import { swapUnlandedProofHash, validateSwapUnlandedProof, type SwapUnlandedProof } from "./unlanded.js";
 import { isIdempotencyKey } from "../idempotency-key-contract.js";
@@ -95,6 +96,9 @@ export class GuardedSwapService {
       blocked("The guarded stable Orca route has no submission capability.");
     const markedAt = assertLiveQuote(operation, now), markerBody = { operationId: operation.operationId, operationIntegrityHash: operation.integrityHash,
       unsignedTransactionPayloadHash: operation.quote.unsignedTransactionPayloadHash, markedAt };
+    // Every lane signs only after this marker. An unmarked swap the index let go by the clock re-takes its account here,
+    // and another unresolved operation on the account refuses it (QA F03: a clock that ran ahead and went back).
+    await assertOwnClaimsAvailable(this.operations, operation.operationId);
     return await this.operations.transition(operation.ownerProfileHash, operation.operationId, operation.integrityHash, "submitting", {
       submissionMarker: { markerHash: domainHash("apn.swap-submission-marker.v1", canonicalJson(markerBody)), markedAt,
         operationIntegrityHash: operation.integrityHash,

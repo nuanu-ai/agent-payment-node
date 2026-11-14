@@ -6,6 +6,7 @@ import { StateStore, sealWallet } from "../../src/state.js";
 import { CircleV2ApprovalExecutor, type CircleApprovalRecord, type CircleApprovalRpc } from "../../src/lifi/circle-v2-approval-executor.js";
 import { temporaryState } from "./helpers.js";
 import { ApnError } from "../../src/errors.js";
+import { OperationIndex } from "../../src/operation-index/index.js";
 
 const account = privateKeyToAccount(`0x${"11".repeat(32)}`);
 const token = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
@@ -107,4 +108,18 @@ test("signing failure records only classified code, never provider message", asy
   assert.equal(result.failureReason, "signing:APN_PROVIDER_PROTOCOL");
   assert.equal(JSON.stringify(result).includes("supersecretcanary123"), false);
   assert.equal(f.sends, 0);
+});
+
+test("QA F03: execute re-takes the approval's own account claim before it leaves prepared; a refusal signs and sends nothing", async t => {
+  const f = await fixture(t), prepared = await f.prepare();
+  // The guard (OperationIndex.reclaim, then the account check) refuses when another unresolved operation holds the account.
+  const seen: string[] = [], refusal = new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this network and account is not terminal.");
+  const guard = t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string) => { seen.push(operationId); throw refusal; });
+  await assert.rejects(f.make().execute(prepared.id, async () => true), (error) => error === refusal);
+  assert.deepEqual(seen, [prepared.id]);
+  assert.deepEqual([f.signings, f.sends], [0, 0]);
+  // The approval stayed prepared: with the account free it signs and sends once.
+  guard.mock.restore();
+  await f.make().execute(prepared.id, async () => true);
+  assert.deepEqual([f.signings, f.sends], [1, 1]);
 });

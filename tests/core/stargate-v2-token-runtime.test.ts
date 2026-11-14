@@ -88,7 +88,8 @@ function serviceRecoveryHarness(phase: string, usageTarget?: string) {
     cleanupTransactionHash: OTHER_TX, policy: { policyDigest: "a".repeat(64), policyRevision: 1, mechanism: STARGATE_TOKEN_MECHANISM },
     ...(usageTarget === undefined ? {} : { usageTarget }), integrityHash: "b".repeat(64) };
   const journal: any = { value: operation, load: async () => structuredClone(journal.value), save: async (value: any) => { journal.value = structuredClone(value); },
-    withLock: async (_id: string, work: () => Promise<any>) => await work(), withOwnerLock: async (_owner: string, work: () => Promise<any>) => await work() };
+    withLock: async (_id: string, work: () => Promise<any>) => await work(), withOwnerLock: async (_owner: string, work: () => Promise<any>) => await work(),
+    assertOwnClaims: async () => undefined };
   const ports: any = { signer: { kind: "imported_evm_signer", address: OWNER, signTransaction: async () => { signs++; throw new Error("must not sign"); } },
     sendRawTransaction: async () => { sends++; throw new Error("must not send"); }, reserveUsage: async () => "reserved",
     followUsage: async (_op: any, target: string) => target, waitSourceReceipt: async () => null, now: () => Date.parse("2026-09-20T10:00:01.000Z") };

@@ -13,7 +13,7 @@ import type { BridgeProtocolReceipt } from "./model.js";
 import type { BridgeRpcPort } from "./ports.js";
 import { bridgeOwner } from "./owner.js";
 import { BRIDGE_MIN_REMAINING_MS, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
-import { admitOperation, assertClaimsAvailable } from "../operation-index/admission.js";
+import { admitOperation, assertClaimsAvailable, assertOwnClaimsAvailable } from "../operation-index/admission.js";
 import { checkNeverLands, type FinalizedBatchRead } from "../evm-finalized-proof.js";
 import type { OperationAbandonApprovalPort } from "../operation-abandon-approval.js";
 import { evmClaim } from "../operation-index/adapters/family-claims.js";
@@ -257,6 +257,9 @@ export class CircleV2ApprovalExecutor {
       bound(r, this.now());
       if (!await confirm(r)) { r = update(r, { phase: "failed_before_effect" }); await this.journal.save(r); return r; }
       await this.fresh(r);
+      // `prepared` is the only phase the index lets go by the clock: the approval re-takes its account before it leaves it,
+      // and another unresolved operation on the account refuses it (QA F03).
+      await assertOwnClaimsAvailable(this.state, id);
       r = update(r, { phase: "signing_started" }); await this.journal.save(r);
       // A crash during signing is ambiguous: never sign again or submit automatically.
       let raw: Hex;

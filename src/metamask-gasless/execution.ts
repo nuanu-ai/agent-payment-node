@@ -1,5 +1,6 @@
 import type { ClockPort, WaitPort } from "../ports.js";
 import { takeSubmitDiagnostic } from "./client/submit-diagnostic.js";
+import { assertOwnClaimsAvailable } from "../operation-index/admission.js";
 import type { StateStore } from "../state.js";
 import { metaMaskGaslessApprovalPhrase, metaMaskGaslessApprovalSummary } from "./approval.js";
 import { validateMetaMaskGaslessSnapshot } from "./chain/snapshot.js";
@@ -85,6 +86,9 @@ export class MetaMaskGaslessExecution {
     if (op.state !== "execution_pending" || op.approval === null || op.approval.fingerprint !== op.fingerprint) {
       mmFail("mm_gasless_state_corrupt");
     }
+    // The dispatch marker is the first step that leaves APN, and the index may have let an undispatched transfer go by
+    // the clock: it re-takes its account first, beside dispatched siblings as its admission is (QA F03).
+    await assertOwnClaimsAvailable(this.state, op.operationId, { kind: "metamask_gasless_beside_dispatched" });
     let submitted: MetaMaskGaslessProviderRead;
     let markerWriteStarted = false;
     try {

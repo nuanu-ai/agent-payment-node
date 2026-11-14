@@ -220,6 +220,8 @@ async function executeLocked(id: string, ports: StargateTokenExecutionPorts, jou
     op = transition(op, "approved", "foreground_owner_confirmation", now()); await journal.save(op); }
   if (op.allowanceRequired && op.phase === "approved") {
     const submissionOpStackFees = await freshPreflight(op, ports, "before_approval"); await ports.confirmPolicy(op);
+    // Nothing was marked yet, so the index may have let this operation go by the clock: it re-takes its account first.
+    await journal.assertOwnClaims(op.operationId);
     const raw = await ports.signer.signTransaction(op.approvalEnvelope!); await verifySignedEnvelope(raw, op.owner, op.approvalEnvelope!);
     const markerAt = now(); if (Date.parse(op.expiresAt) <= markerAt) fail("APN_REPREPARE_REQUIRED", "approval_marker_after_prepare_expiry");
     const approvalFinalityDeadline = new Date(markerAt + (op.approvalFinalityWindowMs ?? 0)).toISOString();
@@ -251,6 +253,8 @@ async function executeLocked(id: string, ports: StargateTokenExecutionPorts, jou
     if (op.postApprovalQuote === undefined || op.phase !== "post_approval_quote_bound") fail("APN_STATE_CORRUPT", "post_approval_quote_missing");
     if (now() >= Date.parse(op.postApprovalQuote.expiresAt)) return await requireCleanup(op, ports, journal, "post_approval_quote_expired");
   }
+  // An operation that needed no approval reaches its first effect here; one with a landed approval already holds its account.
+  await journal.assertOwnClaims(op.operationId);
   try {
     if (!boundNow) await freshPreflight(op, ports, "before_send"); else await sendFeeAdmitted(op, ports); await ports.confirmPolicy(op);
     // The signer re-checks profile and address under its custody lock while signing (BRDG-37); only its port is checked here.

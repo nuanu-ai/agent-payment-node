@@ -9,7 +9,7 @@ import { operationRegistry, type OperationRegistry } from "./registry.js";
 import { OPERATION_INDEX_DIRECTORY, OPERATION_INDEX_LOCK, OperationIndexDamage, OperationIndexStore, type StoredRecordName } from "./store.js";
 import { collidingClaims, normalizeClaims, OPERATION_FAMILIES, profileClaim, UNREADABLE_PROVIDER_CLAIM, unreadableFamilyClaim,
   unreadableProfileClaim, type OperationBeside, type OperationClaim, type OperationIndexEntry, type PrepareIdentity,
-  type WantedClaims } from "./types.js";
+  type WantedClaims, type WantedTag } from "./types.js";
 
 /** Same bound as ORPHAN_TEMPORARY_AGE_MS: an admission without a record older than this belongs to a crashed prepare. */
 export const ADMISSION_LEASE_MS = 10 * 60_000;
@@ -203,6 +203,26 @@ export class OperationIndex {
         }
         await this.reconciler.write(derived, true);
       });
+    });
+  }
+
+  /**
+   * The approve-time account guard of one saved operation, right before its own approve or execute starts the effect
+   * (its start marker or first signature): its entry holds its claims again if the clock released it (`reclaim`), then
+   * any other unresolved operation holding one of the accounts its record names refuses it, as an admission would.
+   * Its profile claim is held, never wanted, as at admission; `tag` is the family's own coexistence rule.
+   */
+  async assertOwnClaimsAvailable(operationId: string, tag?: WantedTag): Promise<void> {
+    await this.reclaim(operationId);
+    await this.repairing(async () => {
+      await this.reconciler.reconcile();
+      const entry = await this.store.entry(operationId), adapter = entry === null ? undefined : this.adapter(entry);
+      const record = entry === null || adapter === undefined ? null : await adapter.load(this.root, entry.recordPath);
+      if (entry === null || adapter === undefined || record === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
+      const held = adapter.claims(record);
+      if (held === null) throw new ApnError("APN_STATE_CORRUPT", "The operation's accounts cannot be read.", { operationId });
+      await this.check({ family: null, profileHash: entry.profileHash, claims: held.filter(claim => !claim.key.startsWith("profile:")),
+        except: operationId, ...(tag === undefined ? {} : { tag }) });
     });
   }
 

@@ -4,6 +4,7 @@ import test from "node:test";
 import type { AssetUsageState } from "../../src/asset-usage-ledger.js";
 import { domainHash, hashObject } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
+import { OperationIndex } from "../../src/operation-index/index.js";
 import { newUniswapTokenOperation, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation } from "../../src/swap/uniswap-v3/token-operation.js";
 import { UniswapTokenExecution, type TokenEffectKind, type TokenEffectObservation } from "../../src/swap/uniswap-v3/token-execution.js";
 import { createUniswapTokenRoute } from "../../src/swap/uniswap-v3/token-route.js";
@@ -372,4 +373,15 @@ test("sanitized live recovery fixture preserves the durable split-brain shape", 
   assert.equal(op.phase, "cleanup_required"); assert.equal(op.cleanupReason, "approval_pre_sign_failed");
   assert.equal(op.approvalAttempt?.nonce, "39"); assert.equal(op.approvalAttempt?.transactionHash, null);
   assert.deepEqual(fixture.authoritativeUsage, { reservationId: op.usageReservationId, state: "failed_before_effect" });
+});
+
+test("QA F03: approve re-checks the token swap's own account claim before consent; a refusal leaves it prepared, unasked and unsent", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
+  // The guard (OperationIndex.reclaim, then the account check) refuses when another unresolved operation holds the account.
+  const seen: string[] = [], refusal = new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this network and account is not terminal.");
+  t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string) => { seen.push(operationId); throw refusal; });
+  await assert.rejects(f.runtime.approve(f.operation.operationId), (error) => error === refusal);
+  assert.deepEqual(seen, [f.operation.operationId]);
+  assert.equal((await f.journal.read(f.operation.operationId))?.phase, "prepared");
+  assert.deepEqual([f.sends, f.foregroundCalls], [[], []]);
 });
