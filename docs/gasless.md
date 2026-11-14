@@ -36,8 +36,9 @@ neither keyless sponsor accepts EIP-7702 there.
   index, together with the families that bind theirs there, for example direct transfers, x402 payments, Solana and
   TRON transfers, and LI.FI and Relay routes. A key that one of them already holds is refused
   (`APN_IDEMPOTENCY_CONFLICT`). Families with their own key journals are separate: a key first used by gasless USDT
-  ([Gasless USDT](gasless-usdt.md#prepare)), Stargate or a swap is not refused here. Gasless USDT checks the other way
-  only: its prepare refuses a key already held here. Repeating an identical prepare returns the saved operation without
+  ([Gasless USDT](gasless-usdt.md#prepare)), Stargate, a swap (the Uniswap token lane included), a MetaMask native
+  transfer, a Circle Base→Solana source or a NEAR 1Click source is not refused here. Gasless USDT
+  checks the other way only: its prepare refuses a key already held here. Repeating an identical prepare returns the saved operation without
   another quote or signature; different inputs under the same key are refused.
 - The profile guards cover direct transfers, x402, Solana/TRON, LI.FI and gasless operations.
 - An approval never sends the same operation twice. A recorded signing, disclosure or send attempt is never repeated by
