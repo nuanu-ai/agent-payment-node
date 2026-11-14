@@ -23,6 +23,8 @@ export const SA_REASON_CODES = Object.freeze({
   sa_gasless_provider_unavailable: "APN_PROVIDER_UNAVAILABLE",
   sa_gasless_provider_protocol: "APN_PROVIDER_PROTOCOL",
   sa_gasless_verify_rejected: "APN_OPERATION_BLOCKED",
+  sa_gasless_verify_payer_mismatch: "APN_OPERATION_BLOCKED",
+  sa_gasless_facilitator_set: "APN_PROVIDER_CAPABILITY_UNAVAILABLE",
   sa_gasless_unknown: "APN_OPERATION_BLOCKED",
   sa_gasless_partial: "APN_OPERATION_BLOCKED",
   sa_gasless_owner_abandoned: "APN_OPERATION_BLOCKED",

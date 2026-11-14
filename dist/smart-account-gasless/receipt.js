@@ -1,11 +1,13 @@
 import { canonicalJson, hashObject } from "../canonical.js";
 import { SA_FILE_LIMIT, SA_RECEIPT_VERSION } from "./operation-model.js";
 import { saSame } from "./integrity.js";
+import { saVerifyAccepted } from "./model.js";
 import { saFail } from "./reasons.js";
 import { saExact, saHash } from "./schema.js";
 import { smartAccountGaslessAtTransition, validateSmartAccountGaslessOperation } from "./transitions.js";
 export function publicSmartAccountGaslessOperation(operation) {
     const op = validateSmartAccountGaslessOperation(operation), i = op.intent, s = op.settlement;
+    const refused = op.verification === null || saVerifyAccepted(op.verification) ? null : op.verification;
     // An owner-abandoned outcome is unknown: it never claims a zero delivery or an unused gross.
     const zero = op.terminal && s === null && op.state !== "abandoned_unknown" ? "0" : null;
     const status = op.state === "completed" ? "consumed" :
@@ -37,9 +39,20 @@ export function publicSmartAccountGaslessOperation(operation) {
         settlement: s, unused_proof: op.unusedProof, scan_cursor: op.cursor,
         endpoint_origin: i.initialSnapshot.endpointOrigin, endpoint_hash: i.initialSnapshot.endpointHash,
         approved_at: op.approval?.approvedAt ?? null, created_at: op.createdAt, updated_at: op.updatedAt, expires_at: i.expiresAt,
-        next_actions: [op.state === "awaiting_approval" ? `apn gasless transfer approve --operation ${op.operationId}` :
+        // Only a record written after a refused verify carries these, so older records project exactly as before.
+        ...(refused === null ? {} : { provider_verify: { is_valid: refused.isValid, payer: refused.payer,
+                invalid_reason: refused.invalidReason, observed_at: refused.observedAt, response_hash: refused.responseHash } }),
+        next_actions: [...(refused === null || op.terminal ? [] : [refusedVerifyAction(op, refused.isValid, refused.invalidReason)]),
+            op.state === "awaiting_approval" ? `apn gasless transfer approve --operation ${op.operationId}` :
                 op.terminal ? `apn receipt get --operation ${op.operationId}` : `apn operation resume --operation ${op.operationId}`],
     };
+}
+function refusedVerifyAction(op, isValid, reason) {
+    const answer = isValid ? "The facilitator accepted this transfer at verify for another payer, so APN refused it" :
+        `The facilitator refused this transfer at verify (${reason === null ? "no closed invalidReason" : `invalidReason ${reason}`})`;
+    return `${answer}; APN did not ask it to settle. It still holds the signed delegation, which only its own addresses can redeem, ` +
+        `until ${op.intent.expiresAt}. Once a finalized Base block is past that time, the resume below proves the outcome ` +
+        "from the chain and frees the reserve.";
 }
 export function smartAccountGaslessReceipt(operation) {
     const op = validateSmartAccountGaslessOperation(operation), body = {
@@ -54,14 +67,16 @@ export function validateSmartAccountGaslessReceipt(value, operation) {
         const op = validateSmartAccountGaslessOperation(operation);
         if (Buffer.byteLength(canonicalJson(value), "utf8") + 1 > SA_FILE_LIMIT)
             saFail("sa_gasless_state_corrupt");
-        const receipt = saExact(value, Object.keys(smartAccountGaslessReceipt(op)));
-        const binding = saHash(receipt.operation_binding_hash), transitionHash = saHash(receipt.transition_hash);
-        saHash(receipt.receipt_hash);
+        // The sidecar's own transition names its shape: a key a later step added (provider_verify) is not in an older one.
+        const transitionHash = saHash(value?.transition_hash);
         const index = op.transitions.findIndex(t => t.transitionHash === transitionHash);
         if (index < 0)
             saFail("sa_gasless_state_corrupt");
-        const historical = smartAccountGaslessAtTransition(op, index);
-        if (historical.integrityHash !== binding || !saSame(receipt, smartAccountGaslessReceipt(historical)))
+        const historical = smartAccountGaslessAtTransition(op, index), expected = smartAccountGaslessReceipt(historical);
+        const receipt = saExact(value, Object.keys(expected));
+        const binding = saHash(receipt.operation_binding_hash);
+        saHash(receipt.receipt_hash);
+        if (historical.integrityHash !== binding || !saSame(receipt, expected))
             saFail("sa_gasless_state_corrupt");
         return receipt;
     }

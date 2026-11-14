@@ -1,7 +1,9 @@
 import { saPolicyHash, saSame } from "./integrity.js";
+import { saVerifyAccepted } from "./model.js";
 import { assertSmartAccountGaslessBinding, smartAccountGaslessOwner } from "./owner.js";
 import { SmartAccountGaslessClock, smartAccountGaslessApprovalPhrase, smartAccountGaslessApprovalSummary, smartAccountGaslessSnapshot } from "./policy.js";
 import { saClassify, saError, saFail, saFailure } from "./reasons.js";
+import { saRegistry } from "./registry.js";
 import { saExact } from "./schema.js";
 import { advanceSmartAccountGaslessOperation, assertSmartAccountGaslessCapacity } from "./transitions.js";
 export class SmartAccountGaslessExecution {
@@ -33,6 +35,9 @@ export class SmartAccountGaslessExecution {
         catch (error) {
             return await this.halt(op, error);
         }
+        // A transfer prepared under another facilitator pin is closed before the owner is asked to approve it.
+        if (!pinned(op))
+            return await this.halt(op, saError("sa_gasless_facilitator_set"));
         let accepted;
         try {
             accepted = await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
@@ -81,6 +86,9 @@ export class SmartAccountGaslessExecution {
         };
         try {
             this.clock.check(op);
+            // A transfer prepared under another facilitator pin (0.5.105 and earlier) ends before its child is disclosed.
+            if (!pinned(op))
+                saFail("sa_gasless_facilitator_set");
             let sealed;
             if (op.signingAttempts === 1) {
                 const recovered = await this.material.load(op);
@@ -115,15 +123,22 @@ export class SmartAccountGaslessExecution {
                 saFail("sa_gasless_state_corrupt");
             const verification = await this.provider.verify(op, exposed);
             this.clock.check(op, [verification.observedAt]);
-            await persist({ state: "verified_pending", verification });
-            // Only the immediate call that received this verify response may reach settle.
-            await this.guard(op, false, exposed);
-            const dispatchAt = new Date(this.clock.live(op)).toISOString();
-            await persist({ state: "dispatch_pending", submissionAttempts: 1, dispatchStartedAt: dispatchAt }, dispatchAt);
-            this.clock.live(op);
-            const providerSettlement = await this.provider.settle(op, exposed);
-            this.clock.check(op, [providerSettlement.observedAt]);
-            await persist({ state: "submitted_pending", providerSettlement });
+            if (!saVerifyAccepted(verification)) {
+                // The refused answer is kept with its closed reason; the delegation stays exposed until its on-chain expiry.
+                await persist({ state: "unknown_finality", verification, failure: saFailure(verification.isValid
+                        ? "sa_gasless_verify_payer_mismatch" : "sa_gasless_verify_rejected") });
+            }
+            else {
+                await persist({ state: "verified_pending", verification });
+                // Only the immediate call that received this verify response may reach settle.
+                await this.guard(op, false, exposed);
+                const dispatchAt = new Date(this.clock.live(op)).toISOString();
+                await persist({ state: "dispatch_pending", submissionAttempts: 1, dispatchStartedAt: dispatchAt }, dispatchAt);
+                this.clock.live(op);
+                const providerSettlement = await this.provider.settle(op, exposed);
+                this.clock.check(op, [providerSettlement.observedAt]);
+                await persist({ state: "submitted_pending", providerSettlement });
+            }
         }
         catch (error) {
             const failure = saClassify(error, "sa_gasless_internal");
@@ -253,6 +268,10 @@ export class SmartAccountGaslessExecution {
             return { operation: op, warning: failure };
         return { operation: await this.save(op, { state: "failed_before_effect", failure }, this.clock.failureAt(op)) };
     }
+}
+/** The child would name exactly the facilitator signers this release pins. */
+function pinned(op) {
+    return saSame(op.intent.requirements.extra.facilitatorAddresses, saRegistry(op.intent.request.chainId).facilitatorAddresses);
 }
 function observationSource(observer) {
     return { environmentName: observer.environmentName, endpointOrigin: observer.rpc.endpointOrigin, endpointHash: observer.rpc.endpointHash };

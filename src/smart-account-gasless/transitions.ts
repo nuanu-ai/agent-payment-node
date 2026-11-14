@@ -6,6 +6,7 @@ import { SA_FILE_LIMIT, SA_HISTORY_LIMIT, SA_MUTABLE_KEYS, SA_OPERATION_KIND, SA
   type SmartAccountGaslessOperationIdentity, type SmartAccountGaslessOperationRecord,
   type SmartAccountGaslessTransition } from "./operation-model.js";
 import { saMaterialHash, saRequirementsHash, saSame } from "./integrity.js";
+import { saStoredReasonToken, saVerifyAccepted } from "./model.js";
 import { SA_REASON_CODES, saFail } from "./reasons.js";
 import { saBlock, saBlockOrder, saCanonicalAddress, saExact, saHash, saHex, saIso, saStateCounters, saUint,
   validateSmartAccountGaslessIntent } from "./schema.js";
@@ -145,18 +146,29 @@ function journalMutable(value: unknown, intent: SmartAccountGaslessIntent, opera
     exposedAt = within(m.exposureStartedAt, material!.sealedAt, at);
     if (time(exposedAt) >= time(intent.expiresAt)) corrupt();
   }
+  let accepted = false;
   if (m.verification !== null) {
-    const v = saExact(m.verification, ["observedAt", "payer", "isValid", "responseHash"]);
-    if (exposedAt === null || v.isValid !== true || saCanonicalAddress(v.payer) !== intent.binding.ownerAddress) corrupt();
+    const refused = typeof m.verification === "object" && Object.hasOwn(m.verification, "invalidReason");
+    const v = saExact(m.verification, ["observedAt", "payer", "isValid", ...(refused ? ["invalidReason"] : []), "responseHash"]);
+    if (exposedAt === null) corrupt();
+    if (!refused) {
+      if (v.isValid !== true || saCanonicalAddress(v.payer) !== intent.binding.ownerAddress) corrupt();
+      accepted = true;
+    } else {
+      // A refused answer: invalid, or valid for another payer. Its reason is a closed token or none.
+      const payer = v.payer === null ? null : saCanonicalAddress(v.payer);
+      if (typeof v.isValid !== "boolean" || (v.isValid && (payer === null || payer === intent.binding.ownerAddress)) ||
+        (v.invalidReason !== null && !saStoredReasonToken(v.invalidReason))) corrupt();
+    }
     within(v.observedAt, exposedAt, at); saHash(v.responseHash);
   }
   if (m.submissionAttempts === 0) { if (m.dispatchStartedAt !== null || m.providerSettlement !== null) corrupt(); }
   else {
-    if (m.verification === null) corrupt();
+    if (!accepted) corrupt();
     dispatchAt = within(m.dispatchStartedAt, (m.verification as { observedAt: string }).observedAt, at);
     if (time(dispatchAt) >= time(intent.expiresAt)) corrupt();
   }
-  if ((m.state === "verified_pending" && m.verification === null) ||
+  if ((m.state === "verified_pending" && !accepted) ||
     (m.state === "exposure_pending" && m.verification !== null)) corrupt();
   if (m.providerSettlement !== null) {
     const p = saExact(m.providerSettlement, ["observedAt", "transactionHash", "responseHash"]);
@@ -207,8 +219,11 @@ function initialMutable(intent: SmartAccountGaslessIntent): SmartAccountGaslessM
 function step(previous: SmartAccountGaslessTransition, next: SmartAccountGaslessTransition): void {
   if (!EDGES[previous.state].includes(next.state) || time(next.at) < time(previous.at)) corrupt();
   const once = ["approval", "material", "verification", "providerSettlement"] as const;
+  // A refused verify answer is written on the step that leaves exposure for unknown finality, never on the way to settle.
+  const refused = next.verification !== null && !saVerifyAccepted(next.verification);
   const stages = { approval: ["awaiting_approval", "execution_pending"], material: ["material_pending", "material_sealed"],
-    verification: ["exposure_pending", "verified_pending"], providerSettlement: ["dispatch_pending", "submitted_pending"] } as const;
+    verification: ["exposure_pending", refused ? "unknown_finality" : "verified_pending"],
+    providerSettlement: ["dispatch_pending", "submitted_pending"] } as const;
   for (const key of once) {
     if (previous[key] !== null && !saSame(previous[key], next[key])) corrupt();
     if (previous[key] === null && next[key] !== null &&

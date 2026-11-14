@@ -1,5 +1,6 @@
 import { ANY_BENEFICIARY, decodeAllowedCalldataTerms, decodeERC20TransferAmountTerms, decodeRedeemerTerms, decodeTimestampTerms, decodeValueLteTerms, hashDelegation, } from "./metamask-smart-account-vendor.js";
 import { ALL_METAMASK_FACILITATOR_ADDRESSES } from "./metamask-smart-account-vendor.js";
+import { SA_FACILITATORS } from "./smart-account-gasless/registry-data.js";
 import { SIGNABLE_DELEGATION_TYPED_DATA, decodeDelegations, encodeDelegations, toDelegationStruct, } from "./metamask-smart-account-vendor.js";
 import { getAddress, keccak256, pad, recoverTypedDataAddress, toHex } from "viem";
 import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
@@ -35,6 +36,11 @@ export class OfficialSmartAccountX402Engine {
         };
     }
 }
+/**
+ * MetaMask's facilitator addresses: the SDK list plus the Base signers MetaMask's facilitator publishes beyond it
+ * (SA_FACILITATORS, from its own `/supported`). A seller offer must name only these.
+ */
+export const APPROVED_METAMASK_FACILITATORS = Object.freeze([...new Set([...ALL_METAMASK_FACILITATOR_ADDRESSES, ...SA_FACILITATORS].map(value => value.toLowerCase()))].sort());
 export class MetaMaskSmartAccountX402Adapter {
     permissions;
     materials;
@@ -44,7 +50,7 @@ export class MetaMaskSmartAccountX402Adapter {
     now;
     approvedFacilitators;
     method = "erc7710";
-    constructor(permissions, materials, rpc, allowance, engine = new OfficialSmartAccountX402Engine(), now = () => new Date(), approvedFacilitators = ALL_METAMASK_FACILITATOR_ADDRESSES) {
+    constructor(permissions, materials, rpc, allowance, engine = new OfficialSmartAccountX402Engine(), now = () => new Date(), approvedFacilitators = APPROVED_METAMASK_FACILITATORS) {
         this.permissions = permissions;
         this.materials = materials;
         this.rpc = rpc;
@@ -56,9 +62,15 @@ export class MetaMaskSmartAccountX402Adapter {
     async prepare(input) {
         await assertMetaMaskSmartAccountPackageIdentity();
         const record = await this.preflightRecord(input.profileHash, input.wallet, input.amountAtomic);
+        // The facilitator may redeem with any address the seller names. A delegation narrowed to some of them, or to a
+        // list APN guessed for a seller that named none, can be refused at verify after its one exposure.
+        if (!isPlainRecord(input.requirements.extra) || input.requirements.extra.facilitatorAddresses === undefined) {
+            incompatible("The seller's ERC-7710 offer names no extra.facilitatorAddresses, so APN cannot name who may redeem the delegation.");
+        }
         const facilitators = intersection(input.facilitatorAddresses, this.approvedFacilitators);
-        if (facilitators.length === 0)
-            incompatible("Seller facilitators do not intersect the approved MetaMask facilitator set.");
+        if (facilitators.length === 0 || facilitators.length !== new Set(input.facilitatorAddresses.map(lower)).size) {
+            incompatible("The seller names a facilitator address outside the approved MetaMask facilitator set.");
+        }
         const requestedExpiry = BigInt(input.preparedAtUnix) + BigInt(input.maxTimeoutSeconds);
         const effectiveExpiryUnix = (requestedExpiry < BigInt(record.granted_expires_at_unix)
             ? requestedExpiry : BigInt(record.granted_expires_at_unix)).toString();

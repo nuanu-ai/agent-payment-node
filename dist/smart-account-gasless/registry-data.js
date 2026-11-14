@@ -23,7 +23,15 @@ export const SA_EVIDENCE_SOURCES = Object.freeze({
     allowanceDeployment747: "c7b4ca4ff0f006c05a5100082f5d7801efd529138b273c6093d5029ef2e57705",
     nonceDeployment748: "5d3f26e7dd4bb380506f6466dc9890b3ad787ae964480f9ca1d24384e69fad82",
     tokenRegistry: "b05aca1551fafb5734cccc0fe2b51d493782471544d03e63ae267c4b58104972",
+    facilitatorSupported20261114: "bdfa7a25199b9ad90db6b5378ed1499c64529ce246cf07f8476318c94ed09715",
 });
 export const SA_FACILITATOR_URL = "https://tx-sentinel-base-mainnet.dev-api.cx.metamask.io/platform/v2/x402";
-export const SA_FACILITATORS = ["0xb4827a2a066cd2ef88560efdf063dd05c6c41cc7"];
+/**
+ * Every Base signer the facilitator publishes, in both `facilitatorAddresses` and `signers` of its `/supported`
+ * (evidence facilitatorSupported20261114). The facilitator may redeem with any of them, so a child delegation names
+ * all of them; `/supported` naming any other set stops a transfer before signing (sa_gasless_facilitator_set).
+ * 0xb4827a… is also METAMASK_FACILITATOR_ADDRESSES_DEV in @metamask/7715-permission-types 2.0.0.
+ */
+export const SA_FACILITATORS = ["0x254db96f4c2e666e8a99c4ce96a8421e343b380a", "0x6da7c5ff4217adc1b7a57551cb2ee3687fb86f9f",
+    "0xb4827a2a066cd2ef88560efdf063dd05c6c41cc7"];
 //# sourceMappingURL=registry-data.js.map

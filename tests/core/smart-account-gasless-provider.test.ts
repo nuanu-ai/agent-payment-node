@@ -71,13 +71,64 @@ test("verify sends the exact sealed request once and accepts only valid exact pa
   assert.equal(transport.calls[0]?.endpoint, `${saRegistry(8453).facilitatorUrl}/verify`);
   assert.equal(transport.calls[0]?.body, canonicalJson({ x402Version: 2, paymentPayload: sealed.paymentPayload,
     paymentRequirements: op.intent.requirements }));
-  for (const response of [{ isValid: false, payer: op.intent.binding.ownerAddress },
-    { isValid: true, payer: op.intent.binding.sessionAddress }, { isValid: true }, { isValid: true,
-      payer: op.intent.binding.ownerAddress, surprise: "secret-canary" }]) {
+  assert.equal(Object.hasOwn(verified, "invalidReason"), false);
+  for (const response of [{ isValid: true }, { isValid: true, payer: op.intent.binding.ownerAddress, surprise: "secret-canary" },
+    { isValid: false, invalidReason: 7 }, { isValid: "false" }]) {
     const rejected = new Transport({ status: 200, body: JSON.stringify(response) });
     await assert.rejects(new MetaMaskSmartAccountGaslessProvider(rejected).verify(op, sealed));
     assert.equal(rejected.calls.length, 1);
   }
+});
+
+test("a refused verify answer is returned with only its closed reason token and claimed payer", async () => {
+  const sealed = material(), op = operation(sealed), owner = op.intent.binding.ownerAddress;
+  const session = op.intent.binding.sessionAddress;
+  const cases: ReadonlyArray<readonly [Record<string, unknown>, { isValid: boolean; payer: string | null; invalidReason: string | null }]> = [
+    [{ isValid: false, payer: owner, invalidReason: "invalid_exact_evm_payload_redeemer", invalidMessage: "secret-canary redeemer 0xabc" },
+      { isValid: false, payer: owner, invalidReason: "invalid_exact_evm_payload_redeemer" }],
+    [{ isValid: false }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, payer: "", invalidReason: "free text with secret-canary" }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, invalidReason: `redeemer_${"ab".repeat(20)}` }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, invalidReason: "request_1234567890" }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, invalidReason: "f47ac10b-58cc-4372-a567-0e02b2c3d479" }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, invalidReason: "Req_AbC123xyz" }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, invalidReason: "tx-sentinel-base-mainnet.dev-api.cx.metamask.io" }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, invalidReason: "redeemer_deadbeefcafe" }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, invalidReason: null, invalidMessage: null }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, invalidReason: "INVALID_ERC7710_DELEGATION" }, { isValid: false, payer: null, invalidReason: "INVALID_ERC7710_DELEGATION" }],
+    [{ isValid: true, payer: session.toUpperCase().replace("0X", "0x") }, { isValid: true, payer: session, invalidReason: null }],
+  ];
+  for (const [response, expected] of cases) {
+    const transport = new Transport({ status: 200, body: JSON.stringify(response) });
+    const answer = await new MetaMaskSmartAccountGaslessProvider(transport, () => new Date(SA_TEST_AT)).verify(op, sealed);
+    assert.deepEqual({ isValid: answer.isValid, payer: answer.payer,
+      invalidReason: (answer as { invalidReason?: unknown }).invalidReason }, expected);
+    assert.equal(answer.observedAt, SA_TEST_AT); assert.match(answer.responseHash, /^[0-9a-f]{64}$/u);
+    assert.equal(JSON.stringify(answer).includes("secret-canary"), false);
+    assert.equal(transport.calls.length, 1);
+  }
+});
+
+test("supported stops before signing when the published facilitator set is not exactly the pinned one", async () => {
+  const pinned = saRegistry(8453).facilitatorAddresses, extra = "0x5555555555555555555555555555555555555555";
+  const body = (offered: readonly string[], signers: readonly string[]) => JSON.stringify({ kinds: [{ x402Version: 2,
+    scheme: "exact", network: "eip155:8453", extra: { assetTransferMethods: ["erc7710"], facilitatorAddresses: offered } }],
+  extensions: [], signers: { "eip155:*": signers } });
+  const accepted = new Transport({ status: 200, body: body([...pinned].reverse().map(a => a.toUpperCase().replace("0X", "0x")), [...pinned]) });
+  assert.deepEqual((await new MetaMaskSmartAccountGaslessProvider(accepted, () => new Date(SA_TEST_AT)).supported()).facilitatorAddresses,
+    [...pinned].sort());
+  for (const [offered, signers] of [[[pinned[0]!], [pinned[0]!]], [[...pinned, extra], [...pinned]], [[...pinned], [...pinned, extra]],
+    [[...pinned].slice(1), [...pinned].slice(1)]] as const) {
+    const transport = new Transport({ status: 200, body: body(offered, signers) });
+    await assert.rejects(new MetaMaskSmartAccountGaslessProvider(transport).supported(),
+      (error: any) => error.code === "APN_PROVIDER_CAPABILITY_UNAVAILABLE" && error.details?.reason === "sa_gasless_facilitator_set");
+    assert.equal(transport.calls.length, 1);
+  }
+  const chainSigner = JSON.parse(body([...pinned], [...pinned]));
+  chainSigner.signers["eip155:8453"] = [extra];
+  const transport = new Transport({ status: 200, body: JSON.stringify(chainSigner) });
+  await assert.rejects(new MetaMaskSmartAccountGaslessProvider(transport).supported(),
+    (error: any) => error.details?.reason === "sa_gasless_facilitator_set");
 });
 
 test("settle sends the identical frozen request once and returns only a valid untrusted hint", async () => {

@@ -3,7 +3,7 @@ import type { SmartAccountGaslessBinding, SmartAccountGaslessBlock, SmartAccount
   SmartAccountGaslessMaterialDescriptor, SmartAccountGaslessMaterialHashes, SmartAccountGaslessPayload,
   SmartAccountGaslessProfileIdentity, SmartAccountGaslessProviderBinding, SmartAccountGaslessProviderSettlement,
   SmartAccountGaslessRpcObservation, SmartAccountGaslessSealedMaterial, SmartAccountGaslessSnapshot,
-  SmartAccountGaslessVerification } from "./model.js";
+  SmartAccountGaslessVerifyAnswer } from "./model.js";
 import type { SmartAccountGaslessOperationRecord, SmartAccountGaslessReceipt } from "./operation-model.js";
 
 export interface SmartAccountGaslessMaterialPort {
@@ -30,7 +30,7 @@ export interface SmartAccountGaslessMaterialValidatorPort {
 export interface SmartAccountGaslessProviderPort {
   supported(): Promise<SmartAccountGaslessProviderBinding>;
   verify(operation: SmartAccountGaslessOperationRecord,
-    material: SmartAccountGaslessSealedMaterial): Promise<SmartAccountGaslessVerification>;
+    material: SmartAccountGaslessSealedMaterial): Promise<SmartAccountGaslessVerifyAnswer>;
   settle(operation: SmartAccountGaslessOperationRecord,
     material: SmartAccountGaslessSealedMaterial): Promise<SmartAccountGaslessProviderSettlement>;
 }

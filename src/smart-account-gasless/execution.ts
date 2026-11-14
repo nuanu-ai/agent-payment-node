@@ -1,8 +1,8 @@
-import type { SmartAccountGaslessObservationSource } from "./model.js";
 import type { ClockPort } from "../ports.js";
 import type { StateStore } from "../state.js";
 import { saPolicyHash, saSame } from "./integrity.js";
-import type { SmartAccountGaslessMutable, SmartAccountGaslessRpcObservation, SmartAccountGaslessSealedMaterial } from "./model.js";
+import { saVerifyAccepted, type SmartAccountGaslessMutable, type SmartAccountGaslessObservationSource,
+  type SmartAccountGaslessRpcObservation, type SmartAccountGaslessSealedMaterial } from "./model.js";
 import type { SmartAccountGaslessOperationRecord } from "./operation-model.js";
 import { assertSmartAccountGaslessBinding, smartAccountGaslessOwner } from "./owner.js";
 import { SmartAccountGaslessClock, smartAccountGaslessApprovalPhrase, smartAccountGaslessApprovalSummary,
@@ -10,6 +10,7 @@ import { SmartAccountGaslessClock, smartAccountGaslessApprovalPhrase, smartAccou
 import type { SmartAccountGaslessApprovalPort, SmartAccountGaslessMaterialPort,
   SmartAccountGaslessProviderPort, SmartAccountGaslessRpcFactory, SmartAccountGaslessRpcPort } from "./ports.js";
 import { saClassify, saError, saFail, saFailure, type SmartAccountGaslessFailure, type SmartAccountGaslessReason } from "./reasons.js";
+import { saRegistry } from "./registry.js";
 import { saExact } from "./schema.js";
 import { advanceSmartAccountGaslessOperation, assertSmartAccountGaslessCapacity } from "./transitions.js";
 
@@ -34,6 +35,8 @@ export class SmartAccountGaslessExecution {
     if (op.terminal || op.state !== "awaiting_approval") return { operation: op };
     let now: number;
     try { now = this.clock.live(op); } catch (error) { return await this.halt(op, error); }
+    // A transfer prepared under another facilitator pin is closed before the owner is asked to approve it.
+    if (!pinned(op)) return await this.halt(op, saError("sa_gasless_facilitator_set"));
     let accepted: boolean;
     try {
       accepted = await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
@@ -68,6 +71,8 @@ export class SmartAccountGaslessExecution {
     };
     try {
       this.clock.check(op);
+      // A transfer prepared under another facilitator pin (0.5.105 and earlier) ends before its child is disclosed.
+      if (!pinned(op)) saFail("sa_gasless_facilitator_set");
       let sealed: SmartAccountGaslessSealedMaterial;
       if (op.signingAttempts === 1) {
         const recovered = await this.material.load(op); this.clock.check(op);
@@ -96,15 +101,21 @@ export class SmartAccountGaslessExecution {
         !saSame(exposed.paymentPayload, sealed.paymentPayload)) saFail("sa_gasless_state_corrupt");
       const verification = await this.provider.verify(op, exposed);
       this.clock.check(op, [verification.observedAt]);
-      await persist({ state: "verified_pending", verification });
-      // Only the immediate call that received this verify response may reach settle.
-      await this.guard(op, false, exposed);
-      const dispatchAt = new Date(this.clock.live(op)).toISOString();
-      await persist({ state: "dispatch_pending", submissionAttempts: 1, dispatchStartedAt: dispatchAt }, dispatchAt);
-      this.clock.live(op);
-      const providerSettlement = await this.provider.settle(op, exposed);
-      this.clock.check(op, [providerSettlement.observedAt]);
-      await persist({ state: "submitted_pending", providerSettlement });
+      if (!saVerifyAccepted(verification)) {
+        // The refused answer is kept with its closed reason; the delegation stays exposed until its on-chain expiry.
+        await persist({ state: "unknown_finality", verification, failure: saFailure(verification.isValid
+          ? "sa_gasless_verify_payer_mismatch" : "sa_gasless_verify_rejected") });
+      } else {
+        await persist({ state: "verified_pending", verification });
+        // Only the immediate call that received this verify response may reach settle.
+        await this.guard(op, false, exposed);
+        const dispatchAt = new Date(this.clock.live(op)).toISOString();
+        await persist({ state: "dispatch_pending", submissionAttempts: 1, dispatchStartedAt: dispatchAt }, dispatchAt);
+        this.clock.live(op);
+        const providerSettlement = await this.provider.settle(op, exposed);
+        this.clock.check(op, [providerSettlement.observedAt]);
+        await persist({ state: "submitted_pending", providerSettlement });
+      }
     } catch (error) {
       const failure = saClassify(error, "sa_gasless_internal");
       // An operation-first write may already be durable. A rejected write never authorizes another write or effect here.
@@ -211,6 +222,10 @@ export class SmartAccountGaslessExecution {
   }
 }
 
+/** The child would name exactly the facilitator signers this release pins. */
+function pinned(op: SmartAccountGaslessOperationRecord): boolean {
+  return saSame(op.intent.requirements.extra.facilitatorAddresses, saRegistry(op.intent.request.chainId).facilitatorAddresses);
+}
 /** An owner-named observation RPC with the environment variable that named it. */
 export interface SmartAccountGaslessObserver {
   readonly rpc: SmartAccountGaslessRpcPort;

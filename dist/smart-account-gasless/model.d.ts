@@ -154,6 +154,27 @@ export interface SmartAccountGaslessVerification {
     readonly isValid: true;
     readonly responseHash: string;
 }
+/**
+ * A verify answer APN refused: `isValid` false, or valid for another payer. It keeps the facilitator's claimed payer
+ * and its `invalidReason` only when that is a closed token (never `invalidMessage` or other free text).
+ */
+export interface SmartAccountGaslessVerifyRejection {
+    readonly observedAt: string;
+    readonly payer: Address | null;
+    readonly isValid: boolean;
+    readonly invalidReason: string | null;
+    readonly responseHash: string;
+}
+export type SmartAccountGaslessVerifyAnswer = SmartAccountGaslessVerification | SmartAccountGaslessVerifyRejection;
+/** The only answer that lets an operation reach settle. */
+export declare function saVerifyAccepted(value: SmartAccountGaslessVerifyAnswer): value is SmartAccountGaslessVerification;
+/**
+ * The facilitator's `invalidReason`, kept only as a closed snake_case token (all lower or all upper case) with no hex run
+ * of 12 or digit run of 6: an address, hash, UUID or request id never fits. Anything else is kept as none.
+ */
+export declare function saProviderReasonToken(value: unknown): string | null;
+/** The shape a saved `invalidReason` must have (frozen at 0.5.106); the provider-side filter above may only get stricter. */
+export declare function saStoredReasonToken(value: unknown): boolean;
 export interface SmartAccountGaslessProviderSettlement {
     readonly observedAt: string;
     readonly transactionHash: Hex | null;
@@ -234,7 +255,7 @@ export interface SmartAccountGaslessMutable {
     readonly submissionAttempts: 0 | 1;
     readonly exposureStartedAt: string | null;
     readonly dispatchStartedAt: string | null;
-    readonly verification: SmartAccountGaslessVerification | null;
+    readonly verification: SmartAccountGaslessVerifyAnswer | null;
     readonly providerSettlement: SmartAccountGaslessProviderSettlement | null;
     readonly cursor: SmartAccountGaslessCursor;
     readonly observation: SmartAccountGaslessObservation | null;

@@ -97,6 +97,14 @@ export interface SmartAccountGaslessPublicOperation {
     readonly created_at: string;
     readonly updated_at: string;
     readonly expires_at: string;
+    /** Present only after the facilitator refused this transfer at verify: what it answered, minus any free text. */
+    readonly provider_verify?: {
+        readonly is_valid: boolean;
+        readonly payer: Address | null;
+        readonly invalid_reason: string | null;
+        readonly observed_at: string;
+        readonly response_hash: string;
+    };
     readonly next_actions: readonly string[];
 }
 export interface SmartAccountGaslessReceipt extends Omit<SmartAccountGaslessPublicOperation, "schema_version"> {

@@ -57,7 +57,7 @@ declare const deployment: {
     facilitatorUrl: string;
     facilitatorOrigin: string;
     facilitatorEndpointHash: string;
-    facilitatorAddresses: readonly ["0xb4827a2a066cd2ef88560efdf063dd05c6c41cc7"];
+    facilitatorAddresses: readonly ["0x254db96f4c2e666e8a99c4ce96a8421e343b380a", "0x6da7c5ff4217adc1b7a57551cb2ee3687fb86f9f", "0xb4827a2a066cd2ef88560efdf063dd05c6c41cc7"];
 };
 export type SmartAccountGaslessDeployment = typeof deployment;
 /** Inventory elsewhere does not admit any executable chain or replace its own grant. */
