@@ -24,6 +24,7 @@ export async function readMetaMaskNativeServerRequest(requestId, projectHash, bi
     }
     if (read.requestId !== requestId)
         return { outcome: "refused", reason: "provider_request_identity_conflict", check: null };
-    return read.found ? { outcome: "verified", status: read.status, transactionHash: read.txHash, responseHash: read.responseHash } : { outcome: "not_found" };
+    return read.found ? { outcome: "verified", status: read.status, transactionHash: read.txHash, mfa: read.mfa, responseHash: read.responseHash }
+        : { outcome: "not_found" };
 }
 //# sourceMappingURL=metamask-native-request-server-read.js.map

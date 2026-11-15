@@ -13,11 +13,12 @@ import { mmRegistry } from "../registry.js";
 import { mmClassify, mmFail, mmFailure } from "../reasons.js";
 import { mmValidateUnsigned } from "../unsigned.js";
 import { mmAddress, mmHex, mmUint } from "../validation.js";
-import { HelperNetworkPolicy, networkContextEmpty, networkContextQuote, networkContextRequest, networkContextServerRequest } from "./network.js";
+import { HelperNetworkPolicy, networkContextEmpty, networkContextQuote, networkContextRequest, networkContextServerRequest, networkContextServerTransaction } from "./network.js";
 import { readPrivateSession, readPrivateState } from "./private-state.js";
 import { serverRequestAnswer, serverRequestNotFound } from "./server-request.js";
 import { assertProjectWallet } from "./project-wallets.js";
-import { helperRequest, MM_HELPER_VERSION } from "./protocol.js";
+import { helperRequest, helperSends, MM_HELPER_VERSION } from "./protocol.js";
+import { assertServerTransactionSession, submitServerTransaction } from "./server-transaction-submit.js";
 import { hydrateSdkState } from "./session.js";
 const transferAbi = parseAbi(["function transfer(address,uint256) returns (bool)"]);
 const SERVER_URL = "https://agentic-mimir-service.api.cx.metamask.io";
@@ -61,12 +62,23 @@ export async function executeHelperRequest(input, options = {}) {
             policy.assertComplete();
             return { version: MM_HELPER_VERSION, ok: true, result };
         }
+        else if (request.mode === "submitTransaction") {
+            const session = await readPrivateSession(home, now());
+            // Only the request's own project and selected server wallet: another one refuses before any network call.
+            assertServerTransactionSession(session, request.transaction);
+            policy = new HelperNetworkPolicy(networkContextServerTransaction(request.transaction, session.projectId, session.token, now), options.exchange, options.parentAlive);
+            globalThis.fetch = policy.fetch;
+            const result = await submitServerTransaction(request.transaction, session, home, now, policy, sent);
+            sent.stage = "complete";
+            policy.assertComplete();
+            return { version: MM_HELPER_VERSION, ok: true, result };
+        }
         else {
             const expected = request.mode === "quote" ? request.input.binding : request.intent.binding;
             const firstObservedAt = now();
             const state = await readPrivateState(home, expected, firstObservedAt);
             policy = request.mode === "quote" ? new HelperNetworkPolicy(networkContextQuote(request.input, state.address, state.token, state.projectId), options.exchange) :
-                new HelperNetworkPolicy(networkContextRequest(request.mode, request.intent, state.projectId, state.token, now), options.exchange);
+                new HelperNetworkPolicy(networkContextRequest(request.mode, request.intent, state.projectId, state.token, now), options.exchange, options.parentAlive);
             if (request.mode === "submit")
                 policy.primeSubmitClock(firstObservedAt);
             globalThis.fetch = policy.fetch;
@@ -97,7 +109,7 @@ export async function executeHelperRequest(input, options = {}) {
                 ? policy?.projectWalletFacts() : undefined;
             return { version: MM_HELPER_VERSION, ok: false, failure, diagnostic: readDiagnostic(request.mode, phase.stage, invariant, context?.network, context?.httpStatus, null, "none", false, context?.validationPredicate, context?.tokenFeesShape, { ...context?.feeFacts, ...relay, ...usdc, ...wallets }) };
         }
-        if (request.mode === "submit") {
+        if (helperSends(request.mode)) {
             const facts = policy?.submitFacts();
             // A sent POST answered outside 2xx, with no check of APN's own refusing, is the provider's answer itself; a sent
             // POST with no answer at all (a transport failure after it left) says so.
@@ -309,7 +321,7 @@ async function readServerRequest(query, session, policy, seen) {
     }
     if (hydrated.writes() !== 0)
         mmFail("mm_gasless_state_security");
-    return serverRequestAnswer(status, query, policy.requestBodyHash(), seen);
+    return serverRequestAnswer(status, query, policy.requestBodyHash(), session.session.authMethod, seen);
 }
 function validateSdkQuote(value, input, owner) {
     if (!isPlainRecord(value) || typeof value.amount !== "bigint" || value.amount !== mmUint(input.netAtomic, true) ||
@@ -390,7 +402,7 @@ function assertBeforeDeadline(value, now) {
         mmFail("mm_gasless_expired");
 }
 function fallback(mode) {
-    return mode === "submit" ? "mm_gasless_submit_unknown" : mode === "buildUnsigned" ?
+    return helperSends(mode) ? "mm_gasless_submit_unknown" : mode === "buildUnsigned" ?
         "mm_gasless_internal" : "mm_gasless_provider_unavailable";
 }
 function logger() {

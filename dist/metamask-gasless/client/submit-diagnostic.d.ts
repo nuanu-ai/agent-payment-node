@@ -2,8 +2,8 @@ import { ApnError } from "../../errors.js";
 import { type MetaMaskGaslessFailureReason } from "../reasons.js";
 import { type MetaMaskJobTx } from "./job-tx.js";
 /**
- * Where a MetaMask gasless submit stopped, as closed facts only: the
- * helper stage, whether APN's network policy let the one POST out, its HTTP status, the check that refused, the
+ * Where a MetaMask gasless submit, or a server-wallet transaction request (submitTransaction), stopped, as closed facts
+ * only: the helper stage, whether APN's network policy let the one POST out, its HTTP status, the check that refused, the
  * provider's error code or job status when they have a closed token form, and how the answer's `tx` compared with the
  * request when that check refused it (job-tx.ts). No body, URL, header or identifier leaves.
  * It is shown with the attempt's own output and never stored: the outcome stays unknown whatever it says.
@@ -11,12 +11,14 @@ import { type MetaMaskJobTx } from "./job-tx.js";
 /** `launch` is before the helper process exists; `runner` is the parent's view of a helper that ran and failed. */
 export type SubmitStage = "launch" | "runner" | "private_state" | "sdk_load" | "hydrate" | "binding" | "body" | "post" | "response" | "complete" | "helper_response";
 /**
- * `not_reached`: no POST could have left (only APN's own checks before it ran, or no helper process started);
+ * `not_reached`: no POST could have left (only APN's own checks before it ran, no helper process started, or its
+ * connection never reached the TLS session the transport writes the request on);
  * `refused`: APN's body check refused it before sending; `sent`: it may have reached the provider; `unknown`: a helper
  * that ran failed, so it may or may not have left. Nothing but `not_reached` and `refused` rules out a sent POST.
  */
 export type SubmitPost = "not_reached" | "refused" | "sent" | "unknown";
-export type SubmitCheck = "none" | "body_mismatch" | "duplicate_request" | "unexpected_request" | "deadline" | "clock" | "session" | "http_status" | "no_answer" | "response_body" | "response_request_id" | "response_kind" | "response_status" | "response_tx" | "response_hash" | "incomplete" | "runner_launch" | "runner_exit" | "runner_timeout" | "runner_output" | "response_invalid" | "unclassified";
+/** `parent_exited`: the APN command that spawned the helper was gone right before the send would be written. */
+export type SubmitCheck = "none" | "body_mismatch" | "duplicate_request" | "unexpected_request" | "deadline" | "clock" | "parent_exited" | "session" | "http_status" | "no_answer" | "response_body" | "response_request_id" | "response_kind" | "response_status" | "response_tx" | "response_hash" | "incomplete" | "runner_launch" | "runner_exit" | "runner_timeout" | "runner_output" | "response_invalid" | "unclassified";
 export interface MetaMaskSubmitDiagnostic {
     readonly mode: "submit";
     readonly stage: SubmitStage;

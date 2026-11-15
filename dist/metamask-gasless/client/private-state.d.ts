@@ -15,4 +15,13 @@ type Expected = MetaMaskGaslessProfileIdentity | MetaMaskGaslessBinding;
 export type PrivateSession = Pick<PrivateState, "sessionEnvelope" | "walletEnvelope" | "session" | "walletState" | "token" | "projectId" | "generationHash">;
 export declare function readPrivateSession(homeDirectory: string, now: Date): Promise<PrivateSession>;
 export declare function readPrivateState(homeDirectory: string, expected: Expected, now: Date): Promise<PrivateState>;
+/**
+ * The session's selected server wallet: the one EVM remote wallet its selection names by name or address (never by id),
+ * as `mm` resolves the active wallet. Lowercase address; a selection that names none or several refuses.
+ */
+export declare function selectedServerWallet(walletState: Readonly<Record<string, unknown>>): {
+    readonly address: `0x${string}`;
+    readonly reference: string;
+    readonly referenceKind: "name" | "address";
+};
 export {};

@@ -4,8 +4,8 @@ import { jobTxDetails, takeJobTx, validateJobTx } from "./job-tx.js";
 import { readDataRecord } from "./read-diagnostic.js";
 const STAGES = ["launch", "runner", "private_state", "sdk_load", "hydrate", "binding", "body", "post", "response", "complete", "helper_response"];
 const POSTS = ["not_reached", "refused", "sent", "unknown"];
-const CHECKS = ["none", "body_mismatch", "duplicate_request", "unexpected_request", "deadline", "clock", "session",
-    "http_status", "no_answer", "response_body", "response_request_id", "response_kind", "response_status", "response_tx", "response_hash",
+const CHECKS = ["none", "body_mismatch", "duplicate_request", "unexpected_request", "deadline", "clock", "parent_exited",
+    "session", "http_status", "no_answer", "response_body", "response_request_id", "response_kind", "response_status", "response_tx", "response_hash",
     "incomplete", "runner_launch", "runner_exit", "runner_timeout", "runner_output", "response_invalid", "unclassified"];
 const KEYS = ["mode", "stage", "post", "httpStatus", "check", "providerError", "providerStatus", "responseTx"];
 const WITH_STATUS = ["response_status", "response_tx"];

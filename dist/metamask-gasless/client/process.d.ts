@@ -3,6 +3,7 @@ import type { MetaMaskGaslessBinding, MetaMaskGaslessProviderIntent, MetaMaskGas
 import type { MetaMaskGaslessProviderPort, MetaMaskGaslessQuoteInput, MetaMaskGaslessUnsignedInput } from "../ports.js";
 import { type HelperRequest } from "./protocol.js";
 import type { MetaMaskServerRequestQuery, MetaMaskServerRequestRead } from "./server-request.js";
+import type { MetaMaskServerTransactionAnswer, MetaMaskServerTransactionInput } from "./server-transaction.js";
 export interface HelperRunnerOptions {
     readonly environment: NodeJS.ProcessEnv;
     readonly timeoutMs: number;
@@ -27,6 +28,12 @@ export declare class MetaMaskGaslessProviderClient implements MetaMaskGaslessPro
     observe(intent: MetaMaskGaslessProviderIntent): Promise<MetaMaskGaslessProviderObservation>;
     /** A native transfer's server-wallet request by its exact id, in the same sandboxed helper (client/server-request.ts). */
     readServerRequest(query: MetaMaskServerRequestQuery): Promise<MetaMaskServerRequestRead>;
+    /**
+     * One server-wallet transaction request with APN's own id, sent once by the same sandboxed helper
+     * (client/server-transaction.ts) and killed after `timeoutMs`: the native transfer's consent deadline, or the revoke's
+     * submit bound. A failure carries the submit's closed diagnostic; once the helper may have started, it is never a refusal.
+     */
+    submitServerTransaction(transaction: MetaMaskServerTransactionInput, timeoutMs: number): Promise<MetaMaskServerTransactionAnswer>;
     private invoke;
 }
 export declare class SubprocessMetaMaskGaslessHelperRunner implements MetaMaskGaslessHelperRunner {

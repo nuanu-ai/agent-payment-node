@@ -1,19 +1,27 @@
+import { randomUUID } from "node:crypto";
 import { isPlainRecord, sha256 } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { isMetaMaskEvmNamespace } from "../../metamask-namespace.js";
-import { classifyMetaMaskPendingNotices, parseMetaMaskProcessOutput } from "../../metamask-process-output.js";
-import { NodeMetaMaskProcessRunner, takeMetaMaskProcessFailureObservation } from "../../metamask-process-runner.js";
-const PENDING = new Set(["EVALUATING", "AWAITING_MFA", "SIGNING", "BROADCASTING"]);
-const TOKEN = /^[A-Za-z0-9._:-]{1,256}$/u;
+import { parseMetaMaskProcessOutput } from "../../metamask-process-output.js";
+import { NodeMetaMaskProcessRunner } from "../../metamask-process-runner.js";
+import { MM_REQUEST_CLOSED_STATUSES, MM_REQUEST_PENDING_STATUSES, metaMaskServerTransaction, sendMetaMaskServerTransaction } from "../../metamask-server-transaction.js";
+import { MetaMaskGaslessProviderClient } from "../client/process.js";
+/** The revoke's send bound, as the gasless relay submit's: the helper is killed after it and the outcome stays unknown. */
+const SUBMIT_TIMEOUT_MS = 120_000;
 /**
- * The owner's MetaMask Agent Wallet CLI signs and broadcasts (`mm wallet send-transaction`, the path the native lane
- * uses), after its own Guard policy and MFA. APN first checks that the selected wallet is the delegator; a selected
- * wallet that differs refuses before anything is handed over.
+ * The owner's MetaMask server wallet signs and broadcasts the disable after its own Guard policy and MFA. APN first
+ * checks with the MetaMask Agent Wallet CLI that its selected wallet is the delegator (a read): a selected wallet that
+ * differs refuses before anything is handed over. APN then names the request id itself and sends the request once
+ * through the sandboxed MetaMask helper the gasless lane uses (metamask-server-transaction.ts): the very request
+ * `mm wallet send-transaction` sent for the same payload and intent, from mm's signed-in session in whichever project
+ * holds the server wallet, as before. mm's own local request list does not hold it.
  */
-export class MetaMaskCliRevocationWallet {
+export class MetaMaskSdkRevocationWallet {
     runner;
-    constructor(runner = new NodeMetaMaskProcessRunner()) {
+    client;
+    constructor(runner = new NodeMetaMaskProcessRunner(), client = new MetaMaskGaslessProviderClient()) {
         this.runner = runner;
+        this.client = client;
     }
     async send(input) {
         const selected = await this.runner.runJson(["wallet", "address", "--chain-namespace", "evm", "--json"]);
@@ -27,75 +35,53 @@ export class MetaMaskCliRevocationWallet {
         finally {
             selected.stdout.fill(0);
         }
-        let result;
-        try {
-            result = await this.runner.runJson(["wallet", "send-transaction", "--chain-id", String(input.chainId),
-                "--payload", JSON.stringify(input.payload), "--intent", input.intent, "--json"]);
-        }
-        catch (error) {
-            return withProvider({ disposition: "unknown", reason: "provider_handoff_outcome_unknown" }, takeMetaMaskProcessFailureObservation(error));
-        }
-        try {
-            return withProvider(submission(result.exitCode, result.stdout, input.from), result.observation);
-        }
-        finally {
-            result.stdout.fill(0);
-        }
+        // Built and checked before the helper starts: a malformed request refuses with nothing sent.
+        const requestId = randomUUID();
+        // The helper lets the POST leave only within its own kill bound.
+        const transaction = metaMaskServerTransaction({ requestId, projectHash: null, from: input.from, chainId: input.chainId,
+            payload: input.payload, intent: input.intent, expiresAt: new Date(Date.now() + SUBMIT_TIMEOUT_MS).toISOString() });
+        return revocationSubmission(await sendMetaMaskServerTransaction(transaction, SUBMIT_TIMEOUT_MS, this.client), metaMaskRevocationRequestIdHash(requestId));
     }
 }
-function withProvider(answer, provider) {
-    if (answer.disposition !== "unknown" || provider === undefined)
-        return answer;
-    const code = stderrErrorCode(provider);
-    return code === undefined ? { ...answer, provider } : { ...answer, providerErrorCode: code, provider };
+/** The session read's closed reasons with a cause of their own; any other reason there is `session_files`. */
+const SESSION_CAUSES = {
+    mm_gasless_binding_changed: "session_binding", mm_gasless_session_unavailable: "session_signed_out",
+    mm_gasless_session_expired: "session_signed_out", mm_gasless_state_busy: "session_busy", mm_gasless_state_security: "session_permissions",
+};
+export function metaMaskRevocationUnsentCause(submission) {
+    if (submission.disposition !== "unknown" || submission.submitDiagnostic === undefined || submission.submitDiagnostic.post !== "not_reached")
+        return undefined;
+    const d = submission.submitDiagnostic;
+    if (d.check === "deadline" || d.check === "clock")
+        return d.check;
+    if (d.stage === "private_state") {
+        const reason = submission.helperFailure;
+        return reason !== undefined && Object.hasOwn(SESSION_CAUSES, reason) ? SESSION_CAUSES[reason] : "session_files";
+    }
+    return d.stage === "launch" || d.stage === "sdk_load" || d.stage === "hydrate" || d.stage === "binding" ? d.stage : undefined;
+}
+/** The provider's request id stays private; its hash names it in output, as it has since 0.5.105. */
+export function metaMaskRevocationRequestIdHash(requestId) {
+    return sha256(`apn.metamask-revocation.request-id.v1\0${requestId}`);
 }
 /**
- * The error code of `mm`'s JSON failure answer, which it writes to stderr after any progress lines
- * (`{"ok":false,"error":{"code":…}}`, indented, or `{"_error":{…}}` after a notice), read from the stream shape: only
- * when the process exited, stdout is empty, stderr is complete and its last frame is that answer. The shape keeps `code`
- * only when it looks like an enum value, so no message, id or address can surface here.
+ * A hash with a live or settled status is acknowledged; a request still before its hash is pending (MetaMask may wait on
+ * the owner's MFA); a closed request, a status APN does not know and every failure once the helper may have started
+ * stay unknown, with what MetaMask said when it said something.
  */
-function stderrErrorCode(provider) {
-    const { stdout, stderr } = provider;
-    if (provider.outcome !== "exit" || stdout.captured !== "empty" || stderr.captured !== "complete" || stderr.frames.length === 0)
-        return undefined;
-    const frame = stderr.frames.at(-1);
-    if (!frame.json || frame.object === undefined)
-        return undefined;
-    const ok = frame.object.keys.find((key) => key.key === "ok");
-    if (ok !== undefined && ok.value !== false)
-        return undefined;
-    const error = frame.object.keys.find((key) => (key.key === "error" || key.key === "_error") && key.object !== undefined);
-    const code = error?.object?.keys.find((key) => key.key === "code")?.value;
-    return typeof code === "string" ? code : undefined;
-}
-function submission(exitCode, stdout, from) {
-    const parsed = parseMetaMaskProcessOutput(stdout);
-    if (parsed === null) {
-        return { disposition: "unknown", reason: stdout.toString("utf8").trim().length === 0 ? "provider_response_empty" : "provider_response_malformed" };
+function revocationSubmission(outcome, requestIdHash) {
+    if (outcome.kind === "unknown") {
+        const d = outcome.diagnostic;
+        return { disposition: "unknown", reason: outcome.reason, requestIdHash,
+            ...(d !== undefined && d.providerError !== null ? { providerErrorCode: d.providerError } : {}), ...(d === undefined ? {} : { submitDiagnostic: d }),
+            ...(outcome.helperFailure === undefined ? {} : { helperFailure: outcome.helperFailure }) };
     }
-    const notice = classifyMetaMaskPendingNotices(parsed.notices), data = parsed.envelope?.data;
-    const hash = isPlainRecord(data) && typeof data.hash === "string" && /^0x[a-fA-F0-9]{64}$/u.test(data.hash) ? data.hash.toLowerCase() : undefined;
-    const token = isPlainRecord(data) && typeof data.pollingId === "string" && TOKEN.test(data.pollingId) ? data.pollingId
-        : notice.disposition === "pending" ? notice.recoveryToken : undefined;
-    // The provider's request id stays private; its hash names it in output, as the gasless lane names its own.
-    const requestIdHash = token === undefined ? null : sha256(`apn.metamask-revocation.request-id.v1\0${token}`);
-    if (notice.disposition === "invalid" || (notice.disposition === "pending" && token !== notice.recoveryToken)) {
-        return { disposition: "unknown", reason: "provider_identity_conflict" };
-    }
-    if (exitCode !== 0)
-        return { disposition: "unknown", reason: "provider_handoff_outcome_unknown" };
-    if (parsed.envelope?.ok === true && isPlainRecord(data)) {
-        if (data.mode !== "server" || typeof data.address !== "string" || data.address.toLowerCase() !== from) {
-            return { disposition: "unknown", reason: "provider_sender_mismatch" };
-        }
-        if (hash !== undefined)
-            return { disposition: "acknowledged", transactionHash: hash, requestIdHash };
-        if (requestIdHash !== null && typeof data.status === "string" && PENDING.has(data.status))
-            return { disposition: "pending", requestIdHash };
-    }
-    if (notice.disposition === "pending" && parsed.envelope === null && requestIdHash !== null)
+    const { status, txHash } = outcome.answer, closed = MM_REQUEST_CLOSED_STATUSES.includes(status);
+    if (txHash !== null && !closed)
+        return { disposition: "acknowledged", transactionHash: txHash, requestIdHash };
+    if (txHash === null && MM_REQUEST_PENDING_STATUSES.includes(status))
         return { disposition: "pending", requestIdHash };
-    return { disposition: "unknown", reason: "provider_handoff_outcome_unknown" };
+    return { disposition: "unknown", reason: closed ? "provider_request_closed" : "provider_request_outcome_unknown", requestIdHash,
+        providerStatus: status, ...(txHash === null ? {} : { transactionHash: txHash }) };
 }
 //# sourceMappingURL=wallet.js.map

@@ -2,9 +2,10 @@ import { submitErrorCode } from "./submit-diagnostic.js";
 import { captureSponsoredQuote, parseSentinelResponse, sentinelFailure, sentinelQuotedFee, validateSentinelResponse } from "./sentinel.js";
 import { MM_SENTINEL_NETWORKS_ENDPOINT, MM_SERVER_WALLET_NETWORKS_ENDPOINT, mmProjectWalletsUrl } from "./provider-endpoints.js";
 import { readProjectWallets } from "./project-wallets.js";
-import { request as httpsRequest } from "node:https";
 import { canonicalJson, exactKeys, isPlainRecord, sha256 } from "../../canonical.js";
-import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress } from "../../network-policy.js";
+import { parsePublicHttpsUrl } from "../../network-policy.js";
+import { HttpsFetchExchange } from "./https-exchange.js";
+import { serverTransactionBody } from "./server-transaction.js";
 import { MM_SENTINEL_SLUG, mmRegistry } from "../registry.js";
 import { mmFail } from "../reasons.js";
 import { encodeFunctionData, parseAbi } from "viem";
@@ -18,6 +19,7 @@ const transferAbi = parseAbi(["function transfer(address,uint256) returns (bool)
 export class HelperNetworkPolicy {
     context;
     exchange;
+    parentAlive;
     fetch;
     counts = new Map();
     successes = new Set();
@@ -43,8 +45,10 @@ export class HelperNetworkPolicy {
     submitFacts() {
         return { post: this.#submitPost, httpStatus: this.#submitStatus, check: this.#submitCheck, providerError: this.#submitError };
     }
-    submitRefused(check) { if (this.context.mode === "submit" && this.#submitCheck === "none")
+    submitRefused(check) { if (this.sends() && this.#submitCheck === "none")
         this.#submitCheck = check; }
+    /** The two modes whose one POST may create a provider request: the gasless relay submit and a server transaction. */
+    sends() { return this.context.mode === "submit" || this.context.mode === "submitTransaction"; }
     /** Closed facts of the two validated relay inventories for the quoted chain, once both were read. */
     relaySupportFacts() {
         return this.#relayListing === undefined || this.#relayFlag === undefined ? undefined
@@ -71,9 +75,14 @@ export class HelperNetworkPolicy {
         return error !== null && typeof error === "object" ? this.#readFailures.get(error) ?? { network: "none", httpStatus: null, validationFailed: false }
             : { network: "none", httpStatus: null, validationFailed: false };
     }
-    constructor(context, exchange = new HttpsFetchExchange()) {
+    /**
+     * `parentAlive`: whether the APN command that spawned this helper still runs. The helper process always passes it
+     * (helper-entry.ts); an in-process run has no parent process to watch and passes none.
+     */
+    constructor(context, exchange = new HttpsFetchExchange(), parentAlive) {
         this.context = context;
         this.exchange = exchange;
+        this.parentAlive = parentAlive;
         this.fetch = this.handle.bind(this);
     }
     /** Only the exact failed original quote exchange may supply this private one-use capture. */
@@ -90,7 +99,7 @@ export class HelperNetworkPolicy {
         return quote;
     }
     didObserveNotFound() { return this.notFound; }
-    /** The SHA-256 of the server request read's 2xx answer bytes, once it came; never the answer itself. */
+    /** The SHA-256 of the 2xx answer bytes of the server request read or transaction POST, once it came; never the answer itself. */
     requestBodyHash() { return this.#requestBodyHash; }
     fixedFailure() {
         return this.deadlineFailure ?? (this.sessionFailure ? "mm_gasless_session_unavailable" : undefined);
@@ -113,11 +122,11 @@ export class HelperNetworkPolicy {
         const expected = this.context.mode === "quote" ? ["project-wallets", "mimir-networks", "accounts-networks", "sentinel-networks",
             "rpc-decimals", ...(this.#sponsoredAccepted ? [] : ["rpc-balance"]), "sentinel-quote"] :
             this.context.mode === "submit" ? ["submit"] : this.context.mode === "observe" ? ["observe"] :
-                this.context.mode === "readRequest" ? ["read-request"] : [];
+                this.context.mode === "readRequest" ? ["read-request"] : this.context.mode === "submitTransaction" ? ["submit-transaction"] : [];
         const walletListed = this.context.mode !== "quote" || this.#projectWallets?.listed === true;
         if (this.counts.size !== expected.length || expected.some((key) => this.counts.get(key) !== 1) || !walletListed) {
             this.submitRefused("incomplete");
-            mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
+            mmFail(this.sends() ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
         }
         if (this.context.mode === "quote" && expected.some((key) => !this.successes.has(key) && !(key === "sentinel-quote" && this.#sponsoredAccepted)))
             mmFail("mm_gasless_provider_unavailable");
@@ -139,21 +148,28 @@ export class HelperNetworkPolicy {
             }
             if ((this.counts.get(key) ?? 0) !== 0) {
                 this.submitRefused("duplicate_request");
-                mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
+                mmFail(this.sends() ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
             }
             this.counts.set(key, 1);
-            if (this.context.mode === "submit")
-                this.assertSubmitDeadline();
+            const left = this.sends() ? this.assertSubmitDeadline() : undefined;
             const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
-            // From the last deadline check on, the POST may reach the provider: it counts as sent even without an answer.
-            const request = { url, method, headers, body, maxBytes: MAX_RESPONSE, timeoutMs: 15_000,
-                ...(signal ? { signal } : {}), ...(this.context.mode === "submit" ? { beforeSend: () => {
+            // From the last deadline check on, the POST may reach the provider: it counts as sent even without an answer. The
+            // transport checks it once more when TLS is up, right before the bytes go, and a send's exchange ends at its deadline
+            // at the latest (its timeout is the time left), so no request of it is written past the deadline.
+            const request = { url, method, headers, body, maxBytes: MAX_RESPONSE,
+                timeoutMs: left === undefined ? 15_000 : Math.min(15_000, left),
+                ...(signal ? { signal } : {}), ...(this.sends() ? { beforeSend: () => {
+                        // An orphan never writes a send: its command is gone, and with it the operation lock and the deadline's owner.
+                        if (this.parentAlive !== undefined && !this.parentAlive()) {
+                            this.submitRefused("parent_exited");
+                            mmFail("mm_gasless_submit_unknown");
+                        }
                         this.assertSubmitDeadline();
-                        if (key === "submit")
+                        if (key === "submit" || key === "submit-transaction")
                             this.#submitPost = "sent";
                     } } : {}) };
             const response = await this.exchange.request(request);
-            if (this.context.mode === "submit" && key === "submit") {
+            if (key === "submit" || key === "submit-transaction") {
                 this.#submitStatus = Number.isSafeInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : null;
                 if (this.#submitStatus !== null && this.#submitStatus >= 300 && typeof response.body === "string" && Buffer.byteLength(response.body) <= MAX_RESPONSE) {
                     this.#submitError = submitErrorCode(response.body);
@@ -173,7 +189,7 @@ export class HelperNetworkPolicy {
                 mmFail("mm_gasless_provider_unavailable");
             if ((this.context.mode === "observe" || this.context.mode === "readRequest") && response.status === 404)
                 this.notFound = true;
-            if (key === "read-request" && response.status >= 200 && response.status < 300)
+            if ((key === "read-request" || key === "submit-transaction") && response.status >= 200 && response.status < 300)
                 this.#requestBodyHash = sha256(response.body);
             if (response.status >= 200 && response.status < 300) {
                 try {
@@ -226,10 +242,21 @@ export class HelperNetworkPolicy {
         if (key === "sentinel-quote")
             this.#quotedFee = sentinelQuotedFee(parseBody(body), this.context.input.token);
     }
+    /**
+     * The send's own deadline (a gasless intent's, a server transaction's), checked at the request and right before its bytes
+     * go. Returns the milliseconds left to it, or `undefined` in a mode that sends nothing.
+     */
     assertSubmitDeadline() {
-        if (this.context.mode !== "submit")
-            return;
-        const current = this.context.now().getTime(), deadline = Date.parse(this.context.intent.expiresAt);
+        // Separate branches: the `"submit" | "observe"` member is not removed by a ternary or a negated mode check.
+        const c = this.context;
+        let expiresAt;
+        if (c.mode === "submitTransaction")
+            expiresAt = c.input.expiresAt;
+        else if (c.mode === "submit")
+            expiresAt = c.intent.expiresAt;
+        else
+            return undefined;
+        const current = c.now().getTime(), deadline = Date.parse(expiresAt);
         if (!Number.isSafeInteger(current) || !Number.isSafeInteger(deadline)) {
             this.deadlineFailure = "mm_gasless_clock";
             this.submitRefused("clock");
@@ -246,6 +273,7 @@ export class HelperNetworkPolicy {
             this.submitRefused("deadline");
             mmFail("mm_gasless_expired");
         }
+        return deadline - current;
     }
     classify(url, method, headers, body) {
         if (this.context.mode === "inspect" || this.context.mode === "buildUnsigned")
@@ -261,6 +289,8 @@ export class HelperNetworkPolicy {
                 return "read-request";
             return mmFail("mm_gasless_provider_unavailable");
         }
+        if (this.context.mode === "submitTransaction")
+            return this.classifyServerTransaction(this.context, url, method, headers, body);
         if (this.context.mode !== "submit" && this.context.mode !== "observe")
             return mmFail("mm_gasless_provider_unavailable");
         exactProviderUrl(url);
@@ -283,6 +313,26 @@ export class HelperNetworkPolicy {
             return "observe";
         this.submitRefused("unexpected_request");
         return mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
+    }
+    /**
+     * One POST to the session project's transaction-request collection, with the session's own bearer token and exactly
+     * the bytes `serverTransactionBody` fixes for the input (request id, chain, tx and intent); any other request,
+     * body or second request is refused before it can leave.
+     */
+    classifyServerTransaction(context, url, method, headers, body) {
+        exactProviderUrl(url);
+        requireBearer(headers, context.token);
+        if (url === `${MIMIR}/v1/projects/${encodeURIComponent(context.projectId)}/transaction-requests` && method === "POST" && body !== null) {
+            if (body === serverTransactionBody(context.input))
+                return "submit-transaction";
+            // A POST that may already have left is never downgraded to refused.
+            if (this.#submitPost !== "sent")
+                this.#submitPost = "refused";
+            this.submitRefused("body_mismatch");
+            return mmFail("mm_gasless_submit_unknown");
+        }
+        this.submitRefused("unexpected_request");
+        return mmFail("mm_gasless_submit_unknown");
     }
 }
 function classifyQuote(context, rawUrl, method, headers, body) {
@@ -490,89 +540,6 @@ function validateResponse(key, body, requestBody, context) {
     else if (key === "sentinel-quote")
         validateSentinelResponse(value, context);
 }
-export class HttpsFetchExchange {
-    async request(request) {
-        const url = parsePublicHttpsUrl(request.url, "APN_HTTP_CONFIG", "MetaMask service", 2048);
-        const deadline = Date.now() + request.timeoutMs;
-        let timer;
-        try {
-            const addresses = await Promise.race([resolvePublicAddresses(url, "APN_HTTP_CONFIG", "MetaMask service"),
-                new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error("dns timeout")), request.timeoutMs); })]);
-            clearTimeout(timer);
-            timer = undefined;
-            const remaining = deadline - Date.now();
-            if (remaining < 1)
-                throw new Error("request timeout");
-            return sendHttps(url, { ...request, timeoutMs: remaining }, addresses);
-        }
-        finally {
-            clearTimeout(timer);
-        }
-    }
-}
-function sendHttps(url, input, addresses) {
-    return new Promise((resolve, reject) => {
-        const selected = addresses[0];
-        if (!selected) {
-            reject(new Error("network"));
-            return;
-        }
-        let done = false;
-        const finish = (error, result) => {
-            if (done)
-                return;
-            done = true;
-            clearTimeout(timer);
-            input.signal?.removeEventListener("abort", abort);
-            error ? reject(error) : resolve(result);
-        };
-        const headers = { ...input.headers, "accept-encoding": "identity",
-            ...(input.body === null ? {} : { "content-length": String(Buffer.byteLength(input.body)) }) };
-        const req = httpsRequest(url, { method: input.method, headers, agent: false, family: selected.family,
-            lookup: (_host, _options, callback) => callback(null, selected.address, selected.family) }, (response) => {
-            const status = response.statusCode ?? 0, encoding = response.headers["content-encoding"];
-            if ((status >= 300 && status < 400) || (encoding && encoding !== "identity")) {
-                response.destroy();
-                finish(new Error("response"));
-                return;
-            }
-            let size = 0;
-            const chunks = [];
-            response.on("data", (chunk) => { size += chunk.length; if (size > input.maxBytes) {
-                response.destroy();
-                finish(new Error("response"));
-            }
-            else
-                chunks.push(chunk); });
-            response.on("end", () => { try {
-                const body = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, size));
-                finish(null, { status, body });
-            }
-            catch {
-                finish(new Error("response"));
-            } });
-            response.on("aborted", () => finish(new Error("response")));
-            response.on("error", () => finish(new Error("response")));
-        });
-        req.on("socket", (socket) => socket.on("connect", () => { if (!socket.remoteAddress || !sameIpAddress(socket.remoteAddress, selected.address)) {
-            req.destroy();
-            finish(new Error("network"));
-        } }));
-        req.on("error", () => finish(new Error("network")));
-        const abort = () => { req.destroy(); finish(new DOMException("Aborted", "AbortError")); };
-        input.signal?.addEventListener("abort", abort, { once: true });
-        const timer = setTimeout(() => { req.destroy(); finish(new Error("timeout")); }, input.timeoutMs);
-        try {
-            input.beforeSend?.();
-        }
-        catch (error) {
-            req.destroy();
-            finish(error);
-            return;
-        }
-        req.end(input.body ?? undefined);
-    });
-}
 export function networkContextQuote(input, owner, authToken, projectId) {
     return { mode: "quote", input: structuredClone(input), owner, authToken, projectId };
 }
@@ -580,5 +547,8 @@ export function networkContextRequest(mode, intent, projectId, token, now) { ret
 export function networkContextEmpty(mode) { return { mode }; }
 export function networkContextServerRequest(query, projectId, token) {
     return { mode: "readRequest", query: structuredClone(query), projectId, token };
+}
+export function networkContextServerTransaction(input, projectId, token, now) {
+    return { mode: "submitTransaction", input: structuredClone(input), projectId, token, now };
 }
 //# sourceMappingURL=network.js.map

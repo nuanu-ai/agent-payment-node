@@ -2,7 +2,7 @@ import type { StateStore } from "../../state.js";
 import type { MetaMaskGaslessOperationRecord } from "../operation-model.js";
 import type { MetaMaskGaslessRpcFactory } from "../ports.js";
 import { type MetaMaskRevocationApprovalPort } from "./consent.js";
-import type { MetaMaskRevocationWalletPort } from "./wallet.js";
+import { type MetaMaskRevocationWalletPort } from "./wallet.js";
 export interface MetaMaskRevocationDependencies {
     readonly approval?: MetaMaskRevocationApprovalPort;
     readonly wallet?: MetaMaskRevocationWalletPort;

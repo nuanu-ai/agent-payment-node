@@ -1,23 +1,6 @@
 import { type MetaMaskNativeDeadlineInput, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
-import { type MetaMaskMfaNotice, type MetaMaskRequestNotFound } from "./metamask-process-output.js";
-import { type MetaMaskProcessObservation } from "./metamask-process-observation.js";
-import type { Hex } from "./model.js";
-interface NativeFailureIdentifiers {
-    readonly requestId?: string;
-    readonly transactionHash?: Hex;
-    readonly sender?: string;
-    readonly chainId?: number;
-    readonly vendorProjectHash?: string;
-    /** The owner's approval the provider waits on for this very request (no hash, no other status), with the output's SHA-256. */
-    readonly mfa?: MetaMaskMfaNotice & {
-        readonly evidenceHash: string;
-    };
-}
+import { type MetaMaskRequestNotFound } from "./metamask-process-output.js";
 export declare function takeMetaMaskNativeProcessFailureDiagnostic(error: unknown): MetaMaskNativeDiagnostic | undefined;
-/** One-use shape of the child's streams for this runner's rejected invocation (timeout, start, oversize). */
-export declare function takeMetaMaskProcessFailureObservation(error: unknown): MetaMaskProcessObservation | undefined;
-/** Internal one-use observation of this runner's rejected invocation. Never exposes captured output or changes rejection. */
-export declare function takeMetaMaskNativeProcessFailureIdentifiers(error: unknown): NativeFailureIdentifiers | undefined;
 interface CapturedStream {
     on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
     removeListener(event: "data", listener: (chunk: Buffer | string) => void): unknown;
@@ -50,8 +33,6 @@ export interface MetaMaskProcessResult {
     readonly exitCode: number;
     readonly stdout: Buffer;
     readonly nativeDiagnostic?: MetaMaskNativeDiagnostic;
-    /** Taken from both streams before they are zeroed; the caller decides whether to show it. */
-    readonly observation?: MetaMaskProcessObservation;
     /**
      * `wallet requests watch <id>` only: where its REQUEST_NOT_FOUND answer on stderr says the request was not found
      * (metamask-process-output.ts). Absent for every other command and answer. A fact about mm's lookup, never an outcome.

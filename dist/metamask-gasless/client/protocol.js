@@ -2,6 +2,7 @@ import { readDataRecord, validateReadDiagnostic } from "./read-diagnostic.js";
 import { validateSubmitDiagnostic } from "./submit-diagnostic.js";
 import { validateObserveDiagnostic } from "./observe-diagnostic.js";
 import { serverRequestQuery, serverRequestRead } from "./server-request.js";
+import { serverTransactionInput, serverTransactionResult } from "./server-transaction.js";
 import { isPlainRecord } from "../../canonical.js";
 import { MM_PROVIDER_STATUSES } from "../model.js";
 import { mmAssertProfileBinding, mmBinding, mmPrivateHash } from "../identity.js";
@@ -34,6 +35,10 @@ export function helperRequest(value) {
         const r = mmExact(value, ["version", "mode", "query"], "mm_gasless_input");
         return { version: MM_HELPER_VERSION, mode: "readRequest", query: serverRequestQuery(r.query) };
     }
+    if (value.mode === "submitTransaction") {
+        const r = mmExact(value, ["version", "mode", "transaction"], "mm_gasless_input");
+        return { version: MM_HELPER_VERSION, mode: "submitTransaction", transaction: serverTransactionInput(r.transaction) };
+    }
     return mmFail("mm_gasless_input");
 }
 export function helperResponse(value, request) {
@@ -44,7 +49,7 @@ export function helperResponse(value, request) {
     if (value.ok === false) {
         const readMode = request.mode === "inspect" || request.mode === "quote" ? request.mode : null;
         const hasDiagnostic = readMode !== null && Object.hasOwn(value, "diagnostic");
-        const hasSubmitDiagnostic = request.mode === "submit" && Object.hasOwn(value, "submitDiagnostic");
+        const hasSubmitDiagnostic = helperSends(request.mode) && Object.hasOwn(value, "submitDiagnostic");
         const hasObserveDiagnostic = (request.mode === "observe" || request.mode === "readRequest") && Object.hasOwn(value, "observeDiagnostic");
         const r = mmExact(value, ["version", "ok", "failure", ...(hasDiagnostic ? ["diagnostic"] : []), ...(hasSubmitDiagnostic ? ["submitDiagnostic"] : []),
             ...(hasObserveDiagnostic ? ["observeDiagnostic"] : [])], responseReason(request.mode));
@@ -73,12 +78,18 @@ export function helperResponse(value, request) {
         mmValidateUnsigned(r.result, request.input, responseReason(request.mode));
     else if (request.mode === "readRequest")
         serverRequestRead(r.result, request.query);
+    else if (request.mode === "submitTransaction")
+        serverTransactionResult(r.result, request.transaction);
     else
         observation(r.result, request.intent);
     return value;
 }
+/** The modes whose one POST may create a provider request: any failure of theirs leaves the request's outcome unknown. */
+export function helperSends(mode) {
+    return mode === "submit" || mode === "submitTransaction";
+}
 function responseReason(mode) {
-    return mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable";
+    return helperSends(mode) ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable";
 }
 function profileIdentity(value) {
     const p = mmExact(value, ["profile", "profileHash", "address", "accountBindingHash", "capabilityHash", "revision"], "mm_gasless_input");

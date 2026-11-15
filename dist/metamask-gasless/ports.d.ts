@@ -62,6 +62,8 @@ export interface MetaMaskGaslessRpcPort {
     observe(intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor, provider: MetaMaskGaslessProviderObservation | null): Promise<MetaMaskGaslessRpcObservation>;
     /** Chain facts for the owner's disable of this dispatched delegation (absent on observation-only test doubles). */
     revocation?(intent: MetaMaskGaslessIntent, disable: MetaMaskDisableCall, operationId: string): Promise<MetaMaskRevocationChain>;
+    /** The delegator's native balance at the latest block, read again right before the disable is sent (atomic wei). */
+    revocationBalance?(intent: MetaMaskGaslessIntent, disable: MetaMaskDisableCall): Promise<string>;
 }
 export type MetaMaskGaslessRpcFactory = (chainId: MetaMaskGaslessChainId) => MetaMaskGaslessRpcPort;
 export type MetaMaskGaslessObservationRpcFactory = (chainId: MetaMaskGaslessChainId, environmentName: string) => MetaMaskGaslessRpcPort;
