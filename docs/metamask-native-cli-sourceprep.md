@@ -137,7 +137,17 @@ marker (`effect_started` with `handoffPath`), that command is gone. Before anyth
 still `reserved` to `unknown_finality` and records the transfer `unknown`, with `diagnostic.stage: "post_handoff"` and
 `code: "interrupted"`. Then it reads the request as for any `unknown` transfer: a transaction hash goes to receipt proof
 and settles the actual fee, `AWAITING_MFA` records the owner's task, and a 404 keeps the transfer `unknown` with its
-holds charged. `native-transfer-status` alone changes nothing.
+holds charged. `native-transfer-status` alone leaves such a marker as it is.
+
+**A command that ended after its outcome.** The send records its outcome in the journal and then moves the usage holds,
+in this release and in every earlier one. A command that ended between the two left the transfer `acknowledged`,
+`unknown`, `confirmed` or `abandoned_unknown` with its holds still `reserved`, and settlement refuses such a hold ("no
+durable effect hold"). `native-transfer-status`, observe and resume hold the operation's lock, so that command is gone.
+Before any receipt or settlement they move each hold of the operation that is still `reserved` to the state the send
+would have written: `submitted` for `acknowledged`, else `unknown_finality`. Both keep the hold charged, so this never
+releases or settles usage; settlement still needs the receipt. A hold that already moved is left alone. A missing or
+changed hold is left as it is, so its settlement still refuses. No journal field changes, so a record any release wrote
+gets the same repair, and a second read does nothing.
 
 States: `prepared`, `effect_started`, `acknowledged` and `unknown` are non-terminal; `confirmed`, `confirmed_reverted`,
 `failed_before_effect` and `abandoned_unknown` are terminal.
