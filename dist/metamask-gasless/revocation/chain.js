@@ -62,6 +62,16 @@ export async function readMetaMaskRevocationChain(call, deployment, dispatched, 
         maxFeePerGasAtomic: maxFee.toString(), maxPriorityFeePerGasAtomic: priority.toString(), l1FeeUpperWei: l1.toString(),
         operatorFeeUpperWei: operator.toString(), maximumNativeCostWei: maximum.toString(), nativeBalanceWei: balance.toString() };
 }
+/** The disable as the `--payload` 0.5.107 handed `mm wallet send-transaction`; the helper sends the request mm built from it. */
+/**
+ * The delegator's native balance at the latest block (pinned by hash), read again inside the send lock right before the
+ * disable goes out. `mm wallet send-transaction` read it before its POST (`assertSufficientNativeFunds`); the helper that
+ * now sends the request does not, so APN reads it itself.
+ */
+export async function readMetaMaskRevocationBalance(call, disable) {
+    const head = await rpcBlock(call, "latest");
+    return rpcQuantity(await call("eth_getBalance", [disable.from, { blockHash: head.block.hash, requireCanonical: true }])).toString();
+}
 export const mmRevocationPayload = (disable, chain) => ({
     to: disable.to, data: disable.data, value: "0x0", gas: quantity(BigInt(chain.gasLimitAtomic)), nonce: quantity(BigInt(chain.nonceAtomic)),
     maxFeePerGas: quantity(BigInt(chain.maxFeePerGasAtomic)), maxPriorityFeePerGas: quantity(BigInt(chain.maxPriorityFeePerGasAtomic)),

@@ -2,7 +2,8 @@ import { performance } from "node:perf_hooks";
 import { exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 const NATIVE_DIAGNOSTIC_STAGES = ["sdk_resolver", "sdk_read", "sdk_send", "owner_guard", "rpc_balance", "rpc_nonce", "post_handoff"];
-const NATIVE_DIAGNOSTIC_CODES = ["ok", "deadline", "refused", "timeout", "exit", "signal", "protocol", "start", "internal"];
+/** `interrupted` (0.5.108): the sending command ended after its effect marker before it recorded the hand-off's outcome. */
+const NATIVE_DIAGNOSTIC_CODES = ["ok", "deadline", "refused", "timeout", "exit", "signal", "protocol", "start", "internal", "interrupted"];
 export function validateMetaMaskNativeDiagnostic(value) {
     if (!isPlainRecord(value) || !exactKeys(value, ["stage", "code", "exitCode", "signal", "durationMs", "remainingMs", "stderrClass", "providerCode"]))
         throw new ApnError("APN_STATE_CORRUPT", "Native diagnostic schema is invalid.");

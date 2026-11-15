@@ -1,6 +1,6 @@
-import type { Hex } from "../../model.js";
 import { type MmRpcCall } from "../chain/abi.js";
 import type { MetaMaskGaslessBlock, MetaMaskGaslessDeployment, MetaMaskGaslessIntent } from "../model.js";
+import type { MetaMaskCliPayload } from "../../metamask-server-transaction.js";
 import type { MetaMaskDisableCall } from "./call.js";
 /** What the chain says right before a disable is handed to the wallet; every refusal here happens before any send. */
 export interface MetaMaskRevocationChain {
@@ -25,4 +25,11 @@ export interface MetaMaskRevocationChain {
  * here), the fee rule `EvmRpc.estimate` uses (2 x base fee + priority) and the delegator's native balance.
  */
 export declare function readMetaMaskRevocationChain(call: MmRpcCall, deployment: MetaMaskGaslessDeployment, dispatched: MetaMaskGaslessIntent, disable: MetaMaskDisableCall, operationId: string): Promise<MetaMaskRevocationChain>;
-export declare const mmRevocationPayload: (disable: MetaMaskDisableCall, chain: MetaMaskRevocationChain) => Readonly<Record<string, Hex>>;
+/** The disable as the `--payload` 0.5.107 handed `mm wallet send-transaction`; the helper sends the request mm built from it. */
+/**
+ * The delegator's native balance at the latest block (pinned by hash), read again inside the send lock right before the
+ * disable goes out. `mm wallet send-transaction` read it before its POST (`assertSufficientNativeFunds`); the helper that
+ * now sends the request does not, so APN reads it itself.
+ */
+export declare function readMetaMaskRevocationBalance(call: MmRpcCall, disable: MetaMaskDisableCall): Promise<string>;
+export declare const mmRevocationPayload: (disable: MetaMaskDisableCall, chain: MetaMaskRevocationChain) => MetaMaskCliPayload;

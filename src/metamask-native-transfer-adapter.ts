@@ -1,17 +1,19 @@
 import { metaMaskGuardPolicyAdmits } from "./metamask-native-policy.js";
+import { performance } from "node:perf_hooks";
 import { getAddress, type Address } from "viem";
 import { nativeDeadlineRemaining, validateMetaMaskNativeDiagnostic, type MetaMaskNativeDeadlineInput, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError, type ErrorCode, type ErrorDetail } from "./errors.js";
 import type { Hex } from "./model.js";
-import { NodeMetaMaskProcessRunner, takeMetaMaskNativeProcessFailureIdentifiers, takeMetaMaskNativeProcessFailureDiagnostic, type MetaMaskProcessResult } from "./metamask-process-runner.js";
+import { NodeMetaMaskProcessRunner, takeMetaMaskNativeProcessFailureDiagnostic, type MetaMaskProcessResult } from "./metamask-process-runner.js";
 import { metaMaskCommand } from "./metamask-command.js";
-import { resolveMetaMaskBin } from "./metamask-package.js";
 import { parseMetaMaskProcessOutput, classifyMetaMaskPendingNotices, metaMaskMfaNotice, metaMaskWatchMissReason, type MetaMaskMfaNotice } from "./metamask-process-output.js";
 import { readMetaMaskNativeServerRequest, type MetaMaskNativeRequestBinding } from "./metamask-native-request-server-read.js";
+import { metaMaskServerTransaction, sendMetaMaskServerTransaction } from "./metamask-server-transaction.js";
+import { metaMaskNativeSdkSubmission } from "./metamask-native-sdk-submission.js";
 import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
 import { METAMASK_NATIVE_CHAINS, metaMaskNativeQuoteTransfer, validateMetaMaskNativeFeeQuote, type MetaMaskNativeFeeChainId } from "./metamask-native-fee-evidence.js";
-import { claimMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedContextCurrent,
+import { claimMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedContextCurrent, metaMaskNativeOwnedRequestId,
   type MetaMaskNativeOwnedScope, type MetaMaskNativeOwnedContext } from "./metamask-native-transfer-owner.js";
 
 // Read at call time: this module sits in an import cycle with the owner, so no imported value is used at load.
@@ -29,10 +31,14 @@ export interface MetaMaskNativeVendorPolicy {
 }
 /** A verified AWAITING_MFA notice (or request status) for the very request stored, with the SHA-256 of the vendor output. */
 export interface MetaMaskNativeMfaEvidence extends MetaMaskMfaNotice { readonly evidenceHash: string }
+/**
+ * The hand-off's outcome. The MetaMask request id is APN's own, sealed and named by its hash in the effect marker
+ * before the send, so no outcome carries it: `pending` adds the owner's MFA window when MetaMask waits on it.
+ */
 export type MetaMaskNativeSubmission = (
-  | { readonly disposition: "acknowledged"; readonly transactionHash: Hex; readonly requestId?: never }
-  | { readonly disposition: "pending"; readonly requestId: string; readonly transactionHash?: never; readonly mfa?: MetaMaskNativeMfaEvidence }
-  | { readonly disposition: "unknown"; readonly reason: string; readonly transactionHash?: Hex; readonly requestId?: string; readonly mfa?: MetaMaskNativeMfaEvidence })
+  | { readonly disposition: "acknowledged"; readonly transactionHash: Hex; readonly mfa?: never }
+  | { readonly disposition: "pending"; readonly transactionHash?: never; readonly mfa?: MetaMaskNativeMfaEvidence }
+  | { readonly disposition: "unknown"; readonly reason: string; readonly transactionHash?: Hex; readonly mfa?: never })
   & {readonly diagnostic?: MetaMaskNativeDiagnostic};
 
 /**
@@ -167,68 +173,50 @@ export async function readMetaMaskNativeVendorPolicy(chainId: MetaMaskNativeFeeC
 
 const quantity = (value: string): string => `0x${BigInt(value).toString(16)}`;
 
-/** A failure before the vendor child process was spawned: nothing was handed to the vendor. */
+/** A failure before the sandboxed helper was spawned: nothing was handed to MetaMask. */
 export class MetaMaskNativeHandoffNotStarted extends Error {
   constructor(readonly causeError: unknown) { super("MetaMask native handoff did not start."); }
 }
 
-/** Owner alone persists the one-effect handoff marker before this statically bound call. */
+/**
+ * Owner alone seals the request id and persists the one-effect handoff marker naming its hash before this statically
+ * bound call. The request goes out once, from mm's own signed-in session, through the sandboxed MetaMask helper the
+ * gasless lane uses (metamask-server-transaction.ts): the very request `mm wallet send-transaction` sent for the same
+ * payload and intent, with APN's own id in place of the one mm would have generated.
+ */
 export async function submitOwnedMetaMaskNative(scope: MetaMaskNativeOwnedScope,
   context: MetaMaskNativeOwnedContext): Promise<MetaMaskNativeSubmission> {
   let prepared: Awaited<ReturnType<typeof prepareNativeHandoff>>;
-  // Every check that can fail runs before the child process is spawned (R3); its failure proves no handoff.
+  // Every check that can fail runs before the helper process is spawned (R3); its failure proves no handoff.
   try { prepared = await prepareNativeHandoff(scope, context); }
   catch (error) { throw new MetaMaskNativeHandoffNotStarted(error); }
-  const { deadline, quote, handoffRunner, payload } = prepared;
-  // EIP-1559 fees force the ordinary type2 path; the normal parser accepts no authorization list.
-  let result: MetaMaskProcessResult;
-  try {
-    const transfer = metaMaskNativeQuoteTransfer(quote);
-    result = await handoffRunner.runJson(["wallet", "send-transaction", "--chain-id", String(quote.chainId), "--payload", payload,
-      "--intent", `APN ${context.operationId}: ${transfer.amountAtomic} atomic USDC to ${transfer.recipient}`, "--json"], nativeDeadlineRemaining(deadline), deadline);
-  } catch (error) {
-    const diagnostic = takeMetaMaskNativeProcessFailureDiagnostic(error);
-    const observed = takeMetaMaskNativeProcessFailureIdentifiers(error);
-    const bound = observed !== undefined && (observed.sender === undefined || observed.sender === quote.sender.toLowerCase()) &&
-      (observed.chainId === undefined || observed.chainId === quote.chainId) &&
-      (observed.vendorProjectHash === undefined || observed.vendorProjectHash === context.vendorProjectHash);
-    // Rejection remains UNKNOWN even when the real failed child emitted a recoverable identifier.
-    return {disposition: "unknown", reason: "provider_private_handoff_outcome_unknown", ...(diagnostic === undefined ? {} : {diagnostic}),
-      ...(bound && observed.transactionHash !== undefined ? {transactionHash: observed.transactionHash} : {}),
-      ...(bound && observed.requestId !== undefined ? {requestId: observed.requestId, ...(observed.mfa === undefined ? {} : {mfa: observed.mfa})} : {})};
-  }
-  // The effect has happened: no guard runs after it. The pre-send guard required the quote nonce to be the pending
-  // nonce, so re-running it after a broadcast (nonce + 1) turned every successful send into an unknown outcome. The
-  // durable effect marker and the stored hash or request id are the guards from here on.
-  let hint: MetaMaskNativeSubmission;
-  try { hint = submissionHint(result,quote.sender); } finally {result.stdout.fill(0);}
-  return {...hint, ...(result.nativeDiagnostic === undefined ? {} : {diagnostic:result.nativeDiagnostic})};
+  // The effect may happen from here: no guard runs after it. The pre-send guard required the quote nonce to be the
+  // pending nonce, so re-running it after a broadcast (nonce + 1) turned every successful send into an unknown outcome.
+  // The durable effect marker and the sealed request id are the guards from here on.
+  const startedAt = performance.now();
+  const outcome = await sendMetaMaskServerTransaction(prepared.transaction, prepared.timeoutMs);
+  return metaMaskNativeSdkSubmission(outcome, startedAt, prepared.deadline);
 }
 
-/** Everything before the vendor child process: claim, policy, resolver, last owner guard and the exact payload. */
+/** Everything before the helper process: claim, the exact request with its sealed id, the last owner guard and the timeout. */
 async function prepareNativeHandoff(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext) {
   claimMetaMaskNativeOwnedScope(scope, context);
   const deadline = assertMetaMaskNativeOwnedScope(scope,context);
   nativeDeadlineRemaining(deadline);
   const quote = validateMetaMaskNativeFeeQuote(context.quote);
   chain(quote.chainId);
-  // Finish package validation before the last owner/deadline check, so a slow resolver cannot move the private handoff past it.
-  nativeDeadlineRemaining(deadline);
-  let resolverTimer:ReturnType<typeof setTimeout>|undefined;
-  let executable:string;
-  try {executable=await Promise.race([resolveMetaMaskBin(),new Promise<never>((_,reject)=>{
-    resolverTimer=setTimeout(()=>reject(new ApnError("APN_OPERATION_BLOCKED","Native SDK resolver deadline reached.")),nativeDeadlineRemaining(deadline));
-  })]);}finally{if(resolverTimer!==undefined)clearTimeout(resolverTimer);}
-  assertMetaMaskNativeOwnedScope(scope, context);
-  nativeDeadlineRemaining(deadline);
-  const handoffRunner = new NodeMetaMaskProcessRunner(async () => executable);
+  const t = quote.transaction, transfer = metaMaskNativeQuoteTransfer(quote);
+  // The payload 0.5.107 handed `mm wallet send-transaction`; EIP-1559 fees force the ordinary type-2 request. The helper
+  // lets the POST leave only before the consent deadline.
+  const transaction = metaMaskServerTransaction({ requestId: metaMaskNativeOwnedRequestId(scope, context), projectHash: context.vendorProjectHash,
+    from: quote.sender, chainId: quote.chainId, intent: `APN ${context.operationId}: ${transfer.amountAtomic} atomic USDC to ${transfer.recipient}`,
+    expiresAt: deadline.utcExpiresAt,
+    payload: { to: t.to, data: t.data, value: "0x0", gas: quantity(t.gasLimitAtomic), nonce: quantity(t.nonceAtomic),
+      maxFeePerGas: quantity(t.maxFeePerGasAtomic), maxPriorityFeePerGas: quantity(t.maxPriorityFeePerGasAtomic) } });
   await assertMetaMaskNativeOwnedContextCurrent(scope, context);
   assertMetaMaskNativeOwnedScope(scope, context);
-  const t = quote.transaction;
-  const payload = JSON.stringify({to: t.to, data: t.data, value: "0x0", gas: quantity(t.gasLimitAtomic),
-    nonce: quantity(t.nonceAtomic), maxFeePerGas: quantity(t.maxFeePerGasAtomic),
-    maxPriorityFeePerGas: quantity(t.maxPriorityFeePerGasAtomic)});
-  return { deadline, quote, handoffRunner, payload };
+  // The helper is killed at the consent deadline, as the vendor child was.
+  return { deadline, transaction, timeoutMs: nativeDeadlineRemaining(deadline) };
 }
 
 /** Transient read evidence only. No field grants financial authority or changes a held journal. */
@@ -248,7 +236,10 @@ export interface MetaMaskNativeReadObservation {
   readonly reason: string | null;
   readonly error_code: "APN_OPERATION_BLOCKED" | "APN_PROVIDER_PROTOCOL" | "APN_PROVIDER_UNAVAILABLE" | "APN_STATE_CORRUPT" | "unavailable" | null;
   readonly diagnostic: MetaMaskNativeDiagnostic | null;
-  /** Present only when the watch answered `metamask_request_not_in_local_state` and APN read the request from MetaMask's server. */
+  /**
+   * Present only when APN read the request from MetaMask's server: for a request APN sent itself (0.5.108 and later,
+   * which mm's local request list never holds), or when the watch answered `metamask_request_not_in_local_state`.
+   */
   readonly server_read?: MetaMaskNativeServerReadObservation;
 }
 /**
@@ -281,9 +272,24 @@ export type MetaMaskNativeRequestObservation = RequestHint & {readonly readObser
  * policy is read around it. When the watch answers that mm's own local request list no longer holds the request (a
  * new `mm login` starts that list empty) and the owner supplies the transfer's sender and chain, the request is read
  * once from MetaMask's server instead, inside the same project bracket; that read never sends, signs or approves.
+ * This is the read of a request `mm wallet send-transaction` sent (a record 0.5.107 or earlier wrote).
  */
 export async function readMetaMaskNativeRequest(requestId: string, vendorProjectHash: string,
   binding?: MetaMaskNativeRequestBinding): Promise<MetaMaskNativeRequestObservation> {
+  return await readRequest(requestId, vendorProjectHash, binding === undefined ? { source: "watch" } : { source: "watch", binding });
+}
+/**
+ * The read of a request APN sent itself through the helper (0.5.108 and later): mm's local request list never holds it,
+ * so no watch runs. The request is read once from MetaMask's server by its exact id, inside the same project bracket
+ * (the session project before and after, two vendor processes), and classified as a watch answer would be.
+ */
+export async function readMetaMaskNativeSdkRequest(requestId: string, vendorProjectHash: string,
+  binding: MetaMaskNativeRequestBinding): Promise<MetaMaskNativeRequestObservation> {
+  return await readRequest(requestId, vendorProjectHash, { source: "server", binding });
+}
+type RequestSource = { readonly source: "watch"; readonly binding?: MetaMaskNativeRequestBinding } |
+  { readonly source: "server"; readonly binding: MetaMaskNativeRequestBinding };
+async function readRequest(requestId: string, vendorProjectHash: string, read: RequestSource): Promise<MetaMaskNativeRequestObservation> {
   const observation: MutableReadObservation = {stage:"input",guard_step:null,request_id:null,watch_returned:false,
     before_guard_verified:false,after_guard_verified:false,request_identity_verified:false,provider_status:null,
     transaction_hash:null,chain_id:null,response_hash:null,reason:null,error_code:null,diagnostic:null};
@@ -302,18 +308,24 @@ export async function readMetaMaskNativeRequest(requestId: string, vendorProject
     observation.stage = "before_guard"; observation.guard_step = "project_before";
     if (await project(runner) !== vendorProjectHash) refuse("metamask_session_project_changed");
     observation.before_guard_verified = true;
-    observation.stage = "watch"; observation.guard_step = null;
-    const result = await runner.runJson(["wallet", "requests", "watch", requestId, "--wallet-timeout", "1", "--json"], 6_000);
-    observation.watch_returned = true;
-    try {
-      observation.response_hash = sha256(result.stdout);
-      observation.diagnostic = result.nativeDiagnostic === undefined ? null : readDiagnostic(result.nativeDiagnostic);
-      hint = requestHint(result, requestId, observation);
-    } finally {result.stdout.fill(0);}
-    // The precise trigger only: mm itself said its local list does not hold this very request. No other answer is retried.
-    if (binding !== undefined && hint.disposition === "unknown" && hint.reason === "metamask_request_not_in_local_state") {
+    observation.guard_step = null;
+    if (read.source === "server") {
       observation.stage = "server_read";
-      hint = await serverRequestHint(requestId, vendorProjectHash, binding, observation, hint);
+      hint = await serverRequestHint(requestId, vendorProjectHash, read.binding, observation, hint, true);
+    } else {
+      observation.stage = "watch";
+      const result = await runner.runJson(["wallet", "requests", "watch", requestId, "--wallet-timeout", "1", "--json"], 6_000);
+      observation.watch_returned = true;
+      try {
+        observation.response_hash = sha256(result.stdout);
+        observation.diagnostic = result.nativeDiagnostic === undefined ? null : readDiagnostic(result.nativeDiagnostic);
+        hint = requestHint(result, requestId, observation);
+      } finally {result.stdout.fill(0);}
+      // The precise trigger only: mm itself said its local list does not hold this very request. No other answer is retried.
+      if (read.binding !== undefined && hint.disposition === "unknown" && hint.reason === "metamask_request_not_in_local_state") {
+        observation.stage = "server_read";
+        hint = await serverRequestHint(requestId, vendorProjectHash, read.binding, observation, hint, false);
+      }
     }
     observation.stage = "after_guard"; observation.guard_step = "project_after";
     if (await project(runner) !== vendorProjectHash) refuse("metamask_session_project_changed");
@@ -352,12 +364,14 @@ function requestHint(result: MetaMaskProcessResult, requestId: string, observati
 }
 
 /**
- * The server's own record of the request, read when mm's local list lost it. A verified answer is classified by
- * `jobHint` exactly as a watch's `request` and `status` of this very request; a 404 stays unknown, and a refused read
- * keeps the watch's own reason.
+ * The server's own record of the request, read when mm's local list does not hold it. A verified answer is classified
+ * by `jobHint` exactly as a watch's `request` and `status` of this very request; a 404 stays unknown, and a refused read
+ * keeps the reason it had before the read (the watch's own, or that no read answered). `withWindow`: the read of a
+ * request APN sent itself also keeps the AWAITING_MFA approval window the answer names; the 0.5.107 fallback read of an
+ * earlier request records it as it always did, with no window.
  */
 async function serverRequestHint(requestId: string, projectHash: string, binding: MetaMaskNativeRequestBinding,
-  observation: MutableReadObservation, missed: RequestHint): Promise<RequestHint> {
+  observation: MutableReadObservation, missed: RequestHint, withWindow: boolean): Promise<RequestHint> {
   const answer = await readMetaMaskNativeServerRequest(requestId, projectHash, binding);
   observation.server_read = Object.freeze({outcome: answer.outcome, response_hash: answer.outcome === "verified" ? answer.responseHash : null,
     reason: answer.outcome === "refused" ? answer.reason : null, check: answer.outcome === "refused" ? answer.check : null});
@@ -365,7 +379,8 @@ async function serverRequestHint(requestId: string, projectHash: string, binding
   if (answer.outcome === "refused") return missed;
   return jobHint({pollingId: requestId, kind: "transaction", namespace: "evm", chainId: binding.chainId},
     {status: answer.status, ...(answer.transactionHash === null ? {} : {txHash: answer.transactionHash})}, true, requestId, observation,
-    {expiresAt: null, authMethod: null, evidenceHash: answer.responseHash});
+    {expiresAt: withWindow ? answer.mfa?.expiresAt ?? null : null, authMethod: withWindow ? answer.mfa?.authMethod ?? null : null,
+      evidenceHash: answer.responseHash});
 }
 
 /** One provider record of the request (a watch's `request` and `status`): its identity, chain, hash and status. */
@@ -395,36 +410,4 @@ function jobHint(request: Record<string, unknown>, status: Record<string, unknow
   if (typeof status.status === "string" && EFFECT_STATES.has(status.status))
     return {disposition: "pending", requestId, ...chainHint, ...(status.status === "AWAITING_MFA" ? {mfa} : {})};
   return {disposition: "unknown", reason: "provider_request_outcome_unknown", requestId, ...chainHint};
-}
-
-function submissionHint(result: MetaMaskProcessResult, expectedPayer: string): MetaMaskNativeSubmission {
-  const parsed = parseMetaMaskProcessOutput(result.stdout);
-  if (parsed === null) return {disposition: "unknown", reason: "provider_response_malformed"};
-  const notice = classifyMetaMaskPendingNotices(parsed.notices);
-  const data = parsed.envelope?.data;
-  const transactionHash = isPlainRecord(data) && typeof data.hash === "string" && /^0x[a-fA-F0-9]{64}$/u.test(data.hash)
-    ? data.hash.toLowerCase() as Hex : undefined;
-  const requestId = isPlainRecord(data) && typeof data.pollingId === "string" && /^[A-Za-z0-9._:-]{1,256}$/u.test(data.pollingId)
-    ? data.pollingId : notice.disposition === "pending" ? notice.recoveryToken : undefined;
-  // The owner's approval the provider waits on, for this very request only: a notice naming it or its AWAITING_MFA status,
-  // with no hash and no other sender. It is kept beside an UNKNOWN or pending outcome, never in place of one.
-  const sender = !isPlainRecord(data) || data.mode === "server" && typeof data.address === "string" && data.address.toLowerCase() === expectedPayer.toLowerCase();
-  const latest = isPlainRecord(data) && typeof data.status === "string" ? data.status : undefined;
-  const awaiting = latest === undefined ? notice.disposition === "pending" && notice.recoveryToken === requestId : latest === "AWAITING_MFA";
-  const task = requestId !== undefined && transactionHash === undefined && sender && awaiting ? {mfa: {...(notice.disposition === "pending"
-    ? metaMaskMfaNotice(parsed.notices) : {expiresAt: null, authMethod: null}), evidenceHash: sha256(result.stdout)}} : {};
-  const unknown = (reason: string, withTask = false): MetaMaskNativeSubmission => ({disposition: "unknown", reason,
-    ...(transactionHash === undefined ? {} : {transactionHash}), ...(requestId === undefined ? {} : {requestId}), ...(withTask ? task : {})});
-  if (notice.disposition === "invalid" || (notice.disposition === "pending" && requestId !== notice.recoveryToken))
-    return unknown("provider_identity_conflict");
-  if (result.exitCode !== 0) return unknown("provider_private_handoff_outcome_unknown", true);
-  if (parsed.envelope?.ok === true && isPlainRecord(data)) {
-    if (!sender) return unknown("provider_sender_mismatch");
-    if (transactionHash !== undefined) return {disposition: "acknowledged", transactionHash};
-    if (requestId !== undefined && typeof data.status === "string" && EFFECT_STATES.has(data.status))
-      return {disposition: "pending", requestId, ...task};
-  }
-  if (notice.disposition === "pending" && parsed.envelope === null)
-    return {disposition: "pending", requestId: notice.recoveryToken, ...task};
-  return unknown("provider_private_handoff_outcome_unknown", true);
 }

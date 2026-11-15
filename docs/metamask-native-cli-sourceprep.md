@@ -77,12 +77,98 @@ apn wallet metamask native-transfer-observe --operation <operation-id>
 4. **Last guard.** APN rechecks the owner policy, profile binding and recipient pin, the account's conflict domain on
    that chain, and repeats the three MetaMask reads. The MetaMask project and the Guard policy must be unchanged since
    consent; otherwise the transfer is blocked before the hand-off.
-5. **Hand-off.** After writing one durable effect marker, APN hands the transfer to MetaMask
-   (`mm wallet send-transaction`) exactly once. MetaMask signs and broadcasts it under its own Guard policy and MFA.
+5. **Hand-off.** APN names the MetaMask request itself (a UUID v4) and seals its ID (see
+   [The sealed request reference](#the-sealed-request-reference)). Then it writes one durable effect marker that names
+   the ID's hash, and hands the transfer to MetaMask exactly once (see [The hand-off](#the-hand-off)). MetaMask signs
+   and broadcasts it under its own Guard policy and MFA.
 
 The result is `acknowledged` (with a transaction hash) or `unknown` (pending MetaMask MFA, or an outcome APN cannot
 prove). Both stay financially unknown until observed; run `native-transfer-observe` or `apn operation resume` to prove
 the receipt and settle the actual fee. A proven no-hand-off ends `failed_before_effect`.
+
+## The hand-off
+
+Up to 0.5.107 APN handed the transfer to `mm wallet send-transaction`. That command creates the MetaMask request ID
+itself and keeps it only in its own local request list, and only after MetaMask answered. When `mm` failed after its
+POST without printing the ID, nothing could find the request again. From 0.5.108 APN sends the same request with its own
+ID, through the sandboxed helper of the MetaMask gasless lane ([gasless.md](gasless.md)). `mm` is still used for the
+sign-in, the Guard mode and policy reads and the project reads around an observation; only the send moved.
+
+The helper reads `mm`'s own signed-in session from `~/.metamask` and refuses before any network call when the session's
+project does not hash to the transfer's project hash, or when its selected server wallet is not the paying wallet. It
+then makes the SDK's own server-wallet call (`EvmServerAdapter.submitTransaction`, `@metamask/fox-sdk` 2.7.0). Its
+network policy admits exactly one request: a POST to `/v1/projects/<project>/transaction-requests` with the session's
+own token and exactly these bytes, which are what `mm` 6.1.5 sent for the same payload and intent:
+
+```json
+{"requestId":"<APN's UUID v4>","namespace":"evm","chainId":<chain>,
+ "tx":{"from":"<sender, lowercase>","to":"<USDC, lowercase>","chainId":<chain>,"data":"<transfer calldata>","value":"0x0",
+       "nonce":<nonce>,"gasLimit":"0x<gas>","maxFeePerGas":"0x<fee>","maxPriorityFeePerGas":"0x<priority fee>"},
+ "txIntent":"APN <operation-id>: <amount> atomic USDC to <recipient>"}
+```
+
+Another body, URL or token, or a second request, is refused before it leaves. The policy also checks the consent
+deadline at the request, and again once the TLS session is up, right before the request is written: nothing of it is
+handed to the socket while DNS, TCP or the handshake run. The exchange's timeout is the time left to the deadline (at
+most 15 seconds), so the request is destroyed at the deadline, written or not. The parent kills the helper at that
+deadline, as it killed the `mm` child.
+
+The helper also watches the APN command that spawned it. The first statement of its bootstrap records its parent's
+pid, before any other module loads. Every 100 ms, and right before a send's request is written, it checks that its
+parent has not changed. When the command died (and its operation lock with it), the helper exits, and the gate refuses
+a send with nothing written (`check: "parent_exited"`, `post: "not_reached"`). Not covered: a command that dies during
+Node's own startup of the helper, before that first statement, and a request already written when the command died.
+Either may still reach MetaMask, and the transfer stays `unknown` as recorded. The deadline gate bounds every send in
+all cases: nothing is written after the deadline, and the exchange ends there.
+
+It returns only bound fields of MetaMask's answer for this very request ID: its status, a transaction hash
+when there is one and, for `AWAITING_MFA`, the approval's `expiresAt` and the session's `authMethod`.
+
+The hand-off's answer decides the journal's state. A `pending` answer is not a state of its own: the journal records
+it as `unknown`, with no transaction hash.
+
+| MetaMask's answer | Hand-off answer | Journal `state` |
+| --- | --- | --- |
+| A transaction hash, status not `FAILED`, `BROADCAST_FAILED`, `DENIED` or `EXPIRED` | acknowledged | `acknowledged` |
+| `EVALUATING`, `AWAITING_MFA`, `SIGNING` or `BROADCASTING` with no hash | pending | `unknown`, with the owner's MFA task for `AWAITING_MFA` |
+| `FAILED`, `BROADCAST_FAILED`, `DENIED` or `EXPIRED`, or another status | unknown | `unknown`, with the hash when MetaMask named one |
+| No answer, a refusing HTTP status, an answer that names another request, the deadline, a helper timeout or exit | unknown | `unknown` |
+
+Every outcome after the effect marker keeps the request ID, so observe reads that request. The journal's `diagnostic`
+has stage `sdk_send`; its `code` is `ok` for an answer, otherwise `refused` (an HTTP refusal), `timeout`, `exit`,
+`start`, `deadline`, `protocol` or `internal`, and `providerCode` is `auth`, `policy`, `mfa`, `funds`, `rate_limit`,
+`other` or `none` from MetaMask's HTTP status and error code. None of them is proof that nothing was sent.
+
+`mm` read the wallet's native balance right before its own POST. The helper does not, and needs not: the last guard
+already reads the native and USDC balances and the nonce (`rpc_balance`), and the native balance must cover the quote's
+full maximum fee, which is at least the gas limit times the maximum fee per gas.
+
+**A command that ended after its marker.** The sending command holds the operation's lock from before the marker until
+it has recorded the outcome and moved the usage holds. When observe or resume later holds that lock and still finds the
+marker (`effect_started` with `handoffPath`), that command is gone. Before anything else it moves both holds that are
+still `reserved` to `unknown_finality` and records the transfer `unknown`, with `diagnostic.stage: "post_handoff"` and
+`code: "interrupted"`. Then it reads the request as for any `unknown` transfer: a transaction hash goes to receipt proof
+and settles the actual fee, `AWAITING_MFA` records the owner's task, and a 404 keeps the transfer `unknown` with its
+holds charged. `native-transfer-status` alone leaves such a marker as it is. A hold that is already `submitted` under
+such a marker moves to `unknown_finality` too.
+
+**A command that ended after its outcome.** The send records its outcome in the journal and then moves the usage holds,
+in this release and in every earlier one. A command that ended between the two left the transfer `acknowledged`,
+`unknown`, `confirmed` or `abandoned_unknown` with its holds still `reserved`, and settlement refuses such a hold ("no
+durable effect hold"). `native-transfer-status`, observe and resume hold the operation's lock, so that command is gone.
+Before any receipt or settlement they move each hold of the operation that is still `reserved` to the state the send
+would have written: `submitted` for `acknowledged`, else `unknown_finality`. Both keep the hold charged, so this never
+releases or settles usage; settlement still needs the receipt. A hold that already moved is left alone. A missing or
+changed hold is left as it is, so its settlement still refuses. No journal field changes, so a record any release wrote
+gets the same repair, and a second read does nothing.
+
+**A command that ended after `failed_before_effect`.** The send, and the close of a transfer whose consent passed before
+its marker, record `failed_before_effect` and then release the usage holds. A command that ended between the two left
+holds `reserved` that counted against the daily limit forever. `native-transfer-status`, observe and resume release
+them under the operation's lock: only for a journal `failed_before_effect` with no transaction hash (APN writes it only
+when nothing was handed off), only the two holds of that very operation, only from `reserved` and only when each matches
+the operation's quote, policy and amount. The release uses the send's own outcome digest. Any other hold is left as it
+is.
 
 States: `prepared`, `effect_started`, `acknowledged` and `unknown` are non-terminal; `confirmed`, `confirmed_reverted`,
 `failed_before_effect` and `abandoned_unknown` are terminal.
@@ -94,11 +180,13 @@ instead.
 
 ## The sealed request reference
 
-When MetaMask holds the transfer for the owner's MFA approval, the hand-off returns the MetaMask request ID that the
-approval waits on. APN keeps that ID encrypted. Right after the hand-off it seals the ID under the login-Keychain
-wrapping secret, with the same custody envelope as wallets and MetaMask x402 authorizations, in
-`metamask-native-request-references/<profile-hash>/<operation-id>.json`. Then it writes the journal, which keeps only
-the ID's hash (`providerRequestIdHash`, with `providerRequestId` null).
+The MetaMask request ID names the request that the owner's MFA approval waits on. APN keeps that ID encrypted. From
+0.5.108 APN names the ID itself after consent and seals it under the login-Keychain wrapping secret, with the same
+custody envelope as wallets and MetaMask x402 authorizations, in
+`metamask-native-request-references/<profile-hash>/<operation-id>.json`. Then it writes the effect marker, which keeps
+only the ID's hash (`providerRequestIdHash`, with `providerRequestId` null) and `handoffPath: "sdk_helper"`. Only then
+does the helper start. A seal or a marker that fails ends the transfer `failed_before_effect` with nothing sent. 0.5.107
+sealed the ID that the hand-off returned, right after the hand-off; those journals have no `handoffPath`.
 
 Output never shows the ID of such a transfer:
 
@@ -124,12 +212,13 @@ opened, the read is refused and nothing is read or written:
 The transfer keeps its state and its reserves. `native-transfer-status` and `apn operation status` never open the
 sealed ID and still answer. `apn operation abandon` still asks for consent after a refused observation.
 
-If the seal fails after the hand-off (the wrapping secret was read before consent, so only its write can fail), APN
-drops the ID, never keeps it in plaintext, and records everything else the hand-off returned, its transaction hash
-included. The journal then holds `providerRequestReason: "provider_request_reference_unsealed"` with no request, and the
-output shows `provider_request_reason`. A kept transaction hash is still observed on chain. Without one, observe reads
-nothing (`read_observation.reason: "provider_request_reference_unsealed"`) and the exit is
-`apn operation abandon` once the quote has expired.
+In 0.5.107, if the seal failed after the hand-off (the wrapping secret was read before consent, so only its write could
+fail), APN dropped the ID, never kept it in plaintext, and recorded everything else the hand-off returned, its
+transaction hash included. Such a journal holds `providerRequestReason: "provider_request_reference_unsealed"` with no
+request, and the output shows `provider_request_reason`. It still loads as written. A kept transaction hash is still
+observed on chain. Without one, observe reads nothing (`read_observation.reason: "provider_request_reference_unsealed"`)
+and the exit is `apn operation abandon` once the quote has expired. From 0.5.108 the seal comes before the hand-off, so
+this case no longer arises.
 
 APN never deletes a sealed request reference, not even after its transfer ends. Each counts as sealed custody, so after
 the first native transfer that sealed a request ID a lost wrapping secret refuses every command that would create a new
@@ -142,10 +231,28 @@ exactly as before, need no wrapping secret, and a read never rewrites them. APN 
 journal that holds `providerRequestIdHash` (`APN_STATE_CORRUPT`). Do not downgrade to 0.5.106 or earlier once such a
 transfer exists. A journal with no stored request stays readable by those releases.
 
+From its effect marker on, every transfer 0.5.108 or later writes holds `handoffPath`. APN 0.5.107 and earlier cannot
+read such a journal (`APN_STATE_CORRUPT`), so do not downgrade below 0.5.108 once one exists.
+
 ## Observing a pending MetaMask request
 
 When a transfer has a stored MetaMask request ID and no transaction hash, `native-transfer-observe` reads that request
 once. It never sends, signs or approves anything. A sealed request ID is opened first (see above).
+
+**A transfer 0.5.108 or later sent** (`handoffPath: "sdk_helper"`) is never in `mm`'s local request list. Its read is:
+
+1. `mm auth status` confirms the signed-in project. Its SHA-256 must equal the project hash stored with the transfer.
+2. The server read below reads the request by its exact ID.
+3. `mm auth status` confirms the project again.
+
+`read_observation.watch_returned` is then `false`, and `read_observation.server_read` is present once step 1 passed. A 404 is
+recorded as `metamask_request_not_found_on_server`; a refused read as `provider_request_read_unavailable`, with its
+reason in `server_read.reason`. A transfer whose command ended at its effect marker (`effect_started`) also names the
+observer. For `AWAITING_MFA` the read records the approval's `expiresAt` and the session's `auth_method`, as the send
+did. When MetaMask's answer names no `approval.expiresAt`, the task keeps the expiry it already holds for the same
+request, with the `evidence_hash` of the answer that named it.
+
+**A transfer 0.5.107 or earlier sent** (no `handoffPath`) is read as before:
 
 1. `mm auth status` confirms the signed-in project. Its SHA-256 must equal the project hash stored with the transfer.
 2. `mm wallet requests watch <request-id> --wallet-timeout 1` reads the request.
@@ -163,23 +270,25 @@ asks MetaMask. A new `mm login` starts that list empty. The watch then writes no
 
 None of them is proof. The transfer stays `unknown`, its reserves stay charged, and APN never sends it again.
 
-**Server read.** After `metamask_request_not_in_local_state`, and only then, APN reads the request from MetaMask's
-server by its exact stored ID, between steps 2 and 3. The watch stays the first read, so every other answer is recorded
-as before. The read uses the sandboxed helper of the MetaMask gasless lane
+**Server read.** For a transfer 0.5.107 or earlier sent, after `metamask_request_not_in_local_state`, and only then, APN
+reads the request from MetaMask's server by its exact stored ID, between steps 2 and 3. The watch stays the first read,
+so every other answer is recorded as before. For a transfer 0.5.108 or later sent, it is step 2. The read uses the
+sandboxed helper of the MetaMask gasless lane
 ([gasless.md](gasless.md)): it uses `mm`'s own signed-in session from `~/.metamask`, and its network policy admits one
 GET of this request's status in the session's project only.
 
 - The session's project ID must hash to the project hash stored with the transfer. Another project refuses with
   `metamask_session_project_changed` before anything is read.
-- The stored request ID must be a canonical UUID v4, the form `mm` gives its request IDs. Another form refuses with
-  `provider_request_binding_invalid`.
+- The stored request ID must be a canonical UUID v4, the form `mm` and APN give their request IDs. Another form refuses
+  with `provider_request_binding_invalid`.
 - The answer must name this request ID, kind `transaction`, `tx.from` equal to the transfer's sender and `tx.chainId`
   equal to its chain. A transaction hash, when present, must be 32 bytes of lowercase hex.
 
 A verified answer is recorded exactly as a `requests watch` answer of the same request: a transaction hash moves the
-transfer to receipt proof, `AWAITING_MFA` records the owner's approval task as a watch status does (its `expires_at`
-and `auth_method` are null), and `EXPIRED` or `DENIED` gives the same next actions as a watch. A 404 is recorded as
-`metamask_request_not_found_on_server`. A refused read keeps `metamask_request_not_in_local_state`.
+transfer to receipt proof, `AWAITING_MFA` records the owner's approval task as a watch status does, and `EXPIRED` or
+`DENIED` gives the same next actions as a watch. After a watch (a transfer 0.5.107 or earlier sent), the task's
+`expires_at` and `auth_method` are null, as before. A 404 is recorded as
+`metamask_request_not_found_on_server`. After a watch, a refused read keeps `metamask_request_not_in_local_state`.
 
 `read_observation.server_read` is present only when the server read ran:
 

@@ -1,28 +1,12 @@
 import type { ProjectWalletFacts, ReadNetwork, RelaySupportFacts, UsdcShortfallFacts } from "./read-diagnostic.js";
 import { type SubmitCheck, type SubmitPost } from "./submit-diagnostic.js";
 import { type SentinelFailure } from "./sentinel.js";
+import { type FetchExchange } from "./https-exchange.js";
 import type { MetaMaskGaslessProviderIntent, MetaMaskGaslessQuote } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
 import type { MetaMaskServerRequestQuery } from "./server-request.js";
-export interface FetchExchangeRequest {
-    readonly url: string;
-    readonly method: "GET" | "POST";
-    readonly headers: Readonly<Record<string, string>>;
-    readonly body: string | null;
-    readonly signal?: AbortSignal;
-    readonly maxBytes: number;
-    readonly timeoutMs: number;
-    /** Internal final gate used by the production transport immediately before bytes leave the process. */
-    readonly beforeSend?: () => void;
-}
-export interface FetchExchangeResponse {
-    readonly status: number;
-    readonly headers?: Readonly<Record<string, string>>;
-    readonly body: string;
-}
-export interface FetchExchange {
-    request(request: FetchExchangeRequest): Promise<FetchExchangeResponse>;
-}
+import { type MetaMaskServerTransactionInput } from "./server-transaction.js";
+export type { FetchExchange, FetchExchangeRequest, FetchExchangeResponse } from "./https-exchange.js";
 export type ModeContext = {
     readonly mode: "inspect" | "buildUnsigned";
 } | {
@@ -42,11 +26,20 @@ export type ModeContext = {
     readonly query: MetaMaskServerRequestQuery;
     readonly projectId: string;
     readonly token: string;
+}
+/** One server-wallet transaction request with APN's own id: its one POST, whose body is fully fixed by the input. */
+ | {
+    readonly mode: "submitTransaction";
+    readonly input: MetaMaskServerTransactionInput;
+    readonly projectId: string;
+    readonly token: string;
+    readonly now: () => Date;
 };
 export declare class HelperNetworkPolicy {
     #private;
     private readonly context;
     private readonly exchange;
+    private readonly parentAlive?;
     readonly fetch: typeof globalThis.fetch;
     private readonly counts;
     private readonly successes;
@@ -63,6 +56,8 @@ export declare class HelperNetworkPolicy {
         readonly providerError: string | null;
     };
     private submitRefused;
+    /** The two modes whose one POST may create a provider request: the gasless relay submit and a server transaction. */
+    private sends;
     /** Closed facts of the two validated relay inventories for the quoted chain, once both were read. */
     relaySupportFacts(): RelaySupportFacts | undefined;
     /**
@@ -75,11 +70,15 @@ export declare class HelperNetworkPolicy {
     projectWalletFacts(): ProjectWalletFacts | undefined;
     /** Transient fixed metadata, never response content or permission. */
     readFailureContext(error: unknown): ReadFailure;
-    constructor(context: ModeContext, exchange?: FetchExchange);
+    /**
+     * `parentAlive`: whether the APN command that spawned this helper still runs. The helper process always passes it
+     * (helper-entry.ts); an in-process run has no parent process to watch and passes none.
+     */
+    constructor(context: ModeContext, exchange?: FetchExchange, parentAlive?: (() => boolean) | undefined);
     /** Only the exact failed original quote exchange may supply this private one-use capture. */
     takeSponsoredQuote(error: unknown): MetaMaskGaslessQuote | undefined;
     didObserveNotFound(): boolean;
-    /** The SHA-256 of the server request read's 2xx answer bytes, once it came; never the answer itself. */
+    /** The SHA-256 of the 2xx answer bytes of the server request read or transaction POST, once it came; never the answer itself. */
     requestBodyHash(): string | undefined;
     fixedFailure(): "mm_gasless_expired" | "mm_gasless_clock" | "mm_gasless_session_unavailable" | undefined;
     setExpectedSubmitBody(value: unknown): void;
@@ -91,19 +90,26 @@ export declare class HelperNetworkPolicy {
     private recordRelayFacts;
     /** Both bodies already passed `validateResponse`; only the owner's balance word and the matching fee entry are read. */
     private recordUsdcFacts;
+    /**
+     * The send's own deadline (a gasless intent's, a server transaction's), checked at the request and right before its bytes
+     * go. Returns the milliseconds left to it, or `undefined` in a mode that sends nothing.
+     */
     private assertSubmitDeadline;
     private classify;
+    /**
+     * One POST to the session project's transaction-request collection, with the session's own bearer token and exactly
+     * the bytes `serverTransactionBody` fixes for the input (request id, chain, tx and intent); any other request,
+     * body or second request is refused before it can leave.
+     */
+    private classifyServerTransaction;
 }
 interface ReadFailure extends Partial<SentinelFailure> {
     readonly network: ReadNetwork;
     readonly httpStatus: number | null;
     readonly validationFailed: boolean;
 }
-export declare class HttpsFetchExchange implements FetchExchange {
-    request(request: FetchExchangeRequest): Promise<FetchExchangeResponse>;
-}
 export declare function networkContextQuote(input: MetaMaskGaslessQuoteInput, owner: string, authToken: string, projectId: string): ModeContext;
 export declare function networkContextRequest(mode: "submit" | "observe", intent: MetaMaskGaslessProviderIntent, projectId: string, token: string, now: () => Date): ModeContext;
 export declare function networkContextEmpty(mode: "inspect" | "buildUnsigned"): ModeContext;
 export declare function networkContextServerRequest(query: MetaMaskServerRequestQuery, projectId: string, token: string): ModeContext;
-export {};
+export declare function networkContextServerTransaction(input: MetaMaskServerTransactionInput, projectId: string, token: string, now: () => Date): ModeContext;

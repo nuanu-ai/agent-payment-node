@@ -18,21 +18,23 @@ export interface MetaMaskNativeVendorPolicy {
 export interface MetaMaskNativeMfaEvidence extends MetaMaskMfaNotice {
     readonly evidenceHash: string;
 }
+/**
+ * The hand-off's outcome. The MetaMask request id is APN's own, sealed and named by its hash in the effect marker
+ * before the send, so no outcome carries it: `pending` adds the owner's MFA window when MetaMask waits on it.
+ */
 export type MetaMaskNativeSubmission = ({
     readonly disposition: "acknowledged";
     readonly transactionHash: Hex;
-    readonly requestId?: never;
+    readonly mfa?: never;
 } | {
     readonly disposition: "pending";
-    readonly requestId: string;
     readonly transactionHash?: never;
     readonly mfa?: MetaMaskNativeMfaEvidence;
 } | {
     readonly disposition: "unknown";
     readonly reason: string;
     readonly transactionHash?: Hex;
-    readonly requestId?: string;
-    readonly mfa?: MetaMaskNativeMfaEvidence;
+    readonly mfa?: never;
 }) & {
     readonly diagnostic?: MetaMaskNativeDiagnostic;
 };
@@ -44,12 +46,17 @@ export type MetaMaskNativeSubmission = ({
 export type MetaMaskNativeRefusal = "metamask_native_chain_unsupported" | "metamask_vendor_read_failed" | "metamask_session_required" | "metamask_session_project_changed" | "metamask_guard_mode_required" | "metamask_wallet_mismatch" | "metamask_guard_policy_missing";
 /** Normal vendor CLI reads only; no policy mutation or remote rolling-usage prediction. */
 export declare function readMetaMaskNativeVendorPolicy(chainId: MetaMaskNativeFeeChainId, payer: Address, recipient: Address, deadline?: MetaMaskNativeDeadlineInput, profile?: string): Promise<MetaMaskNativeVendorPolicy>;
-/** A failure before the vendor child process was spawned: nothing was handed to the vendor. */
+/** A failure before the sandboxed helper was spawned: nothing was handed to MetaMask. */
 export declare class MetaMaskNativeHandoffNotStarted extends Error {
     readonly causeError: unknown;
     constructor(causeError: unknown);
 }
-/** Owner alone persists the one-effect handoff marker before this statically bound call. */
+/**
+ * Owner alone seals the request id and persists the one-effect handoff marker naming its hash before this statically
+ * bound call. The request goes out once, from mm's own signed-in session, through the sandboxed MetaMask helper the
+ * gasless lane uses (metamask-server-transaction.ts): the very request `mm wallet send-transaction` sent for the same
+ * payload and intent, with APN's own id in place of the one mm would have generated.
+ */
 export declare function submitOwnedMetaMaskNative(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): Promise<MetaMaskNativeSubmission>;
 /** Transient read evidence only. No field grants financial authority or changes a held journal. */
 export interface MetaMaskNativeReadObservation {
@@ -68,7 +75,10 @@ export interface MetaMaskNativeReadObservation {
     readonly reason: string | null;
     readonly error_code: "APN_OPERATION_BLOCKED" | "APN_PROVIDER_PROTOCOL" | "APN_PROVIDER_UNAVAILABLE" | "APN_STATE_CORRUPT" | "unavailable" | null;
     readonly diagnostic: MetaMaskNativeDiagnostic | null;
-    /** Present only when the watch answered `metamask_request_not_in_local_state` and APN read the request from MetaMask's server. */
+    /**
+     * Present only when APN read the request from MetaMask's server: for a request APN sent itself (0.5.108 and later,
+     * which mm's local request list never holds), or when the watch answered `metamask_request_not_in_local_state`.
+     */
     readonly server_read?: MetaMaskNativeServerReadObservation;
 }
 /**
@@ -112,6 +122,13 @@ export type MetaMaskNativeRequestObservation = RequestHint & {
  * policy is read around it. When the watch answers that mm's own local request list no longer holds the request (a
  * new `mm login` starts that list empty) and the owner supplies the transfer's sender and chain, the request is read
  * once from MetaMask's server instead, inside the same project bracket; that read never sends, signs or approves.
+ * This is the read of a request `mm wallet send-transaction` sent (a record 0.5.107 or earlier wrote).
  */
 export declare function readMetaMaskNativeRequest(requestId: string, vendorProjectHash: string, binding?: MetaMaskNativeRequestBinding): Promise<MetaMaskNativeRequestObservation>;
+/**
+ * The read of a request APN sent itself through the helper (0.5.108 and later): mm's local request list never holds it,
+ * so no watch runs. The request is read once from MetaMask's server by its exact id, inside the same project bracket
+ * (the session project before and after, two vendor processes), and classified as a watch answer would be.
+ */
+export declare function readMetaMaskNativeSdkRequest(requestId: string, vendorProjectHash: string, binding: MetaMaskNativeRequestBinding): Promise<MetaMaskNativeRequestObservation>;
 export {};

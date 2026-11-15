@@ -1,6 +1,7 @@
 import { ApnError } from "./errors.js";
 declare const NATIVE_DIAGNOSTIC_STAGES: readonly ["sdk_resolver", "sdk_read", "sdk_send", "owner_guard", "rpc_balance", "rpc_nonce", "post_handoff"];
-declare const NATIVE_DIAGNOSTIC_CODES: readonly ["ok", "deadline", "refused", "timeout", "exit", "signal", "protocol", "start", "internal"];
+/** `interrupted` (0.5.108): the sending command ended after its effect marker before it recorded the hand-off's outcome. */
+declare const NATIVE_DIAGNOSTIC_CODES: readonly ["ok", "deadline", "refused", "timeout", "exit", "signal", "protocol", "start", "internal", "interrupted"];
 export interface MetaMaskNativeDiagnostic {
     readonly stage: typeof NATIVE_DIAGNOSTIC_STAGES[number];
     readonly code: typeof NATIVE_DIAGNOSTIC_CODES[number];

@@ -71,6 +71,13 @@ export interface MetaMaskNativeOperation {
    */
   readonly providerRequestIdHash?: string;
   /**
+   * How the request left, in a record 0.5.108 or later wrote: `sdk_helper`, APN named the request id itself, sealed it and
+   * wrote this effect marker with its hash before the sandboxed MetaMask helper sent it; mm's local request list never
+   * holds it, so it is read from MetaMask's server by its id. Absent from every earlier record, whose request was handed
+   * to `mm wallet send-transaction` and is read with `mm wallet requests watch` first.
+   */
+  readonly handoffPath?: typeof METAMASK_NATIVE_SDK_HANDOFF;
+  /**
    * Why a record a later release wrote keeps no request although the hand-off returned one: the id could not be sealed
    * after the hand-off, so it was dropped, never kept in plaintext. Everything else the hand-off returned is kept.
    */
@@ -83,8 +90,10 @@ export interface MetaMaskNativeOperation {
   readonly recordHash: string;
 }
 export const METAMASK_NATIVE_OPERATION_SCHEMA = V2;
-/** The only `providerRequestReason`: the hand-off returned a request id that could not be sealed. */
+/** The only `providerRequestReason`: the hand-off of a 0.5.107 record returned a request id that could not be sealed. */
 export const METAMASK_NATIVE_REQUEST_UNSEALED = "provider_request_reference_unsealed";
+/** The only `handoffPath`: the request APN named, sealed and journaled before the sandboxed helper sent it (0.5.108+). */
+export const METAMASK_NATIVE_SDK_HANDOFF = "sdk_helper";
 
 /**
  * The owner's MetaMask approval this transfer waits on: a verified AWAITING_MFA notice (or request status) for its own
@@ -134,7 +143,7 @@ const instant = (value: unknown): boolean => typeof value === "string" && Number
 
 /** Checked against the record's own seal and fields only (R2): a changed constant or a moved APN home never voids it. */
 function validateOperation(value: unknown): MetaMaskNativeOperation {
-  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion","operationId","requestHash","context","reservations","state","effectAttempts","transactionHash","providerRequestId","receiptEvidence","createdAt","updatedAt","recordHash",...(value.diagnostic===undefined?[]:["diagnostic"]),...(value.mfaTask===undefined?[]:["mfaTask"]),...(value.providerRequestIdHash===undefined?[]:["providerRequestIdHash"]),...(value.providerRequestReason===undefined?[]:["providerRequestReason"])])) corrupt("Native transfer journal schema is invalid.");
+  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion","operationId","requestHash","context","reservations","state","effectAttempts","transactionHash","providerRequestId","receiptEvidence","createdAt","updatedAt","recordHash",...(value.diagnostic===undefined?[]:["diagnostic"]),...(value.mfaTask===undefined?[]:["mfaTask"]),...(value.providerRequestIdHash===undefined?[]:["providerRequestIdHash"]),...(value.providerRequestReason===undefined?[]:["providerRequestReason"]),...(value.handoffPath===undefined?[]:["handoffPath"])])) corrupt("Native transfer journal schema is invalid.");
   const o = value as unknown as MetaMaskNativeOperation, { recordHash, ...body } = o, v2 = o.schemaVersion === V2, c = o.context;
   if ((o.schemaVersion !== V1 && !v2) || recordHash !== hashObject(body)) corrupt("Native transfer journal schema is invalid.");
   if (o.diagnostic !== undefined) validateMetaMaskNativeDiagnostic(o.diagnostic);
@@ -171,6 +180,9 @@ function validateOperation(value: unknown): MetaMaskNativeOperation {
   // A request whose id could not be sealed is named by nothing: no id, no hash, no MFA task.
   if (o.providerRequestReason !== undefined && (o.providerRequestReason !== METAMASK_NATIVE_REQUEST_UNSEALED || o.providerRequestId !== null ||
     o.providerRequestIdHash !== undefined || o.mfaTask !== undefined || o.effectAttempts !== 1)) corrupt("Native transfer provider request reason is invalid.");
+  // A helper hand-off is written with its sealed request's hash in the very effect marker, and never with an id or reason.
+  if (o.handoffPath !== undefined && (o.handoffPath !== METAMASK_NATIVE_SDK_HANDOFF || o.effectAttempts !== 1 || o.providerRequestIdHash === undefined ||
+    o.providerRequestId !== null || o.providerRequestReason !== undefined)) corrupt("Native transfer hand-off path is invalid.");
   validateMfaTask(o);
   return o;
 }
@@ -231,6 +243,8 @@ export class MetaMaskNativeJournal extends SecureStateStore {
       old.diagnostic !== undefined && canonicalJson(old.diagnostic) !== canonicalJson(next.diagnostic) || old.createdAt !== next.createdAt || old.effectAttempts > next.effectAttempts || old.transactionHash !== null && old.transactionHash !== next.transactionHash ||
       old.providerRequestIdHash !== undefined && old.providerRequestIdHash !== next.providerRequestIdHash ||
       old.providerRequestReason !== undefined && old.providerRequestReason !== next.providerRequestReason ||
+      // The hand-off path is named by the effect marker itself (0 to 1 attempts), and never changes or appears later.
+      old.handoffPath !== next.handoffPath && (old.handoffPath !== undefined || old.effectAttempts !== 0) ||
       RESOLVED.includes(old.state))) blocked("Native transfer journal cannot replace an existing outcome.");
     await this.ensureDirectory(DIRECTORY);
     await this.writeJson(`${DIRECTORY}/${next.operationId}.json`, next, old === null);
@@ -304,8 +318,10 @@ function publicMfaTask(o: MetaMaskNativeOperation, now: Date) {
 
 export function publicMetaMaskNativeOperation(o: MetaMaskNativeOperation, now = new Date()) {
   const receipt = o.receiptEvidence === null ? null : validateMetaMaskNativeFeeReceipt(o.receiptEvidence, o.context.quote), transfer = metaMaskNativeQuoteTransfer(o.context.quote);
-  // Only an outcome that a no-send observation can still move (a stored request or transaction) names the observer.
-  const observable = ["acknowledged", "unknown"].includes(o.state) && (o.transactionHash !== null || metaMaskNativeHasRequest(o));
+  // Only an outcome that a no-send observation can still move (a stored request or transaction) names the observer. A
+  // helper hand-off whose command ended at its effect marker still names its sealed request (0.5.108 and later).
+  const observable = (["acknowledged", "unknown"].includes(o.state) || o.state === "effect_started" && o.handoffPath !== undefined) &&
+    (o.transactionHash !== null || metaMaskNativeHasRequest(o));
   return { operation_id: o.operationId, state: o.state === "confirmed" && receipt?.transferAccepted === false ? "confirmed_reverted" : o.state, chain_id: o.context.quote.chainId, profile: o.context.profile,
     sender: o.context.quote.sender, recipient: transfer.recipient, token: o.context.quote.token, usdc_atomic: transfer.amountAtomic, usdc: formatAtomic(transfer.amountAtomic, 6),
     maximum_native_fee_atomic: o.context.quote.feeQuote.totalQuoteWei, transaction_hash: o.transactionHash,

@@ -5,10 +5,11 @@ import { spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mmClassify, mmError, mmFail } from "../reasons.js";
-import { helperResponse, MM_HELPER_VERSION } from "./protocol.js";
+import { helperResponse, helperSends, MM_HELPER_VERSION } from "./protocol.js";
 import { withMetaMaskProviderRefusal } from "./provider-refusal.js";
 const MAX_IO = 1024 * 1024;
 const HELPER_ENTRY = fileURLToPath(new URL("./helper-bootstrap.js", import.meta.url));
+const READ_TIMEOUT_MS = 60_000, SUBMIT_TIMEOUT_MS = 120_000;
 export class MetaMaskGaslessProviderClient {
     environment;
     clock;
@@ -19,27 +20,34 @@ export class MetaMaskGaslessProviderClient {
         this.runner = options.runner ?? new SubprocessMetaMaskGaslessHelperRunner();
     }
     inspect(expected) {
-        return this.invoke({ version: MM_HELPER_VERSION, mode: "inspect", expected });
+        return this.invoke({ version: MM_HELPER_VERSION, mode: "inspect", expected }, READ_TIMEOUT_MS);
     }
     quote(input) {
-        return this.invoke({ version: MM_HELPER_VERSION, mode: "quote", input });
+        return this.invoke({ version: MM_HELPER_VERSION, mode: "quote", input }, READ_TIMEOUT_MS);
     }
     buildUnsigned(input) {
-        return this.invoke({ version: MM_HELPER_VERSION, mode: "buildUnsigned", input });
+        return this.invoke({ version: MM_HELPER_VERSION, mode: "buildUnsigned", input }, READ_TIMEOUT_MS);
     }
     async submit(intent) {
         assertBeforeDeadline(intent.expiresAt, this.clock.now());
-        return await this.invoke({ version: MM_HELPER_VERSION, mode: "submit", intent });
+        return await this.invoke({ version: MM_HELPER_VERSION, mode: "submit", intent }, SUBMIT_TIMEOUT_MS);
     }
     observe(intent) {
-        return this.invoke({ version: MM_HELPER_VERSION, mode: "observe", intent });
+        return this.invoke({ version: MM_HELPER_VERSION, mode: "observe", intent }, READ_TIMEOUT_MS);
     }
     /** A native transfer's server-wallet request by its exact id, in the same sandboxed helper (client/server-request.ts). */
     readServerRequest(query) {
-        return this.invoke({ version: MM_HELPER_VERSION, mode: "readRequest", query });
+        return this.invoke({ version: MM_HELPER_VERSION, mode: "readRequest", query }, READ_TIMEOUT_MS);
     }
-    async invoke(request) {
-        const timeoutMs = request.mode === "submit" ? 120_000 : 60_000;
+    /**
+     * One server-wallet transaction request with APN's own id, sent once by the same sandboxed helper
+     * (client/server-transaction.ts) and killed after `timeoutMs`: the native transfer's consent deadline, or the revoke's
+     * submit bound. A failure carries the submit's closed diagnostic; once the helper may have started, it is never a refusal.
+     */
+    submitServerTransaction(transaction, timeoutMs) {
+        return this.invoke({ version: MM_HELPER_VERSION, mode: "submitTransaction", transaction }, timeoutMs);
+    }
+    async invoke(request, timeoutMs) {
         let raw;
         try {
             raw = await this.runner.run(request, { environment: this.environment, timeoutMs });
@@ -49,7 +57,7 @@ export class MetaMaskGaslessProviderClient {
                 throw readFailureError("mm_gasless_provider_unavailable", takeReadRunnerDiagnostic(error, request.mode) ?? readDiagnostic(request.mode, "launch", "runner_launch"));
             // A runner that did not say whether its helper started may have let the POST out. From a runner only its own two
             // shapes count: refused before launch, or failed after it with the POST unknown.
-            if (request.mode === "submit") {
+            if (helperSends(request.mode)) {
                 const own = takeSubmitDiagnostic(error);
                 throw submitFailureError("mm_gasless_submit_unknown", own !== undefined && (own.stage === "launch" || own.stage === "runner") ? own
                     : runnerDiagnostic("runner_launch", true));
@@ -63,7 +71,7 @@ export class MetaMaskGaslessProviderClient {
         catch (error) {
             if (request.mode === "inspect" || request.mode === "quote")
                 throw readFailureError(mmClassify(error, "mm_gasless_provider_unavailable").reason, readDiagnostic(request.mode, "helper_response", "response_invalid"));
-            if (request.mode === "submit")
+            if (helperSends(request.mode))
                 throw submitFailureError(mmClassify(error, "mm_gasless_submit_unknown").reason, runnerDiagnostic("response_invalid", true));
             throw error;
         }
@@ -85,7 +93,7 @@ export class SubprocessMetaMaskGaslessHelperRunner {
     async run(request, options) {
         // Only a refusal before spawn proves the helper never ran; after spawn its POST may have left.
         const failure = (invariant, code = null, signal = null, started = true) => request.mode === "inspect" || request.mode === "quote" ? readRunnerFailure(request.mode, invariant, code, signal)
-            : request.mode === "submit" ? submitFailureError("mm_gasless_submit_unknown", runnerDiagnostic(invariant, started))
+            : helperSends(request.mode) ? submitFailureError("mm_gasless_submit_unknown", runnerDiagnostic(invariant, started))
                 : new Error("helper failed");
         if (!isAbsolute(process.execPath) || !isAbsolute(HELPER_ENTRY) || !Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1) {
             throw failure("runner_launch", null, null, false);

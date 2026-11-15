@@ -27,7 +27,7 @@ const metaMaskNativeTransferData=(to:`0x${string}`,amount:string)=>encodeFunctio
 mock.module("../../src/metamask-package.js", {namedExports: {resolveMetaMaskBin: async () => "/test-only-pinned-package"}});
 /** The runner diagnostic the next failed read carries, as the real runner attaches it to its error (one use). */
 let nextRunnerDiagnostic: unknown;
-mock.module("../../src/metamask-process-runner.js", {namedExports: {takeMetaMaskNativeProcessFailureDiagnostic: () => { const d = nextRunnerDiagnostic; nextRunnerDiagnostic = undefined; return d; }, takeMetaMaskNativeProcessFailureIdentifiers: () => undefined, NodeMetaMaskProcessRunner: class {
+mock.module("../../src/metamask-process-runner.js", {namedExports: {takeMetaMaskNativeProcessFailureDiagnostic: () => { const d = nextRunnerDiagnostic; nextRunnerDiagnostic = undefined; return d; }, NodeMetaMaskProcessRunner: class {
   async runJson(argv:readonly string[], timeout?:number) {
     calls.push({argv, ...(timeout === undefined ? {} : {timeout})});
     if(readFailure&&calls.length===readFailureAt){const failure=readFailure;readFailure=undefined;throw failure;}
@@ -36,9 +36,15 @@ mock.module("../../src/metamask-process-runner.js", {namedExports: {takeMetaMask
 }}});
 mock.module("../../src/metamask-native-transfer-owner.js", {namedExports: {
   claimMetaMaskNativeOwnedScope: () => {if (!allowTransport) throw new Error("unowned");},
+  metaMaskNativeOwnedRequestId: () => RID,
   assertMetaMaskNativeOwnedScope: (_s:unknown,c:MetaMaskNativeOwnedContext) => ({utcExpiresAt:c.consentExpiresAt,monotonicDeadlineMs:performance.now()+Date.parse(c.consentExpiresAt)-Date.now()}),
   assertMetaMaskNativeOwnedContextCurrent: async (_scope:unknown,ctx:MetaMaskNativeOwnedContext) => {currentChecks++; if (rejectAfterHandoff && currentChecks === 2) throw new Error("expired");const p=await readMetaMaskNativeVendorPolicy(ctx.quote.chainId,ctx.quote.sender,RECIPIENT,ctx.consentExpiresAt);assert.equal(p.vendorProjectHash,ctx.vendorProjectHash);assert.equal(p.vendorPolicyHash,ctx.vendorPolicyHash);},
 }});
+// No test here may reach the hand-off: every send refuses in its last guard, before the helper could start.
+const realSend = await import("../../src/metamask-server-transaction.js");
+let handoffs = 0;
+mock.module("../../src/metamask-server-transaction.js", {namedExports: {...realSend,
+  sendMetaMaskServerTransaction: async () => { handoffs += 1; return {kind: "unknown", reason: "provider_handoff_outcome_unknown"}; }}});
 const {readMetaMaskNativeVendorPolicy, submitOwnedMetaMaskNative, readMetaMaskNativeRequest} = await import("../../src/metamask-native-transfer-adapter.js");
 function result(data:unknown, exitCode=0) {const stdout=Buffer.from(JSON.stringify({ok:true,data})); buffers.push(stdout); return {exitCode,stdout};}
 function setup() {readFailureAt=1;readFailure=undefined;queue=[];calls=[];buffers.length=0;allowTransport=false;currentChecks=0;rejectAfterHandoff=false;}
@@ -57,7 +63,7 @@ function context(policy=POLICY):MetaMaskNativeOwnedContext {
   return {profile:"qa-mm-wallet",profileHash:"1".repeat(64),accountBindingHash:"2".repeat(64),capabilityHash:"3".repeat(64),profileRevision:1,policyDigest:"4".repeat(64),policyRevision:1,activationDigest:"5".repeat(64),vendorPolicyHash:sha256(policy),vendorProjectHash:PROJECT_HASH,quote,operationId:"6".repeat(64),consentExpiresAt:new Date(now.getTime()+60000).toISOString(),issuedDay:now.toISOString().slice(0,10)};
 }
 const scope = {} as MetaMaskNativeOwnedScope;
-const noSend = () => calls.every(c=>c.argv[1]!=="send-transaction");
+const noSend = () => handoffs === 0 && calls.every(c=>c.argv[1]!=="send-transaction");
 
 test("three vendor reads confirm the session project, Guard mode and a policy that admits this payer, chain and recipient", async () => {
  setup();policyQueue();const value=await readMetaMaskNativeVendorPolicy(1,PAYER,RECIPIENT);
@@ -100,24 +106,10 @@ test("byte changes that keep the meaning still admit: whitespace, comments, key 
   setup();policyQueue({policy});assert.equal((await readMetaMaskNativeVendorPolicy(1,PAYER,RECIPIENT)).vendorPolicyHash,sha256(policy));
  }
 });
-test("the transport constructs only the exact type-2 ERC20 payload, names the transfer in its intent and returns an acknowledgement",async()=>{
- setup();allowTransport=true;policyQueue();queue.push(result({mode:"server",address:PAYER,hash:TX}));const ctx=context();
- assert.deepEqual(await submitOwnedMetaMaskNative(scope,ctx),{disposition:"acknowledged",transactionHash:TX});
- const child=calls.find(c=>c.argv[1]==="send-transaction")!;const payload=JSON.parse(child.argv[child.argv.indexOf("--payload")+1]!);
- assert.deepEqual(payload,{to:ctx.quote.token,data:ctx.quote.transaction.data,value:"0x0",gas:"0xfde8",nonce:"0x7",maxFeePerGas:"0xc8",maxPriorityFeePerGas:"0x2"});
- assert.equal(child.argv[child.argv.indexOf("--intent")+1],`APN ${ctx.operationId}: 2500 atomic USDC to ${RECIPIENT}`);
- assert.equal(calls.length,4);assert.ok(calls.every(c=>c.timeout!==undefined&&c.timeout>0&&c.timeout<=60000));assert.ok(buffers.every(b=>b.every(byte=>byte===0)));
-});
 test("counterfeit transport scope refuses before child through the statically imported claim gate",async()=>{setup();await assert.rejects(submitOwnedMetaMaskNative(scope,context()));assert.equal(calls.length,0);});
-test("a hand-off that returned a hash is acknowledged: no owner guard re-runs after the effect",async()=>{setup();allowTransport=true;rejectAfterHandoff=true;policyQueue();queue.push(result({mode:"server",address:PAYER,hash:TX}));const value=await submitOwnedMetaMaskNative(scope,context());assert.deepEqual(value,{disposition:"acknowledged",transactionHash:TX});assert.equal(currentChecks,1);assert.equal(calls.filter(c=>c.argv[1]==="send-transaction").length,1);});
-test("nonzero provider exit preserves returned hash without claiming acknowledgement",async()=>{setup();allowTransport=true;policyQueue();queue.push(result({mode:"server",address:PAYER,hash:TX},1));const value=await submitOwnedMetaMaskNative(scope,context());assert.equal(value.disposition,"unknown");assert.equal("transactionHash" in value&&value.transactionHash,TX);});
-test("returned hash casing is canonicalized for the immutable owner journal",async()=>{setup();allowTransport=true;policyQueue();queue.push(result({mode:"server",address:PAYER,hash:`0x${"A".repeat(64)}`}));assert.deepEqual(await submitOwnedMetaMaskNative(scope,context()),{disposition:"acknowledged",transactionHash:TX});});
-test("nonzero provider exit preserves returned request ID as UNKNOWN",async()=>{setup();allowTransport=true;policyQueue();queue.push(result({mode:"server",address:PAYER,status:"AWAITING_MFA",pollingId:RID},1));const value=await submitOwnedMetaMaskNative(scope,context());assert.equal(value.disposition,"unknown");assert.equal("requestId" in value&&value.requestId,RID);});
-test("a hand-off that returned a pending request keeps its request ID, with no guard after the effect",async()=>{setup();allowTransport=true;rejectAfterHandoff=true;policyQueue();queue.push(result({mode:"server",address:PAYER,status:"AWAITING_MFA",pollingId:RID}));const value=await submitOwnedMetaMaskNative(scope,context());assert.notEqual(value.disposition,"acknowledged");assert.equal("requestId" in value&&value.requestId,RID);assert.equal(currentChecks,1);});
-test("late ambiguous response has UNKNOWN outcome and no automatic resend",async()=>{setup();allowTransport=true;policyQueue();queue.push({exitCode:1,stdout:Buffer.from("malformed")});const value=await submitOwnedMetaMaskNative(scope,context());assert.equal(value.disposition,"unknown");assert.equal(calls.filter(c=>c.argv[1]==="send-transaction").length,1);});
-test("a send result naming another wallet is never acknowledged",async()=>{setup();allowTransport=true;policyQueue();queue.push(result({mode:"server",address:RECIPIENT,hash:TX}));const value=await submitOwnedMetaMaskNative(scope,context());assert.equal(value.disposition,"unknown");});
 test("the vendor policy changing between prepare and send refuses before the financial child",async()=>{setup();allowTransport=true;policyQueue({policy:POLICY+"# edited\n"});await assert.rejects(submitOwnedMetaMaskNative(scope,context()));assert.ok(noSend());});
 
+// The hand-off itself (0.5.108: the sandboxed helper's one POST) is covered by metamask-native-sdk-send.test.ts.
 // These request reads never authorize a financial effect or settlement.
 test("empty project metadata refuses unsigned",async()=>{setup();policyQueue({project:""});await assert.rejects(readMetaMaskNativeVendorPolicy(1,PAYER,RECIPIENT));assert.equal(calls.length,1);});
 // Each failed vendor invariant names itself and the owner's next step;
@@ -201,14 +193,6 @@ test("a notice-only watch is the owner's MFA task for this very request: pending
 test("a notice for another request, or a project that changed around the watch, keeps no task",async()=>{setup();noticeWatch(mfaNotice("other-request"));const other=await readMetaMaskNativeRequest(RID,PROJECT_HASH);assert.equal(other.disposition==="unknown"&&other.reason,"provider_request_identity_conflict");assert.ok(!("mfa" in other));
  setup();noticeWatch(mfaNotice(),"different-project");const drift=await readMetaMaskNativeRequest(RID,PROJECT_HASH);assert.equal(drift.disposition==="unknown"&&drift.reason,"provider_request_read_guard_changed_or_unavailable");assert.ok(!("mfa" in drift));
  setup();noticeWatch(JSON.stringify({_notice:{kind:"AWAITING_MFA",pollingId:RID,expiresAt:"tomorrow",authMethod:"Social Login"}}));const loose=await readMetaMaskNativeRequest(RID,PROJECT_HASH);assert.equal(loose.disposition,"pending");assert.deepEqual(loose.disposition==="pending"&&{...loose.mfa,evidenceHash:null},{expiresAt:null,authMethod:null,evidenceHash:null},"a field not in its exact form is null, never guessed");});
-function sendStream(summary:Record<string,unknown>,exitCode=0,line=mfaNotice()){const stdout=Buffer.from(`${line}\n${JSON.stringify({_summary:summary})}\n`);buffers.push(stdout);queue.push({exitCode,stdout});return sha256(stdout);}
-test("a hand-off the Guard holds for the owner's approval returns pending with its task; another status or sender keeps none",async()=>{
- setup();allowTransport=true;policyQueue();let hash=sendStream({mode:"server",address:PAYER.toLowerCase(),status:"AWAITING_MFA",pollingId:RID});assert.deepEqual(await submitOwnedMetaMaskNative(scope,context()),{disposition:"pending",requestId:RID,mfa:{expiresAt:EXPIRES,authMethod:"social",evidenceHash:hash}});
- setup();allowTransport=true;policyQueue();hash=sendStream({mode:"server",address:PAYER.toLowerCase(),status:"AWAITING_MFA",pollingId:RID},1);const failed=await submitOwnedMetaMaskNative(scope,context());assert.equal(failed.disposition,"unknown");assert.deepEqual("mfa" in failed&&failed.mfa,{expiresAt:EXPIRES,authMethod:"social",evidenceHash:hash});
- setup();allowTransport=true;policyQueue();sendStream({mode:"server",address:PAYER.toLowerCase(),status:"SIGNING",pollingId:RID});assert.deepEqual(await submitOwnedMetaMaskNative(scope,context()),{disposition:"pending",requestId:RID});
- setup();allowTransport=true;policyQueue();sendStream({mode:"server",address:RECIPIENT,status:"AWAITING_MFA",pollingId:RID});const stranger=await submitOwnedMetaMaskNative(scope,context());assert.equal(stranger.disposition,"unknown");assert.ok(!("mfa" in stranger));
- setup();allowTransport=true;policyQueue();sendStream({mode:"server",address:PAYER.toLowerCase(),status:"AWAITING_MFA",pollingId:"other"});const conflict=await submitOwnedMetaMaskNative(scope,context());assert.equal(conflict.disposition,"unknown");assert.ok(!("mfa" in conflict));
- assert.equal(calls.filter(c=>c.argv[1]==="send-transaction").length,1);});
 for(const [name,changed] of Object.entries({wrongRID:{...request(),pollingId:"different"},wrongNamespace:{...request(),namespace:"solana"},wrongKind:{...request(),kind:"message"},otherChain:{...request(),chainId:8453}}))test(`request ${name} is UNKNOWN`,async()=>{setup();requestQueue(changed,{txHash:TX});assert.equal((await readMetaMaskNativeRequest(RID,PROJECT_HASH)).disposition,"unknown");assert.ok(noSend());});
 test("request hash conflict is UNKNOWN",async()=>{setup();requestQueue({...request(),txHash:TX},{txHash:`0x${"c".repeat(64)}`});assert.equal((await readMetaMaskNativeRequest(RID,PROJECT_HASH)).disposition,"unknown");});
 test("post-read project drift preserves actual watch hash as UNKNOWN",async()=>{setup();requestQueue(request(),{txHash:TX,status:"CONFIRMED"},"different-project");const v=await readMetaMaskNativeRequest(RID,PROJECT_HASH);assert.equal(v.disposition,"unknown");assert.equal(v.transactionHash,TX);assert.equal(v.readObservation?.stage,"after_guard");assert.equal(v.readObservation?.guard_step,"project_after");assert.equal(v.readObservation?.before_guard_verified,true);assert.equal(v.readObservation?.after_guard_verified,false);});

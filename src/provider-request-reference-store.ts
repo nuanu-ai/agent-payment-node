@@ -81,8 +81,9 @@ function envelopeSpec(binding: ProviderRequestReferenceBinding): EnvelopeSpec<Re
 /**
  * The provider request ids of MetaMask native and provider direct transfers, sealed under the login-Keychain wrapping
  * secret with the custody envelope every APN store uses. A journal written by a release after 0.5.106 keeps only the
- * id's hash; the id is sealed here once, right after the provider named it and before the journal names its hash, and
- * is opened only to read that request again (observe and resume). Status, receipts and abandonment never open it.
+ * id's hash; the id is sealed here once, before the journal names its hash: right after the provider named it, or, for
+ * a MetaMask native transfer from 0.5.108 on, when APN names it itself, before the request is sent. It is opened only
+ * to read that request again (observe and resume). Status, receipts and abandonment never open it.
  */
 export class EncryptedProviderRequestReferenceStore implements ProviderRequestReferencePort {
   private readonly files: ReferenceFiles;

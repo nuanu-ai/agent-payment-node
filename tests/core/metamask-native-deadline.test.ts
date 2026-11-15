@@ -16,8 +16,9 @@ test("absolute deadline prevents a late package resolver from launching even a r
 test("real TEST child timeout uses remaining deadline and returns only finite sanitized stderr classes",async()=>{
  const dir=await mkdtemp(join(tmpdir(),"apn-mm-TEST-deadline-")),script=join(dir,"child.cjs");
  try{await writeFile(script,"process.stderr.write(JSON.stringify({error:{code:'MFA_REQUIRED',message:'TEST-secret'}}));setInterval(()=>{},1000);");
- const runner=new NodeMetaMaskProcessRunner(async()=>script);let failure:unknown;try{await runner.runJson(["wallet","send-transaction"],30000,new Date(Date.now()+250).toISOString());}catch(error){failure=error;}
- assert.ok(failure);const diagnostic=takeMetaMaskNativeProcessFailureDiagnostic(failure);assert.equal(diagnostic?.stage,"sdk_send");assert.equal(diagnostic?.code,"deadline");assert.equal(diagnostic?.providerCode,"mfa");assert.ok(!JSON.stringify(diagnostic).includes("TEST-secret"));
+ // Every mm child is a read since 0.5.108 (the sends go through the sandboxed SDK helper), so its stage is sdk_read.
+ const runner=new NodeMetaMaskProcessRunner(async()=>script);let failure:unknown;try{await runner.runJson(["wallet","policy","get","--json"],30000,new Date(Date.now()+250).toISOString());}catch(error){failure=error;}
+ assert.ok(failure);const diagnostic=takeMetaMaskNativeProcessFailureDiagnostic(failure);assert.equal(diagnostic?.stage,"sdk_read");assert.equal(diagnostic?.code,"deadline");assert.equal(diagnostic?.providerCode,"mfa");assert.ok(!JSON.stringify(diagnostic).includes("TEST-secret"));
  }finally{await rm(dir,{recursive:true,force:true});}
 });
 test("diagnostic is immutable finite metadata and refuses message/raw output/unknown codes",()=>{

@@ -789,7 +789,7 @@ stored. It contains closed facts only; no body, URL, header or identifier is inc
 | `stage` | The helper stage the submit stopped at. |
 | `post` | Whether the single POST could have left (values below). |
 | `http_status` | The POST's HTTP status, when it was sent and answered. |
-| `check` | The check that refused: APN's body or response checks, a duplicate or unexpected request, the deadline or clock, the session, an answer outside 2xx, no usable answer after it left, or the helper runner. |
+| `check` | The check that refused: APN's body or response checks, a duplicate or unexpected request, the deadline or clock, the APN command that spawned the helper having exited (`parent_exited`), the session, an answer outside 2xx, no usable answer after it left, or the helper runner. |
 | `provider_error` | MetaMask's error code from a non-2xx answer, when it is a short upper-case token. |
 | `provider_status` | The job status of a 2xx answer that APN did not recognize, or whose `tx` it refused, when it is a short upper-case token. |
 | `response_tx` | Only when `check` is `response_tx`: how the answer's `tx` compared with the request (table below); otherwise `null`. |
@@ -830,10 +830,25 @@ refused the helper's result. `provider_status` is MetaMask's own job status toke
 in the submit diagnostic. Apart from `provider_status`, a short upper-case token, no provider text is included. A
 refused read never decides the outcome: the chain still proves it.
 
-The same helper also reads one MetaMask native transfer request by its exact ID (a `readRequest` helper mode), when
-`mm`'s local request list no longer holds it. It makes the same job status GET with the same answer checks. Its network
-policy admits only that one GET, and only for a signed-in project that hashes to the transfer's stored project hash.
+The same helper also reads one MetaMask native transfer request by its exact ID (a `readRequest` helper mode): for a
+transfer APN sent itself (0.5.108 and later), and for an older one when `mm`'s local request list no longer holds it. It
+makes the same job status GET with the same answer checks. Its network policy admits only that one GET, and only for a
+signed-in project that hashes to the transfer's stored project hash.
 See [metamask-native-cli-sourceprep.md](metamask-native-cli-sourceprep.md#observing-a-pending-metamask-request).
+
+From 0.5.108 the same helper also sends the MetaMask native transfer and the delegation disable below (a
+`submitTransaction` helper mode), with a request ID APN names itself. It makes the SDK's server-wallet call
+(`EvmServerAdapter.submitTransaction`) from `mm`'s signed-in session, after checking that the session's selected server
+wallet is the sender and, for a native transfer, that its project hashes to the stored project hash. Its network policy
+admits exactly one POST to the project's `transaction-requests` with exactly the bytes `mm wallet send-transaction`
+(6.1.5) sent for the same payload and intent, and nothing else, and it lets that POST leave only before the send's
+deadline: checked at the request and again once TLS is up, right before the request is written, with the exchange's
+timeout capped at the time left, so the request is destroyed at the deadline. The helper records its parent's pid as
+the first statement of its bootstrap, checks it every 100 ms and right before a send is written, and exits, with
+nothing written, once the APN command that spawned it is gone. A command that dies during Node's own startup of the
+helper, before that statement, or after the request was written, is not covered; the deadline still bounds every send.
+See
+[metamask-native-cli-sourceprep.md](metamask-native-cli-sourceprep.md#the-hand-off).
 
 ### MFA and provider outcomes
 
@@ -968,34 +983,53 @@ pool once, at pricing; a transaction the RPC does not show (many public OP-stack
 exact amount to send when the wallet's native balance is below that maximum.
 
 The foreground screen shows the call, the nonce, the gas fields and the maximum native cost. After the six-character
-code, APN checks that the wallet's selected server wallet is the delegator, and the MetaMask Agent Wallet
-(`mm wallet send-transaction`) signs and broadcasts the call after its own Guard policy and MFA. The call moves no USDC.
+code, APN checks with `mm wallet address` that the wallet's selected server wallet is the delegator; another one refuses
+with `APN_PROFILE_DRIFT / mm_revoke_wallet_mismatch` before anything is sent. Then APN names the request ID itself and
+sends the request once through the sandboxed helper above (`submitTransaction`): the request `mm wallet send-transaction`
+(6.1.5) sent for the same payload and intent, from `mm`'s signed-in session in whichever project holds the server
+wallet. Right before the send, inside the same lock, APN reads the server wallet's native balance again (`mm` read it
+before its own POST; the helper does not) and refuses with `APN_INSUFFICIENT_GAS / mm_revoke_native_gas`, with nothing
+sent, when it no longer covers the disable's maximum native cost. The helper is killed after 120 seconds and lets the POST
+leave only before that bound, checked again right before the request is written, with the exchange ending at the bound. The MetaMask server wallet signs and broadcasts the call after its own Guard policy and
+MFA. The call moves no USDC. Up to 0.5.107 `mm wallet send-transaction` sent it and named the request itself; from 0.5.108 the request is not
+in `mm`'s local request list (`mm wallet requests list`).
 Each disable pins the pending nonce it was priced at, so two disables at one nonce land at most once. A disable priced
 after another one landed fails its gas estimate and is not sent; gas is lost only when a disable is priced before
 another one lands and is sent after it (it reverts `AlreadyDisabled`). Nothing is written to the
 operation: the chain is the record. `operation resume` then proves the outcome: `revoked_unused` when the delegation is
 disabled with no redemption, or `completed` when the redemption landed first. MCP returns the CLI handoff.
 
-The `revoke` output reports `submission`:
+The `revoke` output reports `submission`. Every answer carries `requestIdHash`, the SHA-256 of
+`apn.metamask-revocation.request-id.v1`, a NUL byte and APN's request ID; the ID itself is never shown.
 
 - `acknowledged`: with the transaction hash.
-- `pending`: MetaMask waits on your MFA.
-- `unknown`: not a proof that nothing was sent; `operation resume` reads the chain. Its `reason` says what APN saw
-  (`provider_response_empty` when `mm` wrote nothing to stdout, `provider_response_malformed`,
-  `provider_handoff_outcome_unknown`). When `mm` answered with its JSON error on stderr and nothing on stdout,
-  `providerErrorCode` is that error's code (for example `POLICY_VIOLATION`), taken from the stderr shape below.
+- `pending`: MetaMask waits on your MFA, or is still evaluating, signing or broadcasting.
+- `unknown`: not a proof that nothing was sent; `operation resume` reads the chain. Its `reason` says what APN saw:
+  `provider_request_closed` (MetaMask answered `FAILED`, `BROADCAST_FAILED`, `DENIED` or `EXPIRED`, in
+  `providerStatus`, with `transactionHash` when it named one), `provider_request_outcome_unknown` (another status, in
+  `providerStatus`), `provider_request_identity_conflict` (the answer named another request) or
+  `provider_handoff_outcome_unknown` (no usable answer). When MetaMask refused the request with an HTTP error,
+  `providerErrorCode` is its error code (for example `POLICY_VIOLATION`). `submitDiagnostic` holds the send's closed
+  facts: the helper stage, whether the POST left (`post`), its HTTP status, the check that refused, and MetaMask's error
+  code or job status token when they have a closed form. `helperFailure` is the helper's own closed reason, for
+  example `mm_gasless_binding_changed` or `mm_gasless_session_expired`.
+  When the helper's facts say it stopped before any network call (`post: "not_reached"`), the submission stays
+  `unknown`, and the next action says that no disable left the machine, that its nonce is untouched and that running
+  revoke again is safe. It names the cause those facts give, from a closed list, with its own step: the 120-second
+  bound passed before the request was written (run it again), an invalid or backward clock (correct it), the helper
+  process did not start (run it again), the session is in another project or has another wallet selected (select the
+  server wallet), the session is signed out or expired or its files could not be read (sign in again), another `mm`
+  process was writing its files (run it again), its files are not private to this user (make the MetaMask Agent
+  Wallet's directory and files owned by this user and private to it, with no symbolic link on the way), the bundled
+  MetaMask SDK did not load (run it again, reinstall APN if it repeats), the SDK could not restore the session (sign in
+  again), or the SDK named another server wallet (select the server wallet).
   The next actions say when another disable is safe: the resume still finds the delegation not disabled, and
   `eth_getTransactionCount(<server wallet>, …)` at both `latest` and `pending` still answers the disable's
   `nonce_atomic`, so no transaction of the wallet used that nonce or waits for it in the RPC's pool. Remove the cause
   the code names, then run `revoke` again: it takes the same nonce, so only one of the two disables can land, and it
   moves no USDC. A request MetaMask still holds for your MFA is the only one no RPC shows; it carries the same nonce.
 
-`provider` records the `mm` child process as APN received it, before its bytes are zeroed: the admitted package version
-and shasum, outcome, exit code or signal, duration, and for stdout and stderr the byte count, the SHA-256 of a complete
-capture and each JSON frame's keys and value types. `mm --json` prints its answer indented over many lines after any
-progress lines; that block is one frame, always the last, after at most seven line frames. Values are shown only for
-`ok`, `code`, `kind`, `status`, `mode` and `chainNamespace`; ids, addresses, hashes and messages never appear. Eligible operations list
-`apn gasless transfer revoke` among their next actions.
+Eligible operations list `apn gasless transfer revoke` among their next actions.
 
 ## MetaMask Smart Account
 

@@ -14,13 +14,27 @@ const recipientInput=custom?'0x2222222222222222222222222222222222222222':'0x991e
 let projectHash="d".repeat(64), effects=0, selectedQuote, lastScope, lastContext, beforeGuard=async()=>{};
 const primaryChain=scenario==='op-positive'?10:1, otherVendor='7e5d5899170740ccaa05fb45415c9ef5320815e446788719f3523eb0fd58ee37';
 let vendorHash='e3e44343da17c1912c2da0ce5b58f9c804b53d3715b8a2756c0b035fd50d288a', policyReads=0, requestReads=0;
+// The request id APN named for the hand-off (read from the claimed scope) and the reference store that sealed it.
+let sentRequestId, referenceStore;
 const acknowledgedScenarios=['profile-positive','profile-alias','profile-tamper','positive','native-crosschain','alias-otherchain','op-positive','vendor-drift-in-guard'];
 const {ApnError}=await import(moduleUrl('errors.js'));
 await mock.module(moduleUrl('metamask-native-transfer-adapter.js'), {namedExports:{
   MetaMaskNativeHandoffNotStarted:class extends Error{constructor(cause){super('TEST handoff not started');this.causeError=cause;}},
   readMetaMaskNativeVendorPolicy:async(chain,sender,recipient)=>{policyReads++;assert.equal(recipient.toLowerCase(),recipientInput);if(scenario==='guard-refused')throw new ApnError('APN_OPERATION_BLOCKED','TEST Guard policy refuses',{reason:'metamask_guard_recipient_not_allowlisted'});if(scenario==='vendor-drift-before-send'&&policyReads===2)vendorHash=otherVendor;return {selectedAddress:sender,vendorPolicyHash:vendorHash,tradingMode:'guard',vendorProjectHash:projectHash,outflowLimitsUsd:{rolling_24h:'0.5'},observedAt:new Date().toISOString()};},
-  readMetaMaskNativeRequest:async(id,hash)=>{requestReads++;assert.equal(id,"TEST-pending-request");assert.equal(hash,projectHash);return {disposition:"acknowledged",transactionHash:"0x"+"e".repeat(64),readObservation:Object.freeze({stage:"complete",guard_step:null,request_id:id,watch_returned:true,before_guard_verified:true,after_guard_verified:true,request_identity_verified:true,provider_status:"CONFIRMED",transaction_hash:"0x"+"e".repeat(64),chain_id:primaryChain,response_hash:"1".repeat(64),reason:null,error_code:null,diagnostic:null})};},
-  submitOwnedMetaMaskNative:async(scope,context)=>{const owner=await import(moduleUrl('metamask-native-transfer-owner.js'));owner.claimMetaMaskNativeOwnedScope(scope,context);await owner.assertMetaMaskNativeOwnedContextCurrent(scope,context);lastScope=scope;lastContext=context;assert.equal(context.vendorPolicyHash,vendorHash);assert.throws(()=>owner.claimMetaMaskNativeOwnedScope(scope,context));assert.throws(()=>owner.assertMetaMaskNativeOwnedScope(structuredClone(scope),context));assert.throws(()=>owner.assertMetaMaskNativeOwnedScope(scope,structuredClone(context)));if(scenario==='project'){projectHash='a'.repeat(64);assert.notEqual(context.vendorProjectHash,projectHash);await assert.rejects(()=>owner.assertMetaMaskNativeOwnedContextCurrent(scope,context));}const {StateStore}=await import(moduleUrl('state.js'));await assert.rejects(()=>new StateStore(root).withLocks([`account-chain-nonce:${payer}:${context.quote.chainId}`],async()=>{}, {waitMs:100}),{code:"APN_STATE_BUSY"});await assert.rejects(()=>new StateStore(root).withLocks([`evm-owner:${payer}`],async()=>{}, {waitMs:100}),{code:"APN_STATE_BUSY"});effects++;await beforeGuard(context);if(scenario==='expired'||scenario==='custody'||scenario==='vendor-drift-in-guard')await assert.rejects(()=>owner.assertMetaMaskNativeOwnedContextCurrent(scope,context));if(scenario==='no-rid')return {disposition:"unknown",reason:"TEST no identifiers"};if(scenario==='pending')return {disposition:'pending',requestId:'TEST-pending-request'};if(scenario==='unsealed')return {disposition:'pending',requestId:'TEST-pending-request',mfa:{expiresAt:null,authMethod:'social',evidenceHash:'1'.repeat(64)}};return acknowledgedScenarios.includes(scenario)?{disposition:'acknowledged',transactionHash:'0x'+'e'.repeat(64)}:{disposition:'unknown',reason:'TEST ambiguity',transactionHash:'0x'+'e'.repeat(64),requestId:'TEST-pending-request'};}
+  // 0.5.108: a request APN sent itself is never watched through mm; only its server read runs.
+  readMetaMaskNativeRequest:async()=>{throw new Error('TEST a helper hand-off is never watched through mm');},
+  readMetaMaskNativeSdkRequest:async(id,hash,binding)=>{requestReads++;assert.equal(id,sentRequestId);assert.equal(hash,projectHash);assert.equal(binding.sender.toLowerCase(),payer);
+    if(scenario==='no-rid')return {disposition:"unknown",reason:"metamask_request_not_found_on_server",requestId:id,readObservation:Object.freeze({stage:"complete",guard_step:null,request_id:id,watch_returned:false,before_guard_verified:true,after_guard_verified:true,request_identity_verified:false,provider_status:null,transaction_hash:null,chain_id:null,response_hash:null,reason:"metamask_request_not_found_on_server",error_code:null,diagnostic:null,server_read:Object.freeze({outcome:"not_found",response_hash:null,reason:null,check:null})})};
+    return {disposition:"acknowledged",transactionHash:"0x"+"e".repeat(64),readObservation:Object.freeze({stage:"complete",guard_step:null,request_id:id,watch_returned:true,before_guard_verified:true,after_guard_verified:true,request_identity_verified:true,provider_status:"CONFIRMED",transaction_hash:"0x"+"e".repeat(64),chain_id:primaryChain,response_hash:null,reason:null,error_code:null,diagnostic:null,server_read:Object.freeze({outcome:"verified",response_hash:"1".repeat(64),reason:null,check:null})})};},
+  submitOwnedMetaMaskNative:async(scope,context)=>{const owner=await import(moduleUrl('metamask-native-transfer-owner.js'));owner.claimMetaMaskNativeOwnedScope(scope,context);await owner.assertMetaMaskNativeOwnedContextCurrent(scope,context);lastScope=scope;lastContext=context;
+    // 0.5.108: the id the helper sends is APN's own v4 UUID, sealed, and named by its hash and the helper path in the effect
+    // marker before the hand-off could start; the real last guard above has already checked that marker.
+    sentRequestId=owner.metaMaskNativeOwnedRequestId(scope,context);assert.match(sentRequestId,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
+    {const {metaMaskNativeRequestIdHash,metaMaskNativeRequestReference}=await import(moduleUrl('metamask-native-journal.js'));
+     const marker=JSON.parse(await readFile(join(root,'metamask-native-operations',context.operationId+'.json'),'utf8'));
+     assert.equal(marker.state,'effect_started');assert.equal(marker.effectAttempts,1);assert.equal(marker.handoffPath,'sdk_helper');assert.equal(marker.providerRequestId,null);
+     assert.equal(marker.providerRequestIdHash,metaMaskNativeRequestIdHash(sentRequestId));
+     assert.equal(await referenceStore.open(metaMaskNativeRequestReference(marker,marker.providerRequestIdHash)),sentRequestId);}assert.equal(context.vendorPolicyHash,vendorHash);assert.throws(()=>owner.claimMetaMaskNativeOwnedScope(scope,context));assert.throws(()=>owner.assertMetaMaskNativeOwnedScope(structuredClone(scope),context));assert.throws(()=>owner.assertMetaMaskNativeOwnedScope(scope,structuredClone(context)));if(scenario==='project'){projectHash='a'.repeat(64);assert.notEqual(context.vendorProjectHash,projectHash);await assert.rejects(()=>owner.assertMetaMaskNativeOwnedContextCurrent(scope,context));}const {StateStore}=await import(moduleUrl('state.js'));await assert.rejects(()=>new StateStore(root).withLocks([`account-chain-nonce:${payer}:${context.quote.chainId}`],async()=>{}, {waitMs:100}),{code:"APN_STATE_BUSY"});await assert.rejects(()=>new StateStore(root).withLocks([`evm-owner:${payer}`],async()=>{}, {waitMs:100}),{code:"APN_STATE_BUSY"});effects++;await beforeGuard(context);if(scenario==='expired'||scenario==='custody'||scenario==='vendor-drift-in-guard')await assert.rejects(()=>owner.assertMetaMaskNativeOwnedContextCurrent(scope,context));if(scenario==='no-rid')return {disposition:"unknown",reason:"TEST no answer from the helper"};if(scenario==='pending')return {disposition:'pending',mfa:{expiresAt:null,authMethod:'social',evidenceHash:'1'.repeat(64)}};return acknowledgedScenarios.includes(scenario)?{disposition:'acknowledged',transactionHash:'0x'+'e'.repeat(64)}:{disposition:'unknown',reason:'TEST ambiguity',transactionHash:'0x'+'e'.repeat(64)};}
 }});
 const balances=(q)=>({address:q.sender,asset:{schemaVersion:'apn.evm-asset.v1',chainId:q.chainId,kind:'erc20',address:q.token,decimals:6,decimalsSource:'onchain'},nativeAtomic:scenario==='balance'?'0':'1000000000',assetAtomic:'10000',blockNumberAtomic:'100',blockHash:'0x'+'a'.repeat(64),rpcOrigin:'https://test-rpc.example',observedAt:new Date().toISOString()});
 await mock.module(moduleUrl('metamask-native-transfer-rpc.js'), {namedExports:{
@@ -60,18 +74,28 @@ try {
    await state.writeOperation(sealOperation({...body,state:started.state,reason:started.reason,proofClass:started.proofClass,transitions:appendTransition(saved.transitions,started)}));
  }
  const owner=await import(moduleUrl('metamask-native-transfer-owner.js'));
- // QA F26: a synthetic wrapping secret seals the MetaMask request id the hand-off returns; the Keychain is never touched.
+ // QA F26: a synthetic wrapping secret seals the MetaMask request id APN names; the Keychain is never touched.
  const {EncryptedProviderRequestReferenceStore}=await import(moduleUrl('provider-request-reference-store.js'));
  const {metaMaskNativeRequestIdHash,metaMaskNativeRequestReference}=await import(moduleUrl('metamask-native-journal.js'));
  const wrapping={loads:0,async load(){this.loads++;return Buffer.alloc(32,7);},async create(){return Buffer.alloc(32,7);}};
- const store=new EncryptedProviderRequestReferenceStore({root},wrapping),unsealed=scenario.startsWith('unsealed');
- // QA F26 (review M1): a seal that fails after the hand-off, with and without a transaction hash in the result.
- const references=unsealed?{ready:()=>store.ready(),open:binding=>store.open(binding),seal:async()=>{throw new Error('TEST the seal fails after the hand-off');}}:store;
+ const store=new EncryptedProviderRequestReferenceStore({root},wrapping),unsealed=scenario==='unsealed';referenceStore=store;
+ // A seal that fails after consent, before the effect marker: nothing is handed off.
+ const references=unsealed?{ready:()=>store.ready(),open:binding=>store.open(binding),seal:async()=>{throw new Error('TEST the seal fails before the hand-off');}}:store;
  const run=(chainId,key,p=profile)=>owner.runMetaMaskNativeTransfer(root,{profile:p,chainId,recipient:recipientInput,amountAtomic:amount,idempotencyKey:key},references);
  if(scenario==='vendor-drift-before-send'){
    const result=await run(1,'native-test-refused-0001');assert.equal(result.state,'unknown');assert.equal(result.effect_attempts,1);assert.equal(effects,0);
    const saved=JSON.parse(await readFile(join(root,'metamask-native-operations',result.operation_id+'.json'),'utf8'));assert.equal(saved.reservations.length,2);assert.notEqual(saved.context.vendorPolicyHash,otherVendor);assert.equal(saved.diagnostic.stage,'sdk_read');
    const replay=await run(1,'native-test-refused-0001');assert.deepEqual(replay,result);assert.equal(effects,0);process.stdout.write('TEST_OWNER_'+scenario.toUpperCase()+'_OK\n');
+ } else if(unsealed){
+   // The request id is sealed before the effect marker: a seal that fails leaves the transfer before its effect, sends
+   // nothing and releases its usage.
+   await assert.rejects(()=>run(primaryChain,'native-test-positive-0001'));assert.equal(effects,0);
+   const files=await readdir(join(root,'metamask-native-operations')),saved=JSON.parse(await readFile(join(root,'metamask-native-operations',files[0]),'utf8'));
+   assert.equal(saved.state,'failed_before_effect');assert.equal(saved.effectAttempts,0);assert.equal('providerRequestIdHash' in saved,false);assert.equal('handoffPath' in saved,false);
+   const {AssetUsageLedger}=await import(moduleUrl('asset-usage-ledger.js')),ledger=new AssetUsageLedger(root);
+   for(const asset of [{kind:'native',identifier:null},{kind:'token',identifier:primaryChain===10?'0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85':'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'}])
+     assert.equal((await ledger.usage({account:getAddress(payer),chain:`eip155:${primaryChain}`,asset},new Date())).amountAtomic,'0');
+   process.stdout.write('TEST_OWNER_'+scenario.toUpperCase()+'_OK\n');
  } else if(['policy','wrongcustody','fees','balance','op','alias-samechain','sameprofile','guard-refused'].includes(scenario)){
    await assert.rejects(()=>run(scenario==='op'?10:1,'native-test-refused-0001'));assert.equal(effects,0);
    if(scenario==='guard-refused')assert.deepEqual(await readdir(join(root,'metamask-native-operations')).catch(()=>[]),[]);
@@ -79,16 +103,12 @@ try {
  } else {
  const result=await run(primaryChain,'native-test-positive-0001');assert.ok(wrapping.loads>0,'the wrapping secret is read before consent');
  {const text=await readFile(join(root,'metamask-native-operations',result.operation_id+'.json'),'utf8'),saved=JSON.parse(text);
-  assert.ok(!text.includes('TEST-pending-request')&&!JSON.stringify(result).includes('TEST-pending-request'),'no journal or output names the request id');
-  if(acknowledgedScenarios.includes(scenario)||scenario==='no-rid')assert.equal('providerRequestIdHash' in saved,false);
-  else if(unsealed){assert.equal(saved.state,'unknown');assert.equal(saved.providerRequestId,null);assert.equal('providerRequestIdHash' in saved,false);
-   assert.equal(saved.providerRequestReason,'provider_request_reference_unsealed');assert.equal(result.provider_request_reason,'provider_request_reference_unsealed');
-   assert.equal('mfaTask' in saved,false);
-   assert.equal(saved.transactionHash,scenario==='unsealed-hash'?'0x'+'e'.repeat(64):null,'the hand-off transaction hash is kept');
-   assert.deepEqual(result.next_actions,scenario==='unsealed-hash'?[`apn wallet metamask native-transfer-observe --operation ${result.operation_id}`]:[]);}
-  else{assert.equal(saved.providerRequestId,null);assert.equal(saved.providerRequestIdHash,metaMaskNativeRequestIdHash('TEST-pending-request'));
-   assert.equal(await references.open(metaMaskNativeRequestReference(saved,saved.providerRequestIdHash)),'TEST-pending-request');}}
- assert.equal(result.recipient.toLowerCase(),recipientInput);assert.equal(result.usdc_atomic,amount);assert.equal(result.operation_id,state.operationId(profile,`metamask-native:${primaryChain}:native-test-positive-0001`));assert.equal(lastContext.profile,profile);assert.equal(lastContext.quote.sender.toLowerCase(),payer);assert.equal(result.state,acknowledgedScenarios.includes(scenario)?'acknowledged':'unknown');assert.equal(result.transaction_hash,['pending','no-rid','unsealed'].includes(scenario)?null:'0x'+'e'.repeat(64));assert.throws(()=>owner.assertMetaMaskNativeOwnedScope(lastScope,lastContext));
+  assert.ok(!text.includes(sentRequestId)&&!JSON.stringify(result).includes(sentRequestId),'no journal or output names the request id');
+  // Every outcome after the marker keeps the request APN sent: by its hash, with its seal, beside the helper path.
+  assert.equal(saved.providerRequestId,null);assert.equal(saved.providerRequestIdHash,metaMaskNativeRequestIdHash(sentRequestId));assert.equal(saved.handoffPath,'sdk_helper');
+  assert.equal(await references.open(metaMaskNativeRequestReference(saved,saved.providerRequestIdHash)),sentRequestId);
+  assert.equal('mfaTask' in saved,scenario==='pending');assert.equal('providerRequestReason' in saved,false);}
+ assert.equal(result.recipient.toLowerCase(),recipientInput);assert.equal(result.usdc_atomic,amount);assert.equal(result.operation_id,state.operationId(profile,`metamask-native:${primaryChain}:native-test-positive-0001`));assert.equal(lastContext.profile,profile);assert.equal(lastContext.quote.sender.toLowerCase(),payer);assert.equal(result.state,acknowledgedScenarios.includes(scenario)?'acknowledged':'unknown');assert.equal(result.transaction_hash,['pending','no-rid'].includes(scenario)?null:'0x'+'e'.repeat(64));assert.throws(()=>owner.assertMetaMaskNativeOwnedScope(lastScope,lastContext));
  const replay=await run(primaryChain,'native-test-positive-0001');assert.equal(replay.operation_id,result.operation_id);assert.equal(effects,1);
  await assert.rejects(()=>run(primaryChain,'native-test-second-key-0002'));assert.equal(effects,1);
  if(scenario==='native-crosschain'){const other=await run(1329,'native-test-other-chain-0002');assert.equal(other.state,'acknowledged');assert.equal(effects,2);}
@@ -122,7 +142,10 @@ try {
  await assert.rejects(()=>ledger.transition({...identity,reservationId,policyDigest:held.policyDigest,state:'released_unsubmitted',now:new Date(),outcomeDigest:'2'.repeat(64)}));
  await writeFile(holdPath,original);
  const statusOnly=await owner.readMetaMaskNativeTransfer(root,result.operation_id,false);assert.ok(!("read_observation" in statusOnly));
- if(scenario==='no-rid'||scenario==='unsealed'){const before=await ledger.usageWithReservation(identity,reservationId,new Date());const observed=await owner.readMetaMaskNativeTransfer(root,result.operation_id,true,references);assert.equal(observed.state,"unknown");assert.equal(observed.read_observation.stage,"not_requested");assert.equal(observed.read_observation.reason,scenario==='unsealed'?"provider_request_reference_unsealed":"no_stored_request_id");assert.equal(requestReads,0);assert.deepEqual(await ledger.usageWithReservation(identity,reservationId,new Date()),before);assert.equal(effects,1);
+ if(scenario==='no-rid'){const before=await ledger.usageWithReservation(identity,reservationId,new Date());const observed=await owner.readMetaMaskNativeTransfer(root,result.operation_id,true,references);assert.equal(observed.state,"unknown");
+   // The helper's answer was lost, but the request is APN's own: observe reads it from MetaMask's server by its id.
+   assert.equal(requestReads,1);assert.equal(observed.read_observation.server_read.outcome,"not_found");assert.equal(observed.read_observation.request_id_hash,metaMaskNativeRequestIdHash(sentRequestId));
+   assert.equal('request_id' in observed.read_observation,false);assert.deepEqual(await ledger.usageWithReservation(identity,reservationId,new Date()),before);assert.equal(effects,1);
    // R4 exit: an unknown outcome with no identifier is released by the owner, only after its quote expired, with consent.
    const approvals=[];
    await assert.rejects(()=>owner.abandonMetaMaskNativeTransfer(root,result.operation_id,async i=>{approvals.push(i);},()=>new Date(),references),{code:'APN_OPERATION_BLOCKED'});
@@ -132,7 +155,7 @@ try {
    assert.equal(again.state,'abandoned_unknown');assert.equal(approvals.length,1);
    const freed=await run(primaryChain,'native-test-after-abandon-0003');assert.equal(effects,2,'the account is no longer held after abandonment');assert.equal(freed.effect_attempts,1);
    process.stdout.write('TEST_OWNER_'+scenario.toUpperCase()+'_OK\n');} else {
- const observed=await owner.readMetaMaskNativeTransfer(root,result.operation_id,true,references);assert.equal(observed.state,scenario==='reverted'?'confirmed_reverted':'confirmed');assert.equal(observed.receipt.transferAccepted,scenario!=='reverted');if(scenario!=="pending")assert.equal(observed.read_observation.stage,"not_requested");else {assert.equal(requestReads,1);assert.equal(observed.read_observation.stage,"complete");assert.equal(observed.read_observation.provider_status,"CONFIRMED");}assert.ok(!JSON.stringify(await owner.readMetaMaskNativeTransfer(root,result.operation_id,false)).includes("read_observation"));assert.equal(observed.receipt.nativeFeeAtomic,primaryChain===10?'7500550':'7500000');
+ const observed=await owner.readMetaMaskNativeTransfer(root,result.operation_id,true,references);assert.equal(observed.state,scenario==='reverted'?'confirmed_reverted':'confirmed');assert.equal(observed.receipt.transferAccepted,scenario!=='reverted');if(scenario!=="pending")assert.equal(observed.read_observation.stage,"not_requested");else {assert.equal(requestReads,1);assert.equal(observed.read_observation.stage,"complete");assert.equal(observed.read_observation.provider_status,"CONFIRMED");assert.equal(observed.read_observation.server_read.outcome,"verified");}assert.ok(!JSON.stringify(await owner.readMetaMaskNativeTransfer(root,result.operation_id,false)).includes("read_observation"));assert.equal(observed.receipt.nativeFeeAtomic,primaryChain===10?'7500550':'7500000');
  assert.equal((await ledger.usage({account:address,chain:`eip155:${primaryChain}`,asset:{kind:'native',identifier:null}},new Date())).amountAtomic,primaryChain===10?'7500550':'7500000');
  assert.equal((await ledger.usage({account:address,chain:`eip155:${primaryChain}`,asset:{kind:'token',identifier:token}},new Date())).amountAtomic,scenario==='reverted'?'0':amount);
  if(scenario==='profile-tamper'){

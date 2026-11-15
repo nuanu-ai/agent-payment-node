@@ -56,6 +56,13 @@ export interface MetaMaskNativeOperation {
      */
     readonly providerRequestIdHash?: string;
     /**
+     * How the request left, in a record 0.5.108 or later wrote: `sdk_helper`, APN named the request id itself, sealed it and
+     * wrote this effect marker with its hash before the sandboxed MetaMask helper sent it; mm's local request list never
+     * holds it, so it is read from MetaMask's server by its id. Absent from every earlier record, whose request was handed
+     * to `mm wallet send-transaction` and is read with `mm wallet requests watch` first.
+     */
+    readonly handoffPath?: typeof METAMASK_NATIVE_SDK_HANDOFF;
+    /**
      * Why a record a later release wrote keeps no request although the hand-off returned one: the id could not be sealed
      * after the hand-off, so it was dropped, never kept in plaintext. Everything else the hand-off returned is kept.
      */
@@ -68,8 +75,10 @@ export interface MetaMaskNativeOperation {
     readonly recordHash: string;
 }
 export declare const METAMASK_NATIVE_OPERATION_SCHEMA = "apn.metamask-native-operation.v2";
-/** The only `providerRequestReason`: the hand-off returned a request id that could not be sealed. */
+/** The only `providerRequestReason`: the hand-off of a 0.5.107 record returned a request id that could not be sealed. */
 export declare const METAMASK_NATIVE_REQUEST_UNSEALED = "provider_request_reference_unsealed";
+/** The only `handoffPath`: the request APN named, sealed and journaled before the sandboxed helper sent it (0.5.108+). */
+export declare const METAMASK_NATIVE_SDK_HANDOFF = "sdk_helper";
 /**
  * The owner's MetaMask approval this transfer waits on: a verified AWAITING_MFA notice (or request status) for its own
  * stored request, from the hand-off (`send`) or a no-send read (`watch`: `mm wallet requests watch`, or MetaMask's server

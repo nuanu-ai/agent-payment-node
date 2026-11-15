@@ -36,8 +36,10 @@ test("one GET of the request's own status in the session's project, checked and 
     [{ status: "AWAITING_MFA", txHash: null }, "AWAITING_MFA", null], [{ status: "BROADCAST_FAILED", txHash: undefined }, "BROADCAST_FAILED", null]] as const) {
     const exchange = new RequestExchange(patch);
     const result = await executeHelperRequest(read(), { homeDirectory: home.home, now: () => NOW, exchange });
+    // AWAITING_MFA alone carries the owner's window: the job's exact approval.expiresAt and the session's authMethod.
+    const mfa = status === "AWAITING_MFA" ? { expiresAt: "2030-01-01T00:10:00.000Z", authMethod: "qr" } : null;
     assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: true,
-      result: { requestId: RID, found: true, status, txHash, responseHash: sha256(exchange.bodies[0]!) } });
+      result: { requestId: RID, found: true, status, txHash, mfa, responseHash: sha256(exchange.bodies[0]!) } });
     assert.equal(JSON.stringify(result).includes(PRIVATE), false, "no approval detail, link or other metadata leaves the helper");
     assert.equal(exchange.requests.length, 1); assert.equal(exchange.requests[0]!.url, REQUEST_URL); assert.equal(exchange.requests[0]!.method, "GET");
     assert.equal(exchange.requests[0]!.headers.authorization, `Bearer ${home.token}`); assert.equal(exchange.beforeSends, 0);
@@ -87,7 +89,7 @@ test("an answer naming another request, sender or chain, or with another status 
   }
   const missing = new RequestExchange({}, 404);
   assert.deepEqual(await executeHelperRequest(read(), { homeDirectory: home.home, now: () => NOW, exchange: missing }),
-    { version: MM_HELPER_VERSION, ok: true, result: { requestId: RID, found: false, status: null, txHash: null, responseHash: null } });
+    { version: MM_HELPER_VERSION, ok: true, result: { requestId: RID, found: false, status: null, txHash: null, mfa: null, responseHash: null } });
   assert.equal(missing.requests.length, 1);
   const denied = new RequestExchange({}, 401);
   assert.deepEqual(await executeHelperRequest(read(), { homeDirectory: home.home, now: () => NOW, exchange: denied }),
@@ -102,7 +104,15 @@ test("the native read runs through the parent client and names every refusal pre
   const client = new MetaMaskGaslessProviderClient({ environment: { HOME: home.home }, clock: { now: () => NOW }, runner });
   const sender = getAddress(OWNER);
   assert.deepEqual(await readMetaMaskNativeServerRequest(RID, sha256(PROJECT), { sender, chainId: 1 }, client),
-    { outcome: "verified", status: "CONFIRMED", transactionHash: `0x${"44".repeat(32)}`, responseHash: sha256(exchange.bodies[0]!) });
+    { outcome: "verified", status: "CONFIRMED", transactionHash: `0x${"44".repeat(32)}`, mfa: null, responseHash: sha256(exchange.bodies[0]!) });
+  exchange = new RequestExchange({ status: "AWAITING_MFA", txHash: null });
+  assert.deepEqual(await readMetaMaskNativeServerRequest(RID, sha256(PROJECT), { sender, chainId: 1 }, client),
+    { outcome: "verified", status: "AWAITING_MFA", transactionHash: null, mfa: { expiresAt: "2030-01-01T00:10:00.000Z", authMethod: "qr" },
+      responseHash: sha256(exchange.bodies[0]!) });
+  exchange = new RequestExchange({ status: "AWAITING_MFA", txHash: null, approval: { expiresAt: "soon" } });
+  assert.deepEqual((await readMetaMaskNativeServerRequest(RID, sha256(PROJECT), { sender, chainId: 1 }, client)) as unknown,
+    { outcome: "verified", status: "AWAITING_MFA", transactionHash: null, mfa: { expiresAt: null, authMethod: "qr" }, responseHash: sha256(exchange.bodies[0]!) },
+    "a window not in its exact form is null, never guessed");
   assert.deepEqual(await readMetaMaskNativeServerRequest(RID, sha256("another-project"), { sender, chainId: 1 }, client),
     { outcome: "refused", reason: "metamask_session_project_changed", check: null });
   exchange = new RequestExchange({ tx: { from: OWNER, chainId: 10 } });

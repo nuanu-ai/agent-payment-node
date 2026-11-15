@@ -3,9 +3,9 @@ import { nativeDeadlineExpired, nativeDeadlineRemaining, validateMetaMaskNativeD
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { ApnError } from "./errors.js";
-import { isPlainRecord, sha256 } from "./canonical.js";
-import { classifyMetaMaskPendingNotices, metaMaskMfaNotice, metaMaskRequestNotFound, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
-import { metaMaskJsonAnswer, observeMetaMaskProcess } from "./metamask-process-observation.js";
+import { isPlainRecord } from "./canonical.js";
+import { metaMaskRequestNotFound } from "./metamask-process-output.js";
+import { metaMaskJsonAnswer } from "./metamask-process-observation.js";
 import { METAMASK_FOREGROUND_TIMEOUT_MS, METAMASK_PROCESS_TIMEOUT_MS, resolveMetaMaskBin, } from "./metamask-package.js";
 const MAX_JSON_BYTES = 1024 * 1024;
 const nativeFailureDiagnostics = new WeakMap();
@@ -15,92 +15,6 @@ export function takeMetaMaskNativeProcessFailureDiagnostic(error) {
     const value = nativeFailureDiagnostics.get(error);
     nativeFailureDiagnostics.delete(error);
     return value;
-}
-const failureObservations = new WeakMap();
-/** One-use shape of the child's streams for this runner's rejected invocation (timeout, start, oversize). */
-export function takeMetaMaskProcessFailureObservation(error) {
-    if (!(error instanceof ApnError))
-        return undefined;
-    const value = failureObservations.get(error);
-    failureObservations.delete(error);
-    return value;
-}
-const nativeFailureIdentifiers = new WeakMap();
-/** Internal one-use observation of this runner's rejected invocation. Never exposes captured output or changes rejection. */
-export function takeMetaMaskNativeProcessFailureIdentifiers(error) {
-    if (!(error instanceof ApnError))
-        return undefined;
-    const value = nativeFailureIdentifiers.get(error);
-    nativeFailureIdentifiers.delete(error);
-    return value;
-}
-function observeNativeFailure(bytes) {
-    let parsed = parseMetaMaskProcessOutput(bytes);
-    if (parsed === null) {
-        const text = bytes.toString("utf8"), boundary = text.lastIndexOf("\n");
-        if (boundary < 0)
-            return undefined;
-        const tail = text.slice(boundary + 1).trim();
-        if (!tail.startsWith("{"))
-            return undefined;
-        try {
-            JSON.parse(tail);
-            return undefined;
-        }
-        catch (error) {
-            if (!(error instanceof SyntaxError))
-                return undefined;
-            const atEnd = error.message === "Unexpected end of JSON input" ||
-                / at position ([0-9]+) /u.exec(error.message)?.[1] === String(tail.length);
-            if (!atEnd)
-                return undefined;
-        }
-        const prefix = Buffer.from(text.slice(0, boundary), "utf8");
-        try {
-            parsed = parseMetaMaskProcessOutput(prefix);
-        }
-        finally {
-            prefix.fill(0);
-        }
-        // Only complete normal notice frames before a cut final frame can supply IDs.
-        if (parsed === null || parsed.envelope !== null || parsed.notices.length === 0)
-            return undefined;
-    }
-    if (parsed === null)
-        return undefined;
-    const notice = classifyMetaMaskPendingNotices(parsed.notices);
-    if (notice.disposition === "invalid")
-        return undefined;
-    const data = parsed.envelope?.data;
-    if (parsed.envelope !== null && !isPlainRecord(data))
-        return undefined;
-    if (isPlainRecord(data)) {
-        if (data.mode !== "server" || typeof data.address !== "string" || !/^0x[a-fA-F0-9]{40}$/u.test(data.address))
-            return undefined;
-        if (data.hash !== undefined && (typeof data.hash !== "string" || !/^0x[a-fA-F0-9]{64}$/u.test(data.hash)))
-            return undefined;
-        if (data.pollingId !== undefined && (typeof data.pollingId !== "string" || !/^[A-Za-z0-9._:-]{1,256}$/u.test(data.pollingId)))
-            return undefined;
-        if (data.chainId !== undefined && (typeof data.chainId !== "number" || !Number.isSafeInteger(data.chainId) || data.chainId < 1))
-            return undefined;
-        if (data.projectId !== undefined && (typeof data.projectId !== "string" || !/^[A-Za-z0-9._:-]{1,256}$/u.test(data.projectId)))
-            return undefined;
-        if (notice.disposition === "pending" && data.pollingId !== undefined && data.pollingId !== notice.recoveryToken)
-            return undefined;
-    }
-    const requestId = isPlainRecord(data) && typeof data.pollingId === "string" ? data.pollingId : notice.disposition === "pending" ? notice.recoveryToken : undefined;
-    const transactionHash = isPlainRecord(data) && typeof data.hash === "string" ? data.hash.toLowerCase() : undefined;
-    if (requestId === undefined && transactionHash === undefined)
-        return undefined;
-    const latest = isPlainRecord(data) && typeof data.status === "string" ? data.status : undefined;
-    const awaiting = requestId !== undefined && transactionHash === undefined && (latest === undefined
-        ? notice.disposition === "pending" && notice.recoveryToken === requestId : latest === "AWAITING_MFA");
-    return Object.freeze({ ...(requestId === undefined ? {} : { requestId }), ...(transactionHash === undefined ? {} : { transactionHash }),
-        ...(awaiting ? { mfa: { ...(notice.disposition === "pending" ? metaMaskMfaNotice(parsed.notices) : { expiresAt: null, authMethod: null }),
-                evidenceHash: sha256(bytes) } } : {}),
-        ...(isPlainRecord(data) ? { sender: data.address.toLowerCase(),
-            ...(typeof data.chainId === "number" ? { chainId: data.chainId } : {}),
-            ...(typeof data.projectId === "string" ? { vendorProjectHash: sha256(data.projectId) } : {}) } : {}) });
 }
 export class NodeMetaMaskProcessRunner {
     binResolver;
@@ -195,7 +109,8 @@ export class NodeMetaMaskProcessRunner {
             let size = 0;
             const stderrChunks = [];
             let stderrSize = 0, stderrOverflow = false;
-            const stage = argv[0] === "wallet" && argv[1] === "send-transaction" ? "sdk_send" : "sdk_read";
+            // Every child is a read: the sends go through the sandboxed SDK helper (metamask-server-transaction.ts).
+            const stage = "sdk_read";
             const stderrObservation = () => {
                 if (stderrSize === 0)
                     return { stderrClass: "none", providerCode: "none" };
@@ -234,16 +149,6 @@ export class NodeMetaMaskProcessRunner {
                     bytes.fill(0);
                 }
             };
-            const observe = (outcome, exitCode, signal) => {
-                const out = Buffer.concat(chunks), err = Buffer.concat(stderrChunks);
-                try {
-                    return observeMetaMaskProcess({ outcome, exitCode, signal, durationMs: Math.min(86400000, Math.max(0, Math.floor(performance.now() - started))), stdout: { bytes: out, total: size }, stderr: { bytes: err, total: stderrSize } });
-                }
-                finally {
-                    out.fill(0);
-                    err.fill(0);
-                }
-            };
             let settled = false;
             const zero = () => { for (const chunk of [...chunks, ...stderrChunks])
                 chunk.fill(0); };
@@ -254,25 +159,13 @@ export class NodeMetaMaskProcessRunner {
                 child.removeListener("error", onError);
                 child.removeListener("close", onClose);
             };
-            const fail = (error, observeIdentifiers = false) => {
+            const fail = (error) => {
                 if (settled)
                     return;
                 settled = true;
                 cleanup();
-                if (observeIdentifiers) {
-                    const bytes = Buffer.concat(chunks);
-                    try {
-                        const observation = observeNativeFailure(bytes);
-                        if (observation !== undefined)
-                            nativeFailureIdentifiers.set(error, observation);
-                    }
-                    finally {
-                        bytes.fill(0);
-                    }
-                }
                 const stderr = stderrObservation(), failure = diagnostic(stage, absoluteDeadline !== undefined && remaining() < 1 ? "deadline" : error.message.includes("timed out") ? "timeout" : error.code === "APN_PROVIDER_PROTOCOL" ? "protocol" : "start", null, null, stderr.stderrClass, stderr.providerCode);
                 nativeFailureDiagnostics.set(error, failure);
-                failureObservations.set(error, observe(failure.code, null, null));
                 zero();
                 reject(error);
             };
@@ -301,7 +194,7 @@ export class NodeMetaMaskProcessRunner {
                     bytes.fill(0);
                 }
             };
-            const onError = () => fail(providerUnavailable("The MetaMask Agent Wallet process could not start."), true);
+            const onError = () => fail(providerUnavailable("The MetaMask Agent Wallet process could not start."));
             const onClose = (code, rawSignal) => {
                 if (settled)
                     return;
@@ -310,13 +203,13 @@ export class NodeMetaMaskProcessRunner {
                 const stdout = Buffer.concat(chunks);
                 const signal = ["SIGTERM", "SIGKILL", "SIGINT", "SIGHUP", "SIGABRT", "SIGSEGV", "SIGPIPE"].includes(rawSignal ?? "") ? rawSignal : null;
                 const stderr = stderrObservation(), nativeDiagnostic = diagnostic(stage, signal !== null ? "signal" : code === 0 ? "ok" : "exit", code, signal, stderr.stderrClass, stderr.providerCode);
-                const observation = observe(signal !== null ? "signal" : "exit", code, signal), miss = requestNotFound();
+                const miss = requestNotFound();
                 zero();
-                resolveResult({ exitCode: code ?? 1, stdout, ...(absoluteDeadline === undefined ? {} : { nativeDiagnostic }), observation,
+                resolveResult({ exitCode: code ?? 1, stdout, ...(absoluteDeadline === undefined ? {} : { nativeDiagnostic }),
                     ...(miss === undefined ? {} : { requestNotFound: miss }) });
             };
             const timeout = setTimeout(() => {
-                fail(providerUnavailable("The MetaMask Agent Wallet process timed out safely."), true);
+                fail(providerUnavailable("The MetaMask Agent Wallet process timed out safely."));
                 child.kill();
             }, absoluteDeadline === undefined ? timeoutMs : Math.max(1, Math.min(timeoutMs, remaining())));
             child.stdout.on("data", onStdout);

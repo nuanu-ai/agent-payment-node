@@ -22,6 +22,8 @@ export interface MetaMaskNativeOwnedScope {
 /** Claim is deliberately synchronous: no second SDK action can claim the same foreground consent. */
 export declare function claimMetaMaskNativeOwnedScope(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): void;
 export declare function assertMetaMaskNativeOwnedScope(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): MetaMaskNativeDeadline;
+/** The provider request id the claimed scope's effect marker names by its hash: only the claimed hand-off sends it. */
+export declare function metaMaskNativeOwnedRequestId(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): string;
 /** The last guard before the hand-off, never a caller supplied callback: local custody, the vendor Guard policy, funds and nonce. */
 export declare function assertMetaMaskNativeOwnedContextCurrent(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): Promise<void>;
 /** One foreground command: admission, vendor Guard check, quote, consent, the single hand-off and its durable outcome. */
@@ -30,7 +32,7 @@ export declare function withNativeFeeCeiling(error: unknown, caps: {
     readonly perTransferWei: string;
     readonly dailyRemainingWei: string;
 }, profile: string): unknown;
-/** `references` seals the MetaMask request id the hand-off may return; its wrapping secret is read before consent. */
+/** `references` seals the MetaMask request id APN gives the hand-off; its wrapping secret is read before consent. */
 export declare function runMetaMaskNativeTransfer(stateRoot: string, input: MetaMaskNativeTransferInput, references: ProviderRequestReferencePort): Promise<{
     next_actions: string[];
     mfa_task?: never;
@@ -110,8 +112,12 @@ export declare function metaMaskNativeClosedRequestNextActions(op: Pick<NativeOp
  */
 export declare function closeExpiredNativeTransfersOf(stateRoot: string, chainId: number, payer: string): Promise<void>;
 /**
- * Status, and with `observe` one no-send read of the stored request or transaction. A record that seals its request id
- * opens it from `references` first; one that cannot be opened refuses the read precisely, and nothing is read or written.
+ * Status, and with `observe` one no-send read of the stored request or transaction. Under the operation lock, before any
+ * seal is opened, it first brings the record's own state up to date: it closes a transfer whose consent passed before its
+ * marker, releases the holds of one that failed before its effect, with `observe` records a hand-off whose command ended
+ * at its marker UNKNOWN, and moves holds a send left `reserved` after its outcome. Those writes stay even when the seal
+ * then cannot be opened. A record that seals its request id opens it from `references` before any provider read; one
+ * that cannot be opened refuses the read precisely, and nothing is read from the provider or written after that.
  */
 export declare function readMetaMaskNativeTransfer(stateRoot: string, idInput: string, observe?: boolean, references?: ProviderRequestReferencePort): Promise<{
     read_observation?: MetaMaskNativePublicReadObservation;

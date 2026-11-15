@@ -9,12 +9,14 @@ import type { MetaMaskGaslessBinding, MetaMaskGaslessProviderIntent, MetaMaskGas
   MetaMaskGaslessProviderObservation, MetaMaskGaslessQuote, MetaMaskGaslessUnsignedResult } from "../model.js";
 import type { MetaMaskGaslessProviderPort, MetaMaskGaslessQuoteInput, MetaMaskGaslessUnsignedInput } from "../ports.js";
 import { mmClassify, mmError, mmFail } from "../reasons.js";
-import { helperResponse, MM_HELPER_VERSION, type HelperRequest } from "./protocol.js";
+import { helperResponse, helperSends, MM_HELPER_VERSION, type HelperRequest } from "./protocol.js";
 import type { MetaMaskServerRequestQuery, MetaMaskServerRequestRead } from "./server-request.js";
+import type { MetaMaskServerTransactionAnswer, MetaMaskServerTransactionInput } from "./server-transaction.js";
 import { withMetaMaskProviderRefusal } from "./provider-refusal.js";
 
 const MAX_IO = 1024 * 1024;
 const HELPER_ENTRY = fileURLToPath(new URL("./helper-bootstrap.js", import.meta.url));
+const READ_TIMEOUT_MS = 60_000, SUBMIT_TIMEOUT_MS = 120_000;
 
 export interface HelperRunnerOptions { readonly environment: NodeJS.ProcessEnv; readonly timeoutMs: number }
 export interface MetaMaskGaslessHelperRunner { run(request: HelperRequest, options: HelperRunnerOptions): Promise<unknown> }
@@ -34,27 +36,34 @@ export class MetaMaskGaslessProviderClient implements MetaMaskGaslessProviderPor
     this.runner = options.runner ?? new SubprocessMetaMaskGaslessHelperRunner();
   }
   inspect(expected: MetaMaskGaslessProfileIdentity): Promise<MetaMaskGaslessBinding> {
-    return this.invoke({ version: MM_HELPER_VERSION, mode: "inspect", expected }) as Promise<MetaMaskGaslessBinding>;
+    return this.invoke({ version: MM_HELPER_VERSION, mode: "inspect", expected }, READ_TIMEOUT_MS) as Promise<MetaMaskGaslessBinding>;
   }
   quote(input: MetaMaskGaslessQuoteInput): Promise<MetaMaskGaslessQuote> {
-    return this.invoke({ version: MM_HELPER_VERSION, mode: "quote", input }) as Promise<MetaMaskGaslessQuote>;
+    return this.invoke({ version: MM_HELPER_VERSION, mode: "quote", input }, READ_TIMEOUT_MS) as Promise<MetaMaskGaslessQuote>;
   }
   buildUnsigned(input: MetaMaskGaslessUnsignedInput): Promise<MetaMaskGaslessUnsignedResult> {
-    return this.invoke({ version: MM_HELPER_VERSION, mode: "buildUnsigned", input }) as Promise<MetaMaskGaslessUnsignedResult>;
+    return this.invoke({ version: MM_HELPER_VERSION, mode: "buildUnsigned", input }, READ_TIMEOUT_MS) as Promise<MetaMaskGaslessUnsignedResult>;
   }
   async submit(intent: MetaMaskGaslessProviderIntent): Promise<MetaMaskGaslessProviderObservation> {
     assertBeforeDeadline(intent.expiresAt, this.clock.now());
-    return await this.invoke({ version: MM_HELPER_VERSION, mode: "submit", intent }) as MetaMaskGaslessProviderObservation;
+    return await this.invoke({ version: MM_HELPER_VERSION, mode: "submit", intent }, SUBMIT_TIMEOUT_MS) as MetaMaskGaslessProviderObservation;
   }
   observe(intent: MetaMaskGaslessProviderIntent): Promise<MetaMaskGaslessProviderObservation> {
-    return this.invoke({ version: MM_HELPER_VERSION, mode: "observe", intent }) as Promise<MetaMaskGaslessProviderObservation>;
+    return this.invoke({ version: MM_HELPER_VERSION, mode: "observe", intent }, READ_TIMEOUT_MS) as Promise<MetaMaskGaslessProviderObservation>;
   }
   /** A native transfer's server-wallet request by its exact id, in the same sandboxed helper (client/server-request.ts). */
   readServerRequest(query: MetaMaskServerRequestQuery): Promise<MetaMaskServerRequestRead> {
-    return this.invoke({ version: MM_HELPER_VERSION, mode: "readRequest", query }) as Promise<MetaMaskServerRequestRead>;
+    return this.invoke({ version: MM_HELPER_VERSION, mode: "readRequest", query }, READ_TIMEOUT_MS) as Promise<MetaMaskServerRequestRead>;
   }
-  private async invoke(request: HelperRequest): Promise<unknown> {
-    const timeoutMs = request.mode === "submit" ? 120_000 : 60_000;
+  /**
+   * One server-wallet transaction request with APN's own id, sent once by the same sandboxed helper
+   * (client/server-transaction.ts) and killed after `timeoutMs`: the native transfer's consent deadline, or the revoke's
+   * submit bound. A failure carries the submit's closed diagnostic; once the helper may have started, it is never a refusal.
+   */
+  submitServerTransaction(transaction: MetaMaskServerTransactionInput, timeoutMs: number): Promise<MetaMaskServerTransactionAnswer> {
+    return this.invoke({ version: MM_HELPER_VERSION, mode: "submitTransaction", transaction }, timeoutMs) as Promise<MetaMaskServerTransactionAnswer>;
+  }
+  private async invoke(request: HelperRequest, timeoutMs: number): Promise<unknown> {
     let raw: unknown;
     try { raw = await this.runner.run(request, { environment: this.environment, timeoutMs }); }
     catch (error) {
@@ -62,7 +71,7 @@ export class MetaMaskGaslessProviderClient implements MetaMaskGaslessProviderPor
         takeReadRunnerDiagnostic(error, request.mode) ?? readDiagnostic(request.mode, "launch", "runner_launch"));
       // A runner that did not say whether its helper started may have let the POST out. From a runner only its own two
       // shapes count: refused before launch, or failed after it with the POST unknown.
-      if (request.mode === "submit") {
+      if (helperSends(request.mode)) {
         const own = takeSubmitDiagnostic(error);
         throw submitFailureError("mm_gasless_submit_unknown", own !== undefined && (own.stage === "launch" || own.stage === "runner") ? own
           : runnerDiagnostic("runner_launch", true));
@@ -73,7 +82,7 @@ export class MetaMaskGaslessProviderClient implements MetaMaskGaslessProviderPor
     try { response = helperResponse(raw, request); } catch (error) {
       if (request.mode === "inspect" || request.mode === "quote") throw readFailureError(mmClassify(error, "mm_gasless_provider_unavailable").reason,
         readDiagnostic(request.mode, "helper_response", "response_invalid"));
-      if (request.mode === "submit") throw submitFailureError(mmClassify(error, "mm_gasless_submit_unknown").reason,
+      if (helperSends(request.mode)) throw submitFailureError(mmClassify(error, "mm_gasless_submit_unknown").reason,
         runnerDiagnostic("response_invalid", true));
       throw error;
     }
@@ -97,7 +106,7 @@ export class SubprocessMetaMaskGaslessHelperRunner implements MetaMaskGaslessHel
     const failure = (invariant: "runner_launch" | "runner_exit" | "runner_timeout" | "runner_output", code: number | null = null,
       signal: NodeJS.Signals | null = null, started = true) =>
       request.mode === "inspect" || request.mode === "quote" ? readRunnerFailure(request.mode, invariant, code, signal)
-        : request.mode === "submit" ? submitFailureError("mm_gasless_submit_unknown", runnerDiagnostic(invariant, started))
+        : helperSends(request.mode) ? submitFailureError("mm_gasless_submit_unknown", runnerDiagnostic(invariant, started))
           : new Error("helper failed");
     if (!isAbsolute(process.execPath) || !isAbsolute(HELPER_ENTRY) || !Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1) {
       throw failure("runner_launch", null, null, false);

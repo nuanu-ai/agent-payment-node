@@ -33,6 +33,22 @@ export async function readPrivateSession(homeDirectory, now) {
 }
 export async function readPrivateState(homeDirectory, expected, now) {
     const { sessionEnvelope, walletEnvelope, session, walletState, token, projectId, generationHash } = await readPrivateSession(homeDirectory, now);
+    const { address, reference, referenceKind } = selectedServerWallet(walletState);
+    if (address !== expected.address)
+        mmFail("mm_gasless_binding_changed");
+    const binding = mmBinding({ providerId: "metamask-agent-wallet", address,
+        accountBindingHash: expected.accountBindingHash, capabilityHash: expected.capabilityHash, revision: expected.revision,
+        projectHash: mmPrivateHash("project", projectId), walletReferenceHash: mmPrivateHash("wallet-reference", reference, referenceKind),
+        walletIdHash: mmWalletIdentityHash(address), namespace: "eip155", mode: "server", environment: "prod" });
+    if ("providerId" in expected)
+        mmAssertSameBinding(binding, expected);
+    return { sessionEnvelope, walletEnvelope, session, walletState, token, projectId, address, binding, generationHash };
+}
+/**
+ * The session's selected server wallet: the one EVM remote wallet its selection names by name or address (never by id),
+ * as `mm` resolves the active wallet. Lowercase address; a selection that names none or several refuses.
+ */
+export function selectedServerWallet(walletState) {
     const selected = walletState.selectedWallet;
     const ref = selected.ref;
     const referenceKind = Object.keys(ref)[0];
@@ -44,16 +60,7 @@ export async function readPrivateState(homeDirectory, expected, now) {
         typeof row.address === "string" && row.address.toLowerCase() === reference.toLowerCase());
     if (matches.length !== 1)
         mmFail("mm_gasless_identity");
-    const address = mmAddress(matches[0].address, "mm_gasless_identity");
-    if (address !== expected.address)
-        mmFail("mm_gasless_binding_changed");
-    const binding = mmBinding({ providerId: "metamask-agent-wallet", address,
-        accountBindingHash: expected.accountBindingHash, capabilityHash: expected.capabilityHash, revision: expected.revision,
-        projectHash: mmPrivateHash("project", projectId), walletReferenceHash: mmPrivateHash("wallet-reference", reference, referenceKind),
-        walletIdHash: mmWalletIdentityHash(address), namespace: "eip155", mode: "server", environment: "prod" });
-    if ("providerId" in expected)
-        mmAssertSameBinding(binding, expected);
-    return { sessionEnvelope, walletEnvelope, session, walletState, token, projectId, address, binding, generationHash };
+    return { address: mmAddress(matches[0].address, "mm_gasless_identity"), reference, referenceKind };
 }
 function validateSession(envelope, now) {
     const root = mmExact(envelope, ["schemaVersion", "data"], "mm_gasless_state_corrupt");

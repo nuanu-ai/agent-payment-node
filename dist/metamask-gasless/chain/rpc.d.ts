@@ -42,6 +42,8 @@ export declare class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
     observe(intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor, provider: MetaMaskGaslessProviderObservation | null): Promise<MetaMaskGaslessRpcObservation>;
     /** Chain facts for the owner's disable of this exact dispatched delegation, against the deployment it froze. */
     revocation(intent: MetaMaskGaslessIntent, disable: MetaMaskDisableCall, operationId: string): Promise<MetaMaskRevocationChain>;
+    /** The delegator's native balance at the latest block, right before its disable is sent. */
+    revocationBalance(intent: MetaMaskGaslessIntent, disable: MetaMaskDisableCall): Promise<string>;
     /**
      * Observation proves a saved operation against the deployment it froze (token, manager and enforcers from the
      * record, code pins from its prepare snapshot), never against today's registry: a later pin change refuses new

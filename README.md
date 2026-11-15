@@ -237,6 +237,10 @@ tokens, seed phrases or private keys.
   A watch that `mm` answers with `REQUEST_NOT_FOUND` records where it missed the request, never an outcome:
   `metamask_request_not_in_local_state` (its local request list, emptied by a new `mm login`),
   `metamask_request_not_found_on_server`, or `provider_request_not_found`.
+  A native-fee transfer (`wallet metamask native-transfer`) and a gasless delegation disable are not handed to
+  `mm wallet send-transaction`: APN names the request ID itself (a native transfer seals and journals it first) and sends
+  the same request through its sandboxed SDK helper; `mm` stays for the sign-in and the reads
+  ([MetaMask native](docs/metamask-native-cli-sourceprep.md#the-hand-off)).
 - **MetaMask Smart Account**: APN keeps one encrypted session account and the ERC-7715 grant; each transfer derives one
   exact child delegation after foreground approval. `wallet permission list|sync|disable|forget` manage the binding.
   `sync`, `disable` and `forget` take `--expected-revision`, the `revision` that `wallet permission list` shows; a stale

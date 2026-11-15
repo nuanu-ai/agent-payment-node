@@ -3,7 +3,8 @@ import { exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 
 const NATIVE_DIAGNOSTIC_STAGES = ["sdk_resolver","sdk_read","sdk_send","owner_guard","rpc_balance","rpc_nonce","post_handoff"] as const;
-const NATIVE_DIAGNOSTIC_CODES = ["ok","deadline","refused","timeout","exit","signal","protocol","start","internal"] as const;
+/** `interrupted` (0.5.108): the sending command ended after its effect marker before it recorded the hand-off's outcome. */
+const NATIVE_DIAGNOSTIC_CODES = ["ok","deadline","refused","timeout","exit","signal","protocol","start","internal","interrupted"] as const;
 export interface MetaMaskNativeDiagnostic {
   readonly stage: typeof NATIVE_DIAGNOSTIC_STAGES[number];
   readonly code: typeof NATIVE_DIAGNOSTIC_CODES[number];

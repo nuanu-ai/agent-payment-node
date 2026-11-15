@@ -1,39 +1,23 @@
 import { ApnError } from "./errors.js";
-import { METAMASK_NATIVE_REQUEST_UNSEALED, metaMaskNativeMfaTask, metaMaskNativeRequestIdHash, metaMaskNativeRequestReference, metaMaskNativeSealedMfaTask } from "./metamask-native-journal.js";
-/** Seals the request id the hand-off returned for `op` and returns the hash its journal keeps in its place. */
+import { METAMASK_NATIVE_SDK_HANDOFF, metaMaskNativeMfaTask, metaMaskNativeRequestIdHash, metaMaskNativeRequestReference, metaMaskNativeSealedMfaTask } from "./metamask-native-journal.js";
+/** Seals APN's request id for `op` and returns the hash its effect marker keeps in its place; the caller holds the lock. */
 export async function sealMetaMaskNativeRequest(references, op, requestId) {
     const requestIdHash = metaMaskNativeRequestIdHash(requestId);
     await references.seal(metaMaskNativeRequestReference(op, requestIdHash), requestId);
     return requestIdHash;
 }
 /**
- * Seals the request id the hand-off returned. This runs after the hand-off, so nothing may stop its outcome from being
- * recorded: a seal that fails (the wrapping secret was read before consent, so only a write can fail) drops the id,
- * which is never kept in plaintext, and the journal says why it keeps no request.
+ * The journal fields the hand-off's result writes: its state, transaction hash and diagnostic as returned, and the
+ * owner's MFA task named by `requestIdHash`, the hash the effect marker already keeps (it stays as written).
  */
-export async function keepMetaMaskNativeRequest(references, op, requestId) {
-    try {
-        return { requestIdHash: await sealMetaMaskNativeRequest(references, op, requestId) };
-    }
-    catch {
-        return { unsealed: true };
-    }
-}
-/**
- * The journal fields the hand-off's result writes: its state, transaction hash and diagnostic as returned, the hash of a
- * sealed request id with the owner's MFA task, or `providerRequestReason` for a request id that could not be sealed.
- */
-export function metaMaskNativeHandoffFields(result, kept) {
+export function metaMaskNativeHandoffFields(result, requestIdHash) {
     const diagnostic = result.diagnostic === undefined ? {} : { diagnostic: result.diagnostic };
     if (result.disposition === "acknowledged")
         return { ...diagnostic, state: "acknowledged", transactionHash: result.transactionHash };
-    const requestIdHash = kept !== undefined && "requestIdHash" in kept ? kept.requestIdHash : undefined;
     // A pending or unknown hand-off stays financially UNKNOWN; an owner approval the provider waits on is kept beside it.
-    const mfa = requestIdHash !== undefined && result.mfa !== undefined && result.transactionHash === undefined
+    const mfa = result.mfa !== undefined && result.transactionHash === undefined
         ? { mfaTask: metaMaskNativeSealedMfaTask(requestIdHash, result.mfa, "send") } : {};
-    return { ...diagnostic, state: "unknown", transactionHash: result.transactionHash ?? null, providerRequestId: null,
-        ...(requestIdHash === undefined ? {} : { providerRequestIdHash: requestIdHash }),
-        ...(kept !== undefined && "unsealed" in kept ? { providerRequestReason: METAMASK_NATIVE_REQUEST_UNSEALED } : {}), ...mfa };
+    return { ...diagnostic, state: "unknown", transactionHash: result.transactionHash ?? null, ...mfa };
 }
 /**
  * The stored request id of `op`: kept in the record, or opened from its seal. A seal that cannot be opened (missing,
@@ -55,6 +39,20 @@ export function metaMaskNativeRequestTask(op, evidence, source) {
     if (op.providerRequestId === null)
         throw new ApnError("APN_STATE_CORRUPT", "Native transfer stores no provider request for an MFA task.");
     return metaMaskNativeMfaTask(op.providerRequestId, evidence, source);
+}
+/**
+ * The approval window a read of a request APN sent itself records. A server answer that names no `approval.expiresAt`
+ * keeps the non-null `expiresAt` the task already holds for the same request (the same `requestIdHash`), from the send or
+ * an earlier read, rather than erasing it: the window of one request does not move. The kept expiry keeps the
+ * `evidenceHash` of the answer that named it, since the new answer's hash does not cover it; the auth method is the
+ * read's own. A record 0.5.107 or earlier wrote takes the read's evidence as it always did.
+ */
+export function metaMaskNativeReadEvidence(op, evidence) {
+    const task = op.mfaTask;
+    if (op.handoffPath !== METAMASK_NATIVE_SDK_HANDOFF || evidence.expiresAt !== null || task === undefined || !("requestIdHash" in task) ||
+        task.requestIdHash !== op.providerRequestIdHash || task.expiresAt === null)
+        return evidence;
+    return { ...evidence, expiresAt: task.expiresAt, evidenceHash: task.evidenceHash };
 }
 export function publicMetaMaskNativeReadObservation(observation, op) {
     const hash = op.providerRequestIdHash;

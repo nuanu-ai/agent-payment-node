@@ -51,13 +51,18 @@ https.request = (urlInput, options, onResponse) => {
   assert.notEqual(options.rejectUnauthorized, false); assert.equal(options.checkServerIdentity, undefined);
   const req = new EventEmitter(); req.destroyed = false;
   req.destroy = () => { req.destroyed = true; return req; };
+  // As Node does: the socket is assigned, connects and finishes its TLS handshake whether or not the request was ended.
+  // A send writes its request only after `secureConnect`; a read ends at once and is answered after the handshake.
+  setImmediate(() => {
+    if (req.destroyed) return;
+    const socket = new EventEmitter();
+    socket.remoteAddress = readFixture(fixturePath).transportFault === "wrong-peer" ? "8.8.4.4" : "8.8.8.8";
+    req.emit("socket", socket); socket.emit("connect");
+    if (!req.destroyed) socket.emit("secureConnect");
+  });
   req.end = bodyInput => {
     const body = bodyInput === undefined ? null : String(bodyInput);
     setImmediate(async () => {
-      if (req.destroyed) return;
-      const socket = new EventEmitter();
-      socket.remoteAddress = readFixture(fixturePath).transportFault === "wrong-peer" ? "8.8.4.4" : "8.8.8.8";
-      req.emit("socket", socket); socket.emit("connect");
       if (req.destroyed || readFixture(fixturePath).transportFault === "timeout") return;
       try {
         const result = await respond(fixturePath, url.href, options.method, options.headers, body);

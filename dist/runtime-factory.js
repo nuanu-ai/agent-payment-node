@@ -65,7 +65,7 @@ import { TtyGaslessApproval } from "./gasless/tty.js";
 import { MetaMaskGaslessProviderClient } from "./metamask-gasless/client/index.js";
 import { EncryptedMetaMaskGaslessRequestReferenceStore } from "./metamask-gasless/journal/request-reference.js";
 import { TtyMetaMaskRevocationApproval } from "./metamask-gasless/revocation/consent.js";
-import { MetaMaskCliRevocationWallet } from "./metamask-gasless/revocation/wallet.js";
+import { MetaMaskSdkRevocationWallet } from "./metamask-gasless/revocation/wallet.js";
 import { metaMaskGaslessObservationRpcFactory, metaMaskGaslessRpcFactory } from "./metamask-gasless/chain/rpc.js";
 import { TtyMetaMaskGaslessApproval } from "./metamask-gasless/tty.js";
 import { TtyOperationAbandonApproval } from "./operation-abandon-approval.js";
@@ -268,7 +268,7 @@ export function createApnCore(bound, options = {}, runtimeCommand = bound.reques
             references: new EncryptedMetaMaskGaslessRequestReferenceStore(state, wrappingSecret),
             ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyMetaMaskGaslessApproval() } : {}),
             ...(bound.request.command === "gasless.transfer.revoke" ? { revocation: { approval: new TtyMetaMaskRevocationApproval(),
-                    wallet: new MetaMaskCliRevocationWallet() } } : {}),
+                    wallet: new MetaMaskSdkRevocationWallet() } } : {}),
         },
         gasless: options.gasless ?? { rpcFor: gaslessRpcFactory(process.env),
             observationRpcFor: gaslessObservationRpcFactory(process.env),

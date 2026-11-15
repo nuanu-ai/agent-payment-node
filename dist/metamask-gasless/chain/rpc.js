@@ -13,7 +13,7 @@ import { mmAddress, mmChain, mmHex, mmUint } from "../validation.js";
 import { observeMetaMaskGasless } from "./observe.js";
 import { recheckBlock, rpcBlock, rpcQuantity, rpcRecord } from "./abi.js";
 import { readMetaMaskChainState, validateMetaMaskGaslessSnapshot } from "./snapshot.js";
-import { readMetaMaskRevocationChain } from "../revocation/chain.js";
+import { readMetaMaskRevocationBalance, readMetaMaskRevocationChain } from "../revocation/chain.js";
 export { validateMetaMaskGaslessSnapshot } from "./snapshot.js";
 const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getCode",
     "eth_getStorageAt", "eth_call", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs"]);
@@ -140,6 +140,13 @@ export class MetaMaskGaslessRpc {
         await this.assertChain();
         const call = async (method, params) => await this.call(method, params, REVOCATION_METHODS.has(method));
         return await readMetaMaskRevocationChain(call, mmObservedDeployment(intent, this.deployment), intent, disable, operationId);
+    }
+    /** The delegator's native balance at the latest block, right before its disable is sent. */
+    async revocationBalance(intent, disable) {
+        this.assertIntent(intent);
+        await this.assertChain();
+        const call = async (method, params) => await this.call(method, params, REVOCATION_METHODS.has(method));
+        return await readMetaMaskRevocationBalance(call, disable);
     }
     /**
      * Observation proves a saved operation against the deployment it froze (token, manager and enforcers from the

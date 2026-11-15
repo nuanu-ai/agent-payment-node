@@ -27,8 +27,10 @@ const STATES = METAMASK_NATIVE_STATES;
 const CONTEXT_KEYS = ["profile", "profileHash", "accountBindingHash", "capabilityHash", "profileRevision", "policyDigest", "policyRevision",
     "activationDigest", "vendorPolicyHash", "vendorProjectHash", "quote", "operationId", "consentExpiresAt", "issuedDay"];
 export const METAMASK_NATIVE_OPERATION_SCHEMA = V2;
-/** The only `providerRequestReason`: the hand-off returned a request id that could not be sealed. */
+/** The only `providerRequestReason`: the hand-off of a 0.5.107 record returned a request id that could not be sealed. */
 export const METAMASK_NATIVE_REQUEST_UNSEALED = "provider_request_reference_unsealed";
+/** The only `handoffPath`: the request APN named, sealed and journaled before the sandboxed helper sent it (0.5.108+). */
+export const METAMASK_NATIVE_SDK_HANDOFF = "sdk_helper";
 const mfaFields = (evidence, source, now) => ({ expiresAt: evidence.expiresAt, authMethod: evidence.authMethod, observedAt: now.toISOString(), source, evidenceHash: evidence.evidenceHash });
 /** The task of a record that keeps the request id itself (one 0.5.106 or earlier wrote). */
 export function metaMaskNativeMfaTask(requestId, evidence, source, now = new Date()) {
@@ -55,7 +57,7 @@ const digest = (value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(va
 const instant = (value) => typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 /** Checked against the record's own seal and fields only (R2): a changed constant or a moved APN home never voids it. */
 function validateOperation(value) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "requestHash", "context", "reservations", "state", "effectAttempts", "transactionHash", "providerRequestId", "receiptEvidence", "createdAt", "updatedAt", "recordHash", ...(value.diagnostic === undefined ? [] : ["diagnostic"]), ...(value.mfaTask === undefined ? [] : ["mfaTask"]), ...(value.providerRequestIdHash === undefined ? [] : ["providerRequestIdHash"]), ...(value.providerRequestReason === undefined ? [] : ["providerRequestReason"])]))
+    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "requestHash", "context", "reservations", "state", "effectAttempts", "transactionHash", "providerRequestId", "receiptEvidence", "createdAt", "updatedAt", "recordHash", ...(value.diagnostic === undefined ? [] : ["diagnostic"]), ...(value.mfaTask === undefined ? [] : ["mfaTask"]), ...(value.providerRequestIdHash === undefined ? [] : ["providerRequestIdHash"]), ...(value.providerRequestReason === undefined ? [] : ["providerRequestReason"]), ...(value.handoffPath === undefined ? [] : ["handoffPath"])]))
         corrupt("Native transfer journal schema is invalid.");
     const o = value, { recordHash, ...body } = o, v2 = o.schemaVersion === V2, c = o.context;
     if ((o.schemaVersion !== V1 && !v2) || recordHash !== hashObject(body))
@@ -104,6 +106,10 @@ function validateOperation(value) {
     if (o.providerRequestReason !== undefined && (o.providerRequestReason !== METAMASK_NATIVE_REQUEST_UNSEALED || o.providerRequestId !== null ||
         o.providerRequestIdHash !== undefined || o.mfaTask !== undefined || o.effectAttempts !== 1))
         corrupt("Native transfer provider request reason is invalid.");
+    // A helper hand-off is written with its sealed request's hash in the very effect marker, and never with an id or reason.
+    if (o.handoffPath !== undefined && (o.handoffPath !== METAMASK_NATIVE_SDK_HANDOFF || o.effectAttempts !== 1 || o.providerRequestIdHash === undefined ||
+        o.providerRequestId !== null || o.providerRequestReason !== undefined))
+        corrupt("Native transfer hand-off path is invalid.");
     validateMfaTask(o);
     return o;
 }
@@ -169,6 +175,8 @@ export class MetaMaskNativeJournal extends SecureStateStore {
             old.diagnostic !== undefined && canonicalJson(old.diagnostic) !== canonicalJson(next.diagnostic) || old.createdAt !== next.createdAt || old.effectAttempts > next.effectAttempts || old.transactionHash !== null && old.transactionHash !== next.transactionHash ||
             old.providerRequestIdHash !== undefined && old.providerRequestIdHash !== next.providerRequestIdHash ||
             old.providerRequestReason !== undefined && old.providerRequestReason !== next.providerRequestReason ||
+            // The hand-off path is named by the effect marker itself (0 to 1 attempts), and never changes or appears later.
+            old.handoffPath !== next.handoffPath && (old.handoffPath !== undefined || old.effectAttempts !== 0) ||
             RESOLVED.includes(old.state)))
             blocked("Native transfer journal cannot replace an existing outcome.");
         await this.ensureDirectory(DIRECTORY);
@@ -241,8 +249,10 @@ function publicMfaTask(o, now) {
 }
 export function publicMetaMaskNativeOperation(o, now = new Date()) {
     const receipt = o.receiptEvidence === null ? null : validateMetaMaskNativeFeeReceipt(o.receiptEvidence, o.context.quote), transfer = metaMaskNativeQuoteTransfer(o.context.quote);
-    // Only an outcome that a no-send observation can still move (a stored request or transaction) names the observer.
-    const observable = ["acknowledged", "unknown"].includes(o.state) && (o.transactionHash !== null || metaMaskNativeHasRequest(o));
+    // Only an outcome that a no-send observation can still move (a stored request or transaction) names the observer. A
+    // helper hand-off whose command ended at its effect marker still names its sealed request (0.5.108 and later).
+    const observable = (["acknowledged", "unknown"].includes(o.state) || o.state === "effect_started" && o.handoffPath !== undefined) &&
+        (o.transactionHash !== null || metaMaskNativeHasRequest(o));
     return { operation_id: o.operationId, state: o.state === "confirmed" && receipt?.transferAccepted === false ? "confirmed_reverted" : o.state, chain_id: o.context.quote.chainId, profile: o.context.profile,
         sender: o.context.quote.sender, recipient: transfer.recipient, token: o.context.quote.token, usdc_atomic: transfer.amountAtomic, usdc: formatAtomic(transfer.amountAtomic, 6),
         maximum_native_fee_atomic: o.context.quote.feeQuote.totalQuoteWei, transaction_hash: o.transactionHash,
