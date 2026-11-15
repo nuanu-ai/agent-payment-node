@@ -107,21 +107,37 @@ own token and exactly these bytes, which are what `mm` 6.1.5 sent for the same p
  "txIntent":"APN <operation-id>: <amount> atomic USDC to <recipient>"}
 ```
 
-Another body, URL or token, or a second request, is refused before it leaves. The helper is killed at the consent
-deadline, as the `mm` child was. It returns only bound fields of MetaMask's answer: this request ID, its status, a
-transaction hash when there is one and, for `AWAITING_MFA`, the approval's `expiresAt` and the session's `authMethod`.
+Another body, URL or token, or a second request, is refused before it leaves. The policy also checks the consent
+deadline at the request and again right before the bytes go, and the helper is killed at that deadline, as the `mm`
+child was. It returns only bound fields of MetaMask's answer for this very request ID: its status, a transaction hash
+when there is one and, for `AWAITING_MFA`, the approval's `expiresAt` and the session's `authMethod`.
 
-| MetaMask's answer | Result |
-| --- | --- |
-| A transaction hash, status not `FAILED`, `BROADCAST_FAILED`, `DENIED` or `EXPIRED` | `acknowledged` |
-| `EVALUATING`, `AWAITING_MFA`, `SIGNING` or `BROADCASTING` with no hash | `unknown`, with the owner's MFA task for `AWAITING_MFA` |
-| `FAILED`, `BROADCAST_FAILED`, `DENIED` or `EXPIRED`, or another status | `unknown`, with the hash when MetaMask named one |
-| No answer, a refusing HTTP status, an answer that names another request, a helper timeout or exit | `unknown` |
+The hand-off's answer decides the journal's state. A `pending` answer is not a state of its own: the journal records
+it as `unknown`, with no transaction hash.
+
+| MetaMask's answer | Hand-off answer | Journal `state` |
+| --- | --- | --- |
+| A transaction hash, status not `FAILED`, `BROADCAST_FAILED`, `DENIED` or `EXPIRED` | acknowledged | `acknowledged` |
+| `EVALUATING`, `AWAITING_MFA`, `SIGNING` or `BROADCASTING` with no hash | pending | `unknown`, with the owner's MFA task for `AWAITING_MFA` |
+| `FAILED`, `BROADCAST_FAILED`, `DENIED` or `EXPIRED`, or another status | unknown | `unknown`, with the hash when MetaMask named one |
+| No answer, a refusing HTTP status, an answer that names another request, the deadline, a helper timeout or exit | unknown | `unknown` |
 
 Every outcome after the effect marker keeps the request ID, so observe reads that request. The journal's `diagnostic`
 has stage `sdk_send`; its `code` is `ok` for an answer, otherwise `refused` (an HTTP refusal), `timeout`, `exit`,
 `start`, `deadline`, `protocol` or `internal`, and `providerCode` is `auth`, `policy`, `mfa`, `funds`, `rate_limit`,
 `other` or `none` from MetaMask's HTTP status and error code. None of them is proof that nothing was sent.
+
+`mm` read the wallet's native balance right before its own POST. The helper does not, and needs not: the last guard
+already reads the native and USDC balances and the nonce (`rpc_balance`), and the native balance must cover the quote's
+full maximum fee, which is at least the gas limit times the maximum fee per gas.
+
+**A command that ended after its marker.** The sending command holds the operation's lock from before the marker until
+it has recorded the outcome and moved the usage holds. When observe or resume later holds that lock and still finds the
+marker (`effect_started` with `handoffPath`), that command is gone. Before anything else it moves both holds that are
+still `reserved` to `unknown_finality` and records the transfer `unknown`, with `diagnostic.stage: "post_handoff"` and
+`code: "interrupted"`. Then it reads the request as for any `unknown` transfer: a transaction hash goes to receipt proof
+and settles the actual fee, `AWAITING_MFA` records the owner's task, and a 404 keeps the transfer `unknown` with its
+holds charged. `native-transfer-status` alone changes nothing.
 
 States: `prepared`, `effect_started`, `acknowledged` and `unknown` are non-terminal; `confirmed`, `confirmed_reverted`,
 `failed_before_effect` and `abandoned_unknown` are terminal.
@@ -201,7 +217,9 @@ once. It never sends, signs or approves anything. A sealed request ID is opened 
 `read_observation.watch_returned` is then `false`, and `read_observation.server_read` is present once step 1 passed. A 404 is
 recorded as `metamask_request_not_found_on_server`; a refused read as `provider_request_read_unavailable`, with its
 reason in `server_read.reason`. A transfer whose command ended at its effect marker (`effect_started`) also names the
-observer.
+observer. For `AWAITING_MFA` the read records the approval's `expiresAt` and the session's `auth_method`, as the send
+did. When MetaMask's answer names no `approval.expiresAt`, the task keeps the expiry it already holds for the same
+request.
 
 **A transfer 0.5.107 or earlier sent** (no `handoffPath`) is read as before:
 
@@ -236,8 +254,9 @@ GET of this request's status in the session's project only.
   equal to its chain. A transaction hash, when present, must be 32 bytes of lowercase hex.
 
 A verified answer is recorded exactly as a `requests watch` answer of the same request: a transaction hash moves the
-transfer to receipt proof, `AWAITING_MFA` records the owner's approval task as a watch status does (its `expires_at`
-and `auth_method` are null), and `EXPIRED` or `DENIED` gives the same next actions as a watch. A 404 is recorded as
+transfer to receipt proof, `AWAITING_MFA` records the owner's approval task as a watch status does, and `EXPIRED` or
+`DENIED` gives the same next actions as a watch. After a watch (a transfer 0.5.107 or earlier sent), the task's
+`expires_at` and `auth_method` are null, as before. A 404 is recorded as
 `metamask_request_not_found_on_server`. After a watch, a refused read keeps `metamask_request_not_in_local_state`.
 
 `read_observation.server_read` is present only when the server read ran:
