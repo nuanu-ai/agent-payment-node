@@ -221,9 +221,13 @@ export class HelperNetworkPolicy {
   }
   /** The send's own deadline (a gasless intent's, a server transaction's), checked at the request and right before its bytes go. */
   private assertSubmitDeadline(): void {
-    if (this.context.mode !== "submit" && this.context.mode !== "submitTransaction") return;
-    const current = this.context.now().getTime();
-    const deadline = Date.parse(this.context.mode === "submit" ? this.context.intent.expiresAt : this.context.input.expiresAt);
+    // Separate branches: the `"submit" | "observe"` member is not removed by a ternary or a negated mode check.
+    const c = this.context;
+    let expiresAt: string;
+    if (c.mode === "submitTransaction") expiresAt = c.input.expiresAt;
+    else if (c.mode === "submit") expiresAt = c.intent.expiresAt;
+    else return;
+    const current = c.now().getTime(), deadline = Date.parse(expiresAt);
     if (!Number.isSafeInteger(current) || !Number.isSafeInteger(deadline)) { this.deadlineFailure = "mm_gasless_clock"; this.submitRefused("clock"); mmFail("mm_gasless_clock"); }
     if (this.lastClockMs !== undefined && current < this.lastClockMs) { this.deadlineFailure = "mm_gasless_clock"; this.submitRefused("clock"); mmFail("mm_gasless_clock"); }
     this.lastClockMs = current;

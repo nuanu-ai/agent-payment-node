@@ -336,6 +336,26 @@ async function recordInterruptedHandoff(stateRoot:string,journal:MetaMaskNativeJ
     stderrClass:"none",providerCode:"none"});
   return await journal.persist(patch(op,{state:"unknown",...(op.diagnostic===undefined?{diagnostic:interrupted}:{})}));
 }
+/**
+ * The send's own outcome paths persist the journal first and move the holds after it, in every release. A command that
+ * ended between the two leaves a record past its effect marker (acknowledged or unknown, later confirmed or abandoned)
+ * whose holds are still `reserved`, and its settlement would refuse forever ("no durable effect hold"). The caller holds
+ * the operation lock, which the send holds for its whole run, so that command is gone: every hold of this operation still
+ * `reserved` moves to the state the send would have written, `submitted` for an acknowledged outcome, else
+ * `unknown_finality`. Both keep the hold charged: this never releases or finalizes money, and settlement still needs the
+ * receipt. A hold already moved is left alone, and so is a missing or changed one (its settlement still refuses). No
+ * journal field changes, so a record any release wrote gets the same repair, and running it again does nothing.
+ */
+async function moveHoldsLeftReserved(stateRoot:string,op:NativeOperation):Promise<void> {
+  if(op.effectAttempts!==1||["prepared","effect_started","failed_before_effect"].includes(op.state))return;
+  const ledger=new AssetUsageLedger(stateRoot), state=op.state==="acknowledged"?"submitted":"unknown_finality";
+  for (const r of op.reservations) {
+    const held=await ledger.load({account:r.account,chain:r.chain,asset:r.asset},r.reservationId);
+    if(held===null||held.state!=="reserved"||held.metamaskNativeReservation?.operationId!==op.operationId||held.policyDigest!==r.policyDigest||
+      held.amountAtomic!==r.amountAtomic||held.idempotencyHash!==r.idempotencyHash)continue;
+    await ledger.transition({...transitionIdentity(r),state,now:new Date(),expectedCurrentStates:["reserved"]});
+  }
+}
 function failureDiagnostic(error: unknown, context: MetaMaskNativeOwnedContext, scope: MetaMaskNativeOwnedScope | undefined): MetaMaskNativeDiagnostic {
   const e = scope === undefined ? undefined : scopes.get(scope), deadline = Date.parse(nativeContextDeadline(context));
   return takeMetaMaskNativeProcessFailureDiagnostic(error)??(error instanceof ApnError&&"nativeDiagnostic" in error?validateMetaMaskNativeDiagnostic(error.nativeDiagnostic):undefined)??validateMetaMaskNativeDiagnostic({
@@ -356,6 +376,9 @@ export async function readMetaMaskNativeTransfer(stateRoot:string,idInput:string
     op=await closeExpiredBeforeEffect(stateRoot,journal,op,new Date());
     // Observing, under the operation lock: a helper hand-off whose command ended at its marker is UNKNOWN first.
     if(observe)op=await recordInterruptedHandoff(stateRoot,journal,op);
+    // Status and observe alike, before any receipt or settlement: a send that ended after its journal outcome and before
+    // its hold transitions leaves holds `reserved`, which settlement would never accept.
+    await moveHoldsLeftReserved(stateRoot,op);
     let readObservation: MetaMaskNativePublicReadObservation | undefined = observe ? publicMetaMaskNativeReadObservation(Object.freeze({stage:"not_requested",guard_step:null,
       request_id:op.providerRequestId,watch_returned:false,before_guard_verified:false,after_guard_verified:false,
       request_identity_verified:false,provider_status:null,transaction_hash:op.transactionHash,chain_id:op.context.quote.chainId,

@@ -4,11 +4,13 @@
  * it UNKNOWN with an `interrupted` diagnostic and moves both holds to `unknown_finality`, before any read can add a hash,
  * a receipt or the owner's task. So a hash the server names settles through the receipt, and a later status no longer
  * fails on a hold that was never moved. A record without the helper path (0.5.107 and earlier) is left as it is.
+ * A send that ended after its journal outcome and before its hold transitions (any release) leaves holds `reserved`:
+ * status and observe move each to the state that send would have written, before any receipt or settlement.
  * The vendor and chain reads are doubles; the state, the journal, the usage ledger and the sealed reference are real.
  * Nothing here imports helpers.ts: it loads src/core.js before the mocks below could apply.
  */
 import assert from "node:assert/strict";
-import { chmod, cp, readdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, cp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test, { mock } from "node:test";
 import { ReferenceTestSecret, referenceTemporaryState } from "./provider-request-reference-helpers.js";
@@ -33,18 +35,23 @@ mock.module("../../src/metamask-native-transfer-rpc.js", { namedExports: {
   readMetaMaskNativeFunding: async () => { throw new Error("TEST no funding read"); },
   observeMetaMaskNativeTransfer: async (quote: Record<string, any>, transactionHash: string) => {
     receipts += 1;
-    const { validateMetaMaskNativeFeeReceipt, metaMaskNativeQuoteTransfer } = await import("../../src/metamask-native-fee-evidence.js");
-    const transfer = metaMaskNativeQuoteTransfer(quote as never), word = (value: string) => `0x${value.slice(2).toLowerCase().padStart(64, "0")}`;
-    const block = { numberAtomic: "101", hash: `0x${"b".repeat(64)}` }, t = quote.transaction;
-    const evidence = { schemaVersion: "apn.metamask-native-fee-receipt.v1", quoteHash: quote.quoteHash, transactionHash, chainId: quote.chainId,
-      sender: quote.sender, to: t.to, valueAtomic: "0", transactionType: 2, nonceAtomic: t.nonceAtomic, data: t.data, gasLimitAtomic: t.gasLimitAtomic,
-      maxFeePerGasAtomic: t.maxFeePerGasAtomic, maxPriorityFeePerGasAtomic: t.maxPriorityFeePerGasAtomic, authorizationList: [], status: "success",
-      gasUsedAtomic: "50000", effectiveGasPriceAtomic: "150", receiptBlock: block, canonicalBlock: block,
-      logs: [{ address: quote.token, topics: [TRANSFER_TOPIC, word(quote.sender), word(transfer.recipient)],
-        data: `0x${BigInt(transfer.amountAtomic).toString(16).padStart(64, "0")}` }], rpcOrigin: "https://test-rpc.example", observedAt: new Date().toISOString() };
+    const { validateMetaMaskNativeFeeReceipt } = await import("../../src/metamask-native-fee-evidence.js");
+    const evidence = await receiptEvidence(quote, transactionHash);
     return { kind: "accepted", evidence, receipt: validateMetaMaskNativeFeeReceipt(evidence, quote) };
   },
 } });
+/** The successful transfer receipt of `quote`'s transaction: 50000 gas at 150, so the native fee is 7500000. */
+async function receiptEvidence(quote: Record<string, any>, transactionHash: string): Promise<Record<string, unknown>> {
+  const { metaMaskNativeQuoteTransfer } = await import("../../src/metamask-native-fee-evidence.js");
+  const transfer = metaMaskNativeQuoteTransfer(quote as never), word = (value: string) => `0x${value.slice(2).toLowerCase().padStart(64, "0")}`;
+  const block = { numberAtomic: "101", hash: `0x${"b".repeat(64)}` }, t = quote.transaction;
+  return { schemaVersion: "apn.metamask-native-fee-receipt.v1", quoteHash: quote.quoteHash, transactionHash, chainId: quote.chainId,
+    sender: quote.sender, to: t.to, valueAtomic: "0", transactionType: 2, nonceAtomic: t.nonceAtomic, data: t.data, gasLimitAtomic: t.gasLimitAtomic,
+    maxFeePerGasAtomic: t.maxFeePerGasAtomic, maxPriorityFeePerGasAtomic: t.maxPriorityFeePerGasAtomic, authorizationList: [], status: "success",
+    gasUsedAtomic: "50000", effectiveGasPriceAtomic: "150", receiptBlock: block, canonicalBlock: block,
+    logs: [{ address: quote.token, topics: [TRANSFER_TOPIC, word(quote.sender), word(transfer.recipient)],
+      data: `0x${BigInt(transfer.amountAtomic).toString(16).padStart(64, "0")}` }], rpcOrigin: "https://test-rpc.example", observedAt: new Date().toISOString() };
+}
 const { readMetaMaskNativeTransfer } = await import("../../src/metamask-native-transfer-owner.js");
 const { MetaMaskNativeJournal, metaMaskNativeRequestIdHash, metaMaskNativeRequestReference } = await import("../../src/metamask-native-journal.js");
 const { EncryptedProviderRequestReferenceStore } = await import("../../src/provider-request-reference-store.js");
@@ -74,31 +81,36 @@ async function rows(root: string): Promise<Map<string, { readonly path: string; 
   return found;
 }
 
+type Hold = "reserved" | "submitted" | "unknown_finality";
 /**
- * A corpus transfer rewritten as a 0.5.108 command leaves it when its process dies after the effect marker: the request id
- * sealed, the marker naming its hash and the helper path, no outcome, both holds still `reserved`.
+ * A corpus transfer rewritten as a command leaves it when its process dies: `fields` are the journal it reached (built
+ * from the stored record), `handoffPath` says a 0.5.108 helper hand-off wrote it (the request id sealed, the marker naming
+ * its hash and the helper path), and `holds` are the native and token usage rows.
  */
-async function interrupted(t: test.TestContext, handoffPath: boolean = true) {
+type Fields = (saved: Record<string, any>) => Record<string, unknown> | Promise<Record<string, unknown>>;
+async function crashed(t: test.TestContext, fields: Fields, handoffPath: boolean, holds: readonly [Hold, Hold] = ["reserved", "reserved"]) {
   const temporary = await referenceTemporaryState(); t.after(temporary.cleanup);
   const root = temporary.root;
   await cp(FIXTURE, root, { recursive: true }); await ownerOnly(root);
   await new MetaMaskNativeJournal(root).initialize();
   const directory = join(root, "metamask-native-operations"), [file] = await readdir(directory), path = join(directory, file!);
-  const { recordHash: _hash, diagnostic: _diagnostic, ...saved } = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
-  const body = { ...saved, state: "effect_started", ...(handoffPath ? { providerRequestIdHash: HASH, handoffPath: "sdk_helper" } : {}) };
+  const { recordHash: _hash, diagnostic: _diagnostic, ...saved } = JSON.parse(await readFile(path, "utf8")) as Record<string, any>;
+  const body = { ...saved, ...(await fields(saved)), ...(handoffPath ? { providerRequestIdHash: HASH, handoffPath: "sdk_helper" } : {}) };
   await writeFile(path, `${canonicalJson({ ...body, recordHash: hashObject(body) })}\n`, { mode: 0o600 });
   const id = file!.slice(0, 64), journal = new MetaMaskNativeJournal(root), op = (await journal.read(id))!;
-  for (const reservation of op.reservations) {
+  for (const [index, reservation] of op.reservations.entries()) {
     const { path: rowPath, row } = (await rows(root)).get(reservation.reservationId)!;
     const { consumedAtomic: _consumed, ...current } = withoutDigest(row as never) as unknown as Record<string, unknown>;
-    await writeFile(rowPath, `${canonicalJson(seal({ ...current, state: "reserved", updatedAt: current.reservedAt, effectAt: null, outcomeDigest: null } as never))}\n`,
+    await writeFile(rowPath, `${canonicalJson(seal({ ...current, state: holds[index], updatedAt: current.reservedAt, effectAt: null, outcomeDigest: null } as never))}\n`,
       { mode: 0o600 });
   }
   const references = new EncryptedProviderRequestReferenceStore({ root }, new ReferenceTestSecret());
   if (handoffPath) await references.seal(metaMaskNativeRequestReference(op, HASH), RID);
   serverReads = []; receipts = 0; answer = undefined;
-  return { root, id, journal, references, op };
+  return { root, id, journal, references, op, path };
 }
+/** A 0.5.108 send that ended at its effect marker: no outcome, both holds still `reserved`. */
+const interrupted = (t: test.TestContext, handoffPath: boolean = true) => crashed(t, () => ({ state: "effect_started" }), handoffPath);
 const holdStates = async (root: string, op: { readonly reservations: readonly { readonly reservationId: string }[] }) => {
   const all = await rows(root);
   return op.reservations.map(reservation => all.get(reservation.reservationId)!.row.state);
@@ -154,4 +166,63 @@ test("an effect marker 0.5.107 or earlier wrote, with no helper path, is observe
   assert.deepEqual(serverReads, []); assert.deepEqual(await holdStates(root, op), ["reserved", "reserved"]);
   assert.deepEqual(await readFile(join(root, "metamask-native-operations", `${id}.json`)), before);
   assert.equal((await journal.read(id))?.diagnostic, undefined);
+});
+
+const journalBytes = (path: string) => readFile(path);
+const holdRows = async (root: string) => [...(await rows(root)).values()].map(entry => entry.row);
+
+test("a send that ended after its UNKNOWN outcome, before moving its holds: status moves them, and the receipt settles", async (t) => {
+  const { root, id, references, op, path } = await crashed(t, () => ({ state: "unknown" }), true);
+  const before = await journalBytes(path);
+  const status = await readMetaMaskNativeTransfer(root, id);
+  assert.equal(status.state, "unknown");
+  assert.deepEqual(await holdStates(root, op), ["unknown_finality", "unknown_finality"]);
+  assert.deepEqual(await journalBytes(path), before, "the repair changes no journal field");
+  answer = { disposition: "acknowledged", requestId: RID, transactionHash: TX, chainId: 1, readObservation: observation("CONFIRMED", true, TX) };
+  const observed = await readMetaMaskNativeTransfer(root, id, true, references);
+  assert.deepEqual([serverReads, receipts], [[RID], 1]);
+  assert.equal(observed.state, "confirmed"); assert.equal(observed.diagnostic, undefined, "a recorded outcome is not an interrupted hand-off");
+  const settled = await rows(root), [native, token] = op.reservations.map(reservation => settled.get(reservation.reservationId)!.row);
+  assert.deepEqual([native!.state, native!.consumedAtomic, token!.state], ["finalized", "7500000", "finalized"]);
+});
+
+test("a send that ended after its acknowledged outcome moves its holds to submitted, and the receipt settles them", async (t) => {
+  const { root, id, references, op, path } = await crashed(t, () => ({ state: "acknowledged", transactionHash: TX }), true);
+  const before = await journalBytes(path);
+  assert.equal((await readMetaMaskNativeTransfer(root, id)).state, "acknowledged");
+  assert.deepEqual(await holdStates(root, op), ["submitted", "submitted"]);
+  assert.deepEqual(await journalBytes(path), before);
+  const observed = await readMetaMaskNativeTransfer(root, id, true, references);
+  assert.deepEqual([serverReads, receipts], [[], 1]);
+  assert.equal(observed.state, "confirmed");
+  assert.deepEqual(await holdStates(root, op), ["finalized", "finalized"]);
+});
+
+test("a record 0.5.107 or earlier wrote, stuck confirmed with its holds still reserved, settles on its next status", async (t) => {
+  const { root, id, op, path, journal } = await crashed(t, async saved => ({ state: "confirmed", transactionHash: TX,
+    receiptEvidence: await receiptEvidence(saved.context.quote, TX) }), false);
+  assert.equal((await journal.read(id))?.handoffPath, undefined);
+  const before = await journalBytes(path);
+  // Without the repair this status refuses on every call: "MetaMask settlement has no durable effect hold".
+  const status = await readMetaMaskNativeTransfer(root, id);
+  assert.equal(status.state, "confirmed"); assert.equal(receipts, 0);
+  const settled = await rows(root), [native, token] = op.reservations.map(reservation => settled.get(reservation.reservationId)!.row);
+  assert.deepEqual([native!.state, native!.consumedAtomic, token!.state], ["finalized", "7500000", "finalized"]);
+  assert.deepEqual(await journalBytes(path), before);
+  assert.equal((await readMetaMaskNativeTransfer(root, id)).state, "confirmed");
+});
+
+test("holds the send already moved are left alone, and a missing hold still refuses settlement", async (t) => {
+  const moved = await crashed(t, () => ({ state: "acknowledged", transactionHash: TX }), true, ["submitted", "unknown_finality"]);
+  const rowsBefore = await holdRows(moved.root), before = await journalBytes(moved.path);
+  for (let i = 0; i < 2; i += 1) assert.equal((await readMetaMaskNativeTransfer(moved.root, moved.id)).state, "acknowledged");
+  assert.deepEqual(await holdRows(moved.root), rowsBefore, "no hold row is rewritten");
+  assert.deepEqual(await journalBytes(moved.path), before);
+  const missing = await crashed(t, async saved => ({ state: "confirmed", transactionHash: TX,
+    receiptEvidence: await receiptEvidence(saved.context.quote, TX) }), false);
+  const [nativeHold, tokenHold] = missing.op.reservations, all = await rows(missing.root);
+  await rm(all.get(nativeHold!.reservationId)!.path);
+  await assert.rejects(readMetaMaskNativeTransfer(missing.root, missing.id), /MetaMask settlement hold is absent/u);
+  // The token hold the send left reserved is moved and stays charged; nothing is released or finalized.
+  assert.equal((await rows(missing.root)).get(tokenHold!.reservationId)!.row.state, "unknown_finality");
 });
