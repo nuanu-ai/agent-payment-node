@@ -63,18 +63,26 @@ export class MetaMaskSdkRevocationWallet implements MetaMaskRevocationWalletPort
 
 /**
  * Why the disable never reached the network, when the helper's own closed facts say so: its deadline or clock check right
- * before the bytes would go, its process that never started, the session read (another project or selected wallet, signed
- * out or expired, or its files unreadable), the SDK load, the SDK's session restore, or the SDK's server wallet. Any other
- * fact is `undefined`: the request may have left. The disposition stays unknown either way; only the next step differs.
+ * before the bytes would go, its process that never started, the session read (another project or selected wallet,
+ * signed out or expired, another `mm` writing its files, files not private to this user, or files that could not be
+ * read), the SDK load, the SDK's session restore, or the SDK's server wallet. Any other fact is `undefined`: the request
+ * may have left. The disposition stays unknown either way; only the next step differs.
  */
-export type MetaMaskRevocationUnsentCause = "deadline" | "clock" | "launch" | "session_binding" | "session_signed_out" | "session_files" |
-  "sdk_load" | "hydrate" | "binding";
+export type MetaMaskRevocationUnsentCause = "deadline" | "clock" | "launch" | "session_binding" | "session_signed_out" | "session_busy" |
+  "session_permissions" | "session_files" | "sdk_load" | "hydrate" | "binding";
+/** The session read's closed reasons with a cause of their own; any other reason there is `session_files`. */
+const SESSION_CAUSES: Readonly<Record<string, MetaMaskRevocationUnsentCause>> = {
+  mm_gasless_binding_changed: "session_binding", mm_gasless_session_unavailable: "session_signed_out",
+  mm_gasless_session_expired: "session_signed_out", mm_gasless_state_busy: "session_busy", mm_gasless_state_security: "session_permissions",
+};
 export function metaMaskRevocationUnsentCause(submission: MetaMaskRevocationSubmission): MetaMaskRevocationUnsentCause | undefined {
   if (submission.disposition !== "unknown" || submission.submitDiagnostic === undefined || submission.submitDiagnostic.post !== "not_reached") return undefined;
   const d = submission.submitDiagnostic;
   if (d.check === "deadline" || d.check === "clock") return d.check;
-  if (d.stage === "private_state") return submission.helperFailure === "mm_gasless_binding_changed" ? "session_binding"
-    : submission.helperFailure === "mm_gasless_session_unavailable" ? "session_signed_out" : "session_files";
+  if (d.stage === "private_state") {
+    const reason = submission.helperFailure;
+    return reason !== undefined && Object.hasOwn(SESSION_CAUSES, reason) ? SESSION_CAUSES[reason]! : "session_files";
+  }
   return d.stage === "launch" || d.stage === "sdk_load" || d.stage === "hydrate" || d.stage === "binding" ? d.stage : undefined;
 }
 

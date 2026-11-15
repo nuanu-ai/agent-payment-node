@@ -20,8 +20,9 @@ export type SubmitStage = "launch" | "runner" | "private_state" | "sdk_load" | "
  * that ran failed, so it may or may not have left. Nothing but `not_reached` and `refused` rules out a sent POST.
  */
 export type SubmitPost = "not_reached" | "refused" | "sent" | "unknown";
-export type SubmitCheck = "none" | "body_mismatch" | "duplicate_request" | "unexpected_request" | "deadline" | "clock" | "session" |
-  "http_status" | "no_answer" | "response_body" | "response_request_id" | "response_kind" | "response_status" | "response_tx" |
+/** `parent_exited`: the APN command that spawned the helper was gone right before the send would be written. */
+export type SubmitCheck = "none" | "body_mismatch" | "duplicate_request" | "unexpected_request" | "deadline" | "clock" | "parent_exited" |
+  "session" | "http_status" | "no_answer" | "response_body" | "response_request_id" | "response_kind" | "response_status" | "response_tx" |
   "response_hash" | "incomplete" | "runner_launch" | "runner_exit" | "runner_timeout" | "runner_output" | "response_invalid" | "unclassified";
 export interface MetaMaskSubmitDiagnostic {
   readonly mode: "submit";
@@ -39,8 +40,8 @@ export interface MetaMaskSubmitDiagnostic {
 }
 const STAGES: readonly string[] = ["launch", "runner", "private_state", "sdk_load", "hydrate", "binding", "body", "post", "response", "complete", "helper_response"];
 const POSTS: readonly string[] = ["not_reached", "refused", "sent", "unknown"];
-const CHECKS: readonly string[] = ["none", "body_mismatch", "duplicate_request", "unexpected_request", "deadline", "clock", "session",
-  "http_status", "no_answer", "response_body", "response_request_id", "response_kind", "response_status", "response_tx", "response_hash",
+const CHECKS: readonly string[] = ["none", "body_mismatch", "duplicate_request", "unexpected_request", "deadline", "clock", "parent_exited",
+  "session", "http_status", "no_answer", "response_body", "response_request_id", "response_kind", "response_status", "response_tx", "response_hash",
   "incomplete", "runner_launch", "runner_exit", "runner_timeout", "runner_output", "response_invalid", "unclassified"];
 const KEYS = ["mode", "stage", "post", "httpStatus", "check", "providerError", "providerStatus", "responseTx"] as const;
 const WITH_STATUS: readonly string[] = ["response_status", "response_tx"];

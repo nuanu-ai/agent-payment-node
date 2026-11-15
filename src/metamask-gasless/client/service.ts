@@ -34,6 +34,8 @@ export interface HelperExecutionOptions {
   readonly homeDirectory?: string;
   readonly now?: () => Date;
   readonly exchange?: FetchExchange;
+  /** The helper process's watch of the APN command that spawned it (helper-entry.ts), checked right before a send is written. */
+  readonly parentAlive?: () => boolean;
 }
 
 export async function executeHelperRequest(input: unknown, options: HelperExecutionOptions = {}): Promise<HelperResponse> {
@@ -68,7 +70,8 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
       const session = await readPrivateSession(home, now());
       // Only the request's own project and selected server wallet: another one refuses before any network call.
       assertServerTransactionSession(session, request.transaction);
-      policy = new HelperNetworkPolicy(networkContextServerTransaction(request.transaction, session.projectId, session.token, now), options.exchange);
+      policy = new HelperNetworkPolicy(networkContextServerTransaction(request.transaction, session.projectId, session.token, now), options.exchange,
+        options.parentAlive);
       globalThis.fetch = policy.fetch;
       const result = await submitServerTransaction(request.transaction, session, home, now, policy, sent);
       sent.stage = "complete";
@@ -80,7 +83,8 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
       const state = await readPrivateState(home, expected, firstObservedAt);
       policy = request.mode === "quote" ? new HelperNetworkPolicy(networkContextQuote(request.input, state.address, state.token, state.projectId),
         options.exchange) :
-        new HelperNetworkPolicy(networkContextRequest(request.mode, request.intent, state.projectId, state.token, now), options.exchange);
+        new HelperNetworkPolicy(networkContextRequest(request.mode, request.intent, state.projectId, state.token, now), options.exchange,
+          options.parentAlive);
       if (request.mode === "submit") policy.primeSubmitClock(firstObservedAt);
       globalThis.fetch = policy.fetch;
       const result = request.mode === "quote" ? await quote(request.input, state, policy, phase) : request.mode === "submit" ?

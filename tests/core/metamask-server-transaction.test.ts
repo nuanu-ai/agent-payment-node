@@ -208,6 +208,33 @@ test("a send is written only once TLS is up, after its last deadline check, and 
   const read = new WrittenRequest();
   endRequestWhenSecure(read as unknown as ClientRequest, { body: null }, () => assert.fail("a read has no gate"));
   assert.deepEqual(read.written, [undefined]);
+  // A write that throws after the gate ends the exchange as a failure, never as an uncaught exception.
+  class ThrowingRequest extends WrittenRequest { override end(): this { throw new Error("TEST write failed"); } }
+  const throwing = new ThrowingRequest(), socket = new EventEmitter(), failures: unknown[] = [];
+  endRequestWhenSecure(throwing as unknown as ClientRequest, { body, beforeSend: () => undefined }, (error) => failures.push(error));
+  throwing.emit("socket", socket); socket.emit("secureConnect");
+  assert.deepEqual([throwing.destroyed, failures.length], [true, 1]);
+});
+
+test("a helper whose APN command is gone writes no send: the gate refuses before the bytes, with nothing written", async (t) => {
+  const token = "synthetic-token", headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const body = serverTransactionBody(input()), exchange = new ConnectingExchange();
+  const policy = new HelperNetworkPolicy(networkContextServerTransaction(input(), PROJECT, token, () => new Date()), exchange, () => false);
+  await assert.rejects(policy.fetch(COLLECTION, { method: "POST", headers, body }),
+    (error: unknown) => error instanceof ApnError && error.details?.reason === "mm_gasless_submit_unknown");
+  assert.deepEqual([exchange.req.written, exchange.req.destroyed], [[], true]);
+  assert.deepEqual([policy.submitFacts().post, policy.submitFacts().check], ["not_reached", "parent_exited"]);
+  // In the helper: the same refusal, and its diagnostic says the POST did not leave.
+  const home = await syntheticHome(); t.after(home.cleanup);
+  const transport = new TransactionExchange();
+  const result = await executeHelperRequest(submit(input()), { homeDirectory: home.home, exchange: transport, parentAlive: () => false });
+  assert.equal(transport.bodies.length, 0);
+  assert.deepEqual(!result.ok && [result.failure.reason, result.submitDiagnostic?.post, result.submitDiagnostic?.check],
+    ["mm_gasless_submit_unknown", "not_reached", "parent_exited"]);
+  // While it runs, nothing changes.
+  const alive = await executeHelperRequest(submit(input()), { homeDirectory: home.home, exchange: new TransactionExchange({ status: "SIGNING" }),
+    parentAlive: () => true });
+  assert.equal(alive.ok, true);
 });
 
 test("a malformed request, another project or another selected wallet refuses in the helper before any network call", async (t) => {

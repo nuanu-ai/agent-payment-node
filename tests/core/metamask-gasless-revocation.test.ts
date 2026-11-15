@@ -186,6 +186,15 @@ test("an unknown disable answer names MetaMask's error code and when another dis
     `Sign in to the MetaMask Agent Wallet again, then run ${again}.`);
   assert.equal((await stopped("mm_gasless_internal", "sdk_load", "unclassified")).next_actions![0], `The MetaMask helper stopped before any ` +
     `network call: the MetaMask SDK bundled with APN did not load (mm_gasless_internal). ${safe} Run ${again}; reinstall APN if it stops here again.`);
+  // At the session read: another mm writing its files is no sign-in problem, nor are files that are not private.
+  assert.equal((await stopped("mm_gasless_state_busy", "private_state", "unclassified")).next_actions![0], `The MetaMask helper stopped ` +
+    `before any network call: another mm process was writing the MetaMask Agent Wallet's files (mm_gasless_state_busy). ${safe} Run ${again}.`);
+  assert.equal((await stopped("mm_gasless_state_security", "private_state", "unclassified")).next_actions![0], `The MetaMask helper stopped ` +
+    `before any network call: the MetaMask Agent Wallet's files on this machine are not private to this user (their owner, their permissions ` +
+    `or a symbolic link on the way to them) (mm_gasless_state_security). ${safe} Make the MetaMask Agent Wallet's directory and files owned by ` +
+    `this user and private to it, with no symbolic link on the way, then run ${again}.`);
+  assert.match((await stopped("mm_gasless_state_corrupt", "private_state", "unclassified")).next_actions![0]!,
+    /: the MetaMask Agent Wallet's files on this machine could not be read \(mm_gasless_state_corrupt\)\. .* Sign in to the MetaMask Agent Wallet again, then run /u);
   // A stop past the request's own checks is not proof that nothing left: the resume step, as for any unknown answer.
   assert.match((await stopped("mm_gasless_submit_unknown", "post", "unclassified")).next_actions![0]!, /^MetaMask did not confirm this disable\. /u);
 });

@@ -48,7 +48,9 @@ export function endRequestWhenSecure(req: ClientRequest, input: Pick<FetchExchan
   req.once("socket", (socket) => socket.once("secureConnect", () => {
     if (req.destroyed) return;
     try { gate(); } catch (error) { req.destroy(); fail(error); return; }
-    req.end(input.body ?? undefined);
+    // From here the gate has counted the request as sent: a throw while writing it may follow bytes that already left,
+    // so it ends the exchange as a failure and the send stays unknown, never "not reached".
+    try { req.end(input.body ?? undefined); } catch (error) { req.destroy(); fail(error); }
   }));
 }
 

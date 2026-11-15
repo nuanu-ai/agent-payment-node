@@ -89,7 +89,12 @@ export class HelperNetworkPolicy {
     return error !== null && typeof error === "object" ? this.#readFailures.get(error) ?? { network: "none", httpStatus: null, validationFailed: false }
       : { network: "none", httpStatus: null, validationFailed: false };
   }
-  constructor(private readonly context: ModeContext, private readonly exchange: FetchExchange = new HttpsFetchExchange()) {
+  /**
+   * `parentAlive`: whether the APN command that spawned this helper still runs. The helper process always passes it
+   * (helper-entry.ts); an in-process run has no parent process to watch and passes none.
+   */
+  constructor(private readonly context: ModeContext, private readonly exchange: FetchExchange = new HttpsFetchExchange(),
+    private readonly parentAlive?: () => boolean) {
     this.fetch = this.handle.bind(this) as typeof globalThis.fetch;
   }
   /** Only the exact failed original quote exchange may supply this private one-use capture. */
@@ -159,6 +164,8 @@ export class HelperNetworkPolicy {
     const request: FetchExchangeRequest = { url, method, headers, body, maxBytes: MAX_RESPONSE,
       timeoutMs: left === undefined ? 15_000 : Math.min(15_000, left),
       ...(signal ? { signal } : {}), ...(this.sends() ? { beforeSend: () => {
+        // An orphan never writes a send: its command is gone, and with it the operation lock and the deadline's owner.
+        if (this.parentAlive !== undefined && !this.parentAlive()) { this.submitRefused("parent_exited"); mmFail("mm_gasless_submit_unknown"); }
         this.assertSubmitDeadline(); if (key === "submit" || key === "submit-transaction") this.#submitPost = "sent";
       } } : {}) };
     const response = await this.exchange.request(request);

@@ -96,6 +96,10 @@ const UNSENT: Readonly<Record<MetaMaskRevocationUnsentCause, (from: string, agai
     `Select the server wallet ${from} in the MetaMask Agent Wallet, then run ${again}.`],
   session_signed_out: (_from, again) => ["the MetaMask Agent Wallet is signed out or its session expired",
     `Sign in to the MetaMask Agent Wallet again, then run ${again}.`],
+  session_busy: (_from, again) => ["another mm process was writing the MetaMask Agent Wallet's files", `Run ${again}.`],
+  session_permissions: (_from, again) => ["the MetaMask Agent Wallet's files on this machine are not private to this user " +
+    "(their owner, their permissions or a symbolic link on the way to them)", "Make the MetaMask Agent Wallet's directory and " +
+    `files owned by this user and private to it, with no symbolic link on the way, then run ${again}.`],
   session_files: (_from, again) => ["the MetaMask Agent Wallet's files on this machine could not be read",
     `Sign in to the MetaMask Agent Wallet again, then run ${again}.`],
   sdk_load: (_from, again) => ["the MetaMask SDK bundled with APN did not load", `Run ${again}; reinstall APN if it stops here again.`],
