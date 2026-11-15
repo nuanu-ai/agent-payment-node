@@ -27,7 +27,7 @@ const metaMaskNativeTransferData=(to:`0x${string}`,amount:string)=>encodeFunctio
 mock.module("../../src/metamask-package.js", {namedExports: {resolveMetaMaskBin: async () => "/test-only-pinned-package"}});
 /** The runner diagnostic the next failed read carries, as the real runner attaches it to its error (one use). */
 let nextRunnerDiagnostic: unknown;
-mock.module("../../src/metamask-process-runner.js", {namedExports: {takeMetaMaskNativeProcessFailureDiagnostic: () => { const d = nextRunnerDiagnostic; nextRunnerDiagnostic = undefined; return d; }, takeMetaMaskNativeProcessFailureIdentifiers: () => undefined, NodeMetaMaskProcessRunner: class {
+mock.module("../../src/metamask-process-runner.js", {namedExports: {takeMetaMaskNativeProcessFailureDiagnostic: () => { const d = nextRunnerDiagnostic; nextRunnerDiagnostic = undefined; return d; }, NodeMetaMaskProcessRunner: class {
   async runJson(argv:readonly string[], timeout?:number) {
     calls.push({argv, ...(timeout === undefined ? {} : {timeout})});
     if(readFailure&&calls.length===readFailureAt){const failure=readFailure;readFailure=undefined;throw failure;}

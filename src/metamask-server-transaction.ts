@@ -4,6 +4,7 @@ import { MetaMaskGaslessProviderClient } from "./metamask-gasless/client/process
 import { serverTransactionInput, type MetaMaskServerTransactionAnswer, type MetaMaskServerTransactionInput,
   type MetaMaskServerTransactionTx } from "./metamask-gasless/client/server-transaction.js";
 import { takeSubmitDiagnostic, type MetaMaskSubmitDiagnostic } from "./metamask-gasless/client/submit-diagnostic.js";
+import { mmClassify, type MetaMaskGaslessFailureReason } from "./metamask-gasless/reasons.js";
 
 /**
  * The `--payload` APN handed `mm wallet send-transaction` up to 0.5.107, for the native transfer and the gasless revoke
@@ -49,9 +50,10 @@ export function metaMaskCliPayloadTx(payload: MetaMaskCliPayload, from: Address,
  * before the helper starts, so a malformed one refuses before anything could be sent.
  */
 export function metaMaskServerTransaction(input: { readonly requestId: string; readonly projectHash: string | null;
-  readonly from: Address; readonly chainId: number; readonly payload: MetaMaskCliPayload; readonly intent: string }): MetaMaskServerTransactionInput {
+  readonly from: Address; readonly chainId: number; readonly payload: MetaMaskCliPayload; readonly intent: string;
+  readonly expiresAt: string }): MetaMaskServerTransactionInput {
   return serverTransactionInput({ requestId: input.requestId, projectHash: input.projectHash,
-    tx: metaMaskCliPayloadTx(input.payload, input.from, input.chainId), intent: input.intent });
+    tx: metaMaskCliPayloadTx(input.payload, input.from, input.chainId), intent: input.intent, expiresAt: input.expiresAt });
 }
 
 /** Job statuses of a request MetaMask still works on before it has a transaction hash. */
@@ -60,14 +62,15 @@ export const MM_REQUEST_PENDING_STATUSES: readonly string[] = ["EVALUATING", "AW
 export const MM_REQUEST_CLOSED_STATUSES: readonly string[] = ["FAILED", "BROADCAST_FAILED", "DENIED", "EXPIRED"];
 
 /**
- * What one send says. `answered`: the helper's bound fields of the server's answer for this very request (the answer
- * named another request: `provider_request_identity_conflict`). `unknown`: the helper failed once it may have started,
- * so the POST may have left; `diagnostic` is the submit's closed facts, when they came. Never a refusal before the send.
+ * What one send says. `answered`: the helper's bound fields of the server's answer for this very request (the client
+ * accepts no answer for another id). `unknown`: the helper failed once it may have started, so the POST may have left;
+ * `provider_request_identity_conflict` when the server's answer named another request; `diagnostic` is the submit's
+ * closed facts and `helperFailure` the helper's closed refusal reason, when they came. Never a refusal before the send.
  */
 export type MetaMaskServerTransactionOutcome =
   | { readonly kind: "answered"; readonly answer: MetaMaskServerTransactionAnswer }
   | { readonly kind: "unknown"; readonly reason: "provider_request_identity_conflict" | "provider_handoff_outcome_unknown";
-      readonly diagnostic?: MetaMaskSubmitDiagnostic };
+      readonly diagnostic?: MetaMaskSubmitDiagnostic; readonly helperFailure?: MetaMaskGaslessFailureReason };
 export interface MetaMaskServerTransactionPort {
   submitServerTransaction(transaction: MetaMaskServerTransactionInput, timeoutMs: number): Promise<MetaMaskServerTransactionAnswer>;
 }
@@ -78,11 +81,10 @@ export async function sendMetaMaskServerTransaction(transaction: MetaMaskServerT
   let answer: MetaMaskServerTransactionAnswer;
   try { answer = await client.submitServerTransaction(transaction, timeoutMs); }
   catch (error) {
-    const diagnostic = takeSubmitDiagnostic(error);
+    const diagnostic = takeSubmitDiagnostic(error), helperFailure = mmClassify(error, "mm_gasless_submit_unknown").reason;
     return { kind: "unknown", reason: diagnostic?.check === "response_request_id" ? "provider_request_identity_conflict" : "provider_handoff_outcome_unknown",
-      ...(diagnostic === undefined ? {} : { diagnostic }) };
+      ...(diagnostic === undefined ? {} : { diagnostic }), helperFailure };
   }
-  if (answer.requestId !== transaction.requestId) return { kind: "unknown", reason: "provider_request_identity_conflict" };
   return { kind: "answered", answer };
 }
 

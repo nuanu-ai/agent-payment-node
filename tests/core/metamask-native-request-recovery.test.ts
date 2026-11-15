@@ -18,7 +18,7 @@ let serverCalls: unknown[][] = [];
 let serverAnswer: MetaMaskNativeServerRequestAnswer = { outcome: "not_found" };
 mock.module("../../src/metamask-package.js", { namedExports: { resolveMetaMaskBin: async () => "/test-only-pinned-package" } });
 mock.module("../../src/metamask-process-runner.js", { namedExports: { takeMetaMaskNativeProcessFailureDiagnostic: () => undefined,
-  takeMetaMaskNativeProcessFailureIdentifiers: () => undefined, NodeMetaMaskProcessRunner: class {
+  NodeMetaMaskProcessRunner: class {
     async runJson(argv: readonly string[]) { calls.push(argv); const value = queue.shift(); assert.ok(value, "unexpected child call"); return value; }
   } } });
 mock.module("../../src/metamask-native-transfer-owner.js", { namedExports: { claimMetaMaskNativeOwnedScope: () => { throw new Error("unowned"); },
@@ -50,7 +50,7 @@ test("a local-state miss without the transfer's binding is classified precisely 
 test("the server and unattributed misses, and an empty answer without one, never trigger a server read", async () => {
   for (const [kind, reason] of [["server", "metamask_request_not_found_on_server"], ["unattributed", "provider_request_not_found"],
     [undefined, "provider_response_malformed"]] as const) {
-    setup({ outcome: "verified", status: "CONFIRMED", transactionHash: TX, responseHash: SERVER_HASH }); missed(kind);
+    setup({ outcome: "verified", status: "CONFIRMED", transactionHash: TX, mfa: null, responseHash: SERVER_HASH }); missed(kind);
     const v = await readMetaMaskNativeRequest(RID, PROJECT_HASH, BINDING);
     assert.equal(v.disposition, "unknown"); assert.equal(v.disposition === "unknown" && v.reason, reason);
     assert.equal(v.readObservation?.reason, reason); assert.equal(v.readObservation?.provider_status, null);
@@ -73,7 +73,7 @@ const without = (value: unknown) => {
 test("a verified server answer is recorded exactly as a watch answer of the same request would be", async () => {
   for (const [status, txHash] of [["CONFIRMED", TX], ["EXPIRED", null], ["DENIED", null], ["FAILED", null], ["FAILED", TX], ["AWAITING_MFA", null],
     ["SIGNING", null], ["BROADCASTED", null]] as const) {
-    setup({ outcome: "verified", status, transactionHash: txHash, responseHash: SERVER_HASH }); missed("local_state");
+    setup({ outcome: "verified", status, transactionHash: txHash, mfa: null, responseHash: SERVER_HASH }); missed("local_state");
     const server = await readMetaMaskNativeRequest(RID, PROJECT_HASH, BINDING);
     assert.deepEqual(serverCalls, [[RID, PROJECT_HASH, BINDING]]);
     assert.deepEqual(calls.map((argv) => argv[1]), ["status", "requests", "status"], "the project bracket still surrounds the read");
@@ -85,12 +85,12 @@ test("a verified server answer is recorded exactly as a watch answer of the same
     if (server.disposition === "pending" && server.mfa !== undefined)
       assert.deepEqual(server.mfa, { expiresAt: null, authMethod: null, evidenceHash: SERVER_HASH }, "the task's evidence is the server's answer");
   }
-  setup({ outcome: "verified", status: "EXPIRED", transactionHash: null, responseHash: SERVER_HASH }); missed("local_state");
+  setup({ outcome: "verified", status: "EXPIRED", transactionHash: null, mfa: null, responseHash: SERVER_HASH }); missed("local_state");
   const expired = await readMetaMaskNativeRequest(RID, PROJECT_HASH, BINDING);
   assert.deepEqual(expired, { disposition: "unknown", reason: "provider_request_outcome_unknown", requestId: RID, chainId: 1,
     readObservation: { ...base, request_identity_verified: true, provider_status: "EXPIRED", transaction_hash: null, chain_id: 1, response_hash: EMPTY,
       reason: "provider_request_outcome_unknown", server_read: { outcome: "verified", response_hash: SERVER_HASH, reason: null, check: null } } });
-  setup({ outcome: "verified", status: "CONFIRMED", transactionHash: TX, responseHash: SERVER_HASH }); missed("local_state");
+  setup({ outcome: "verified", status: "CONFIRMED", transactionHash: TX, mfa: null, responseHash: SERVER_HASH }); missed("local_state");
   const confirmed = await readMetaMaskNativeRequest(RID, PROJECT_HASH, BINDING);
   assert.equal(confirmed.disposition, "acknowledged"); assert.equal(confirmed.transactionHash, TX); assert.equal(confirmed.chainId, 1);
 });
@@ -113,7 +113,7 @@ test("a server 404 stays unknown, and a refused server read keeps the local-stat
 });
 
 test("a project that changed around the server read keeps nothing the read said", async () => {
-  setup({ outcome: "verified", status: "CONFIRMED", transactionHash: TX, responseHash: SERVER_HASH }); missed("local_state", "different-project");
+  setup({ outcome: "verified", status: "CONFIRMED", transactionHash: TX, mfa: null, responseHash: SERVER_HASH }); missed("local_state", "different-project");
   const drift = await readMetaMaskNativeRequest(RID, PROJECT_HASH, BINDING);
   assert.equal(drift.disposition, "unknown"); assert.equal(drift.disposition === "unknown" && drift.reason, "provider_request_read_guard_changed_or_unavailable");
   assert.equal(drift.readObservation?.stage, "after_guard"); assert.equal(drift.readObservation?.after_guard_verified, false);
@@ -135,7 +135,7 @@ const unsourced = (value: unknown) => {
 test("a request APN sent itself is read from MetaMask's server by its id inside the project bracket, never watched", async () => {
   for (const [status, txHash] of [["CONFIRMED", TX], ["EXPIRED", null], ["DENIED", null], ["FAILED", TX], ["AWAITING_MFA", null], ["SIGNING", null],
     ["BROADCASTED", null]] as const) {
-    setup({ outcome: "verified", status, transactionHash: txHash, responseHash: SERVER_HASH });
+    setup({ outcome: "verified", status, transactionHash: txHash, mfa: null, responseHash: SERVER_HASH });
     const server = await sdkRead();
     assert.deepEqual(calls.map((argv) => argv[1]), ["status", "status"], "the session project before and after, and no watch");
     assert.deepEqual(serverCalls, [[RID, PROJECT_HASH, BINDING]]);
@@ -159,12 +159,22 @@ test("a request APN sent itself is read from MetaMask's server by its id inside 
   }
 });
 
+test("a request APN sent itself keeps the approval window the server names; the 0.5.107 fallback read records none, as before", async () => {
+  const approval = { expiresAt: "2030-01-01T00:10:00.000Z", authMethod: "qr" };
+  setup({ outcome: "verified", status: "AWAITING_MFA", transactionHash: null, mfa: approval, responseHash: SERVER_HASH });
+  const sent = await sdkRead();
+  assert.deepEqual(sent.disposition === "pending" && sent.mfa, { ...approval, evidenceHash: SERVER_HASH });
+  setup({ outcome: "verified", status: "AWAITING_MFA", transactionHash: null, mfa: approval, responseHash: SERVER_HASH }); missed("local_state");
+  const older = await readMetaMaskNativeRequest(RID, PROJECT_HASH, BINDING);
+  assert.deepEqual(older.disposition === "pending" && older.mfa, { expiresAt: null, authMethod: null, evidenceHash: SERVER_HASH });
+});
+
 test("a project that changed around the server read keeps nothing it said, and one changed before it reads nothing", async () => {
-  setup({ outcome: "verified", status: "CONFIRMED", transactionHash: TX, responseHash: SERVER_HASH });
+  setup({ outcome: "verified", status: "CONFIRMED", transactionHash: TX, mfa: null, responseHash: SERVER_HASH });
   const drift = await sdkRead("different-project");
   assert.equal(drift.disposition === "unknown" && drift.reason, "provider_request_read_guard_changed_or_unavailable");
   assert.equal(drift.readObservation?.guard_step, "project_after"); assert.equal(drift.transactionHash, TX);
-  setup({ outcome: "verified", status: "CONFIRMED", transactionHash: TX, responseHash: SERVER_HASH }); project("different-project");
+  setup({ outcome: "verified", status: "CONFIRMED", transactionHash: TX, mfa: null, responseHash: SERVER_HASH }); project("different-project");
   const before = await readMetaMaskNativeSdkRequest(RID, PROJECT_HASH, BINDING);
   assert.equal(before.readObservation?.guard_step, "project_before"); assert.equal(calls.length, 1); assert.equal(serverCalls.length, 0);
 });

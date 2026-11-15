@@ -92,7 +92,7 @@ export function helperResponse(value: unknown, request: HelperRequest): HelperRe
   else if (request.mode === "quote") quoteOutput(r.result, request.input);
   else if (request.mode === "buildUnsigned") mmValidateUnsigned(r.result, request.input, responseReason(request.mode));
   else if (request.mode === "readRequest") serverRequestRead(r.result, request.query);
-  else if (request.mode === "submitTransaction") serverTransactionResult(r.result);
+  else if (request.mode === "submitTransaction") serverTransactionResult(r.result, request.transaction);
   else observation(r.result, request.intent);
   return value as HelperResponse;
 }

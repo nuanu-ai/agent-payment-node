@@ -68,7 +68,7 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
       const session = await readPrivateSession(home, now());
       // Only the request's own project and selected server wallet: another one refuses before any network call.
       assertServerTransactionSession(session, request.transaction);
-      policy = new HelperNetworkPolicy(networkContextServerTransaction(request.transaction, session.projectId, session.token), options.exchange);
+      policy = new HelperNetworkPolicy(networkContextServerTransaction(request.transaction, session.projectId, session.token, now), options.exchange);
       globalThis.fetch = policy.fetch;
       const result = await submitServerTransaction(request.transaction, session, home, now, policy, sent);
       sent.stage = "complete";
@@ -301,7 +301,7 @@ async function readServerRequest(query: MetaMaskServerRequestQuery, session: Pri
     throw error;
   }
   if (hydrated.writes() !== 0) mmFail("mm_gasless_state_security");
-  return serverRequestAnswer(status, query, policy.requestBodyHash(), seen);
+  return serverRequestAnswer(status, query, policy.requestBodyHash(), session.session.authMethod, seen);
 }
 
 function validateSdkQuote(value: unknown, input: Extract<HelperRequest, { mode: "quote" }>["input"], owner: string): MetaMaskGaslessQuote {

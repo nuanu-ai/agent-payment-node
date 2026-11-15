@@ -226,6 +226,31 @@ test("a request APN sent itself is observed from MetaMask's server by its sealed
   assert.deepEqual((await readMetaMaskNativeTransfer(started.root, id)).next_actions, [observe]);
 });
 
+test("a read that names no approval window keeps the one known for the same request; an earlier release's record takes the read's", async (t) => {
+  const pendingWith = (expiresAt: string | null): MetaMaskNativeRequestObservation => ({ disposition: "pending", requestId: RID,
+    mfa: { expiresAt, authMethod: "social", evidenceHash: "1".repeat(64) }, readObservation: observation("AWAITING_MFA", true) });
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  reads = []; serverReads = [];
+  const helper = await helperTransfer(temporary.root);
+  // The send recorded the window (approval.expiresAt) and the session's auth method.
+  await helper.journal.persist(patch(helper.op, { mfaTask: metaMaskNativeSealedMfaTask(HASH, { expiresAt: EXPIRES, authMethod: "qr", evidenceHash: EVIDENCE }, "send") }));
+  answer = pendingWith(null);
+  const kept = await readMetaMaskNativeTransfer(temporary.root, id, true, helper.references);
+  assert.deepEqual([kept.mfa_task?.expires_at, kept.mfa_task?.auth_method, kept.mfa_task?.source, kept.mfa_task?.evidence_hash],
+    [EXPIRES, "social", "watch", "1".repeat(64)], "the known expiry stays; every other field is the read's own");
+  const LATER = "2099-10-21T09:51:13.922Z";
+  answer = pendingWith(LATER);
+  assert.equal((await readMetaMaskNativeTransfer(temporary.root, id, true, helper.references)).mfa_task?.expires_at, LATER, "a window the read names replaces it");
+  assert.deepEqual(serverReads, [RID, RID]);
+  // A record 0.5.107 wrote takes the read's evidence as it always did.
+  const older = await temporaryState(); t.after(older.cleanup);
+  const sealed = await sealedTransfer(older.root);
+  await sealed.journal.persist(patch(sealed.op, { mfaTask: metaMaskNativeSealedMfaTask(HASH, { expiresAt: EXPIRES, authMethod: "qr", evidenceHash: EVIDENCE }, "send") }));
+  answer = pendingWith(null);
+  assert.equal((await readMetaMaskNativeTransfer(older.root, id, true, sealed.references)).mfa_task?.expires_at, null);
+  assert.deepEqual(reads, [RID]);
+});
+
 test("the helper path is bound to the marker: it needs a sealed hash, never changes and never appears later", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const { journal, op } = await helperTransfer(temporary.root);

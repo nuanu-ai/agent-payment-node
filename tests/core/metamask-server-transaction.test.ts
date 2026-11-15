@@ -28,8 +28,11 @@ const COLLECTION = `https://agentic-mimir-service.api.cx.metamask.io/v1/projects
 const PRIVATE = "private_provider_metadata_canary", EXPIRES = "2030-01-01T00:10:00.000Z";
 /** 0.5.107's `--payload` for the native transfer: every field a `0x` hex string, `to` checksummed. */
 const PAYLOAD = { to: USDC, data: DATA, value: "0x0", gas: "0xfde8", nonce: "0x7", maxFeePerGas: "0xc8", maxPriorityFeePerGas: "0x2" };
+/** The send's own deadline, well ahead of the real clock the helper runs on here. */
+const DEADLINE = new Date(Date.now() + 3_600_000).toISOString();
 const input = (patch: Partial<MetaMaskServerTransactionInput> = {}): MetaMaskServerTransactionInput =>
-  ({ ...metaMaskServerTransaction({ requestId: RID, projectHash: sha256(PROJECT), from: OWNER, chainId: 1, payload: PAYLOAD, intent: INTENT }), ...patch });
+  ({ ...metaMaskServerTransaction({ requestId: RID, projectHash: sha256(PROJECT), from: OWNER, chainId: 1, payload: PAYLOAD, intent: INTENT,
+    expiresAt: DEADLINE }), ...patch });
 const submit = (transaction: unknown) => ({ version: MM_HELPER_VERSION, mode: "submitTransaction", transaction });
 
 /** The server's answer to the one POST: the job MetaMask created for the posted request, with `patch` merged in. */
@@ -90,7 +93,7 @@ test("the helper POSTs exactly the bytes the SDK's server adapter sends, once, w
 test("the network policy admits the one exact POST and refuses another body, URL, token or a second request before it leaves", async () => {
   const token = "synthetic-token", headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
   const policyFor = () => { const exchange = new TransactionExchange(); return { exchange,
-    policy: new HelperNetworkPolicy(networkContextServerTransaction(input(), PROJECT, token), exchange) }; };
+    policy: new HelperNetworkPolicy(networkContextServerTransaction(input(), PROJECT, token, () => new Date()), exchange) }; };
   const refused = (reason: string) => (error: unknown) => error instanceof ApnError && error.details?.reason === reason;
   let { exchange, policy } = policyFor();
   const sent = await policy.fetch(COLLECTION, { method: "POST", headers, body: serverTransactionBody(input()) });
@@ -119,10 +122,40 @@ test("the network policy admits the one exact POST and refuses another body, URL
   assert.equal(exchange.requests.length, 0);
 });
 
+test("the send's deadline is checked at the request and again right before its bytes leave; past it nothing is sent", async () => {
+  const token = "synthetic-token", headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const deadline = Date.parse(DEADLINE);
+  let clock = deadline - 1;
+  /** An exchange whose transport takes until the deadline before the bytes would go. */
+  class SlowExchange extends TransactionExchange {
+    override async request(request: FetchExchangeRequest): Promise<FetchExchangeResponse> { clock = deadline; return await super.request(request); }
+  }
+  let exchange: TransactionExchange = new SlowExchange();
+  let policy = new HelperNetworkPolicy(networkContextServerTransaction(input(), PROJECT, token, () => new Date(clock)), exchange);
+  await assert.rejects(policy.fetch(COLLECTION, { method: "POST", headers, body: serverTransactionBody(input()) }),
+    (error: unknown) => error instanceof ApnError && error.details?.reason === "mm_gasless_expired");
+  assert.equal(exchange.bodies.length, 0, "the transport never sent the bytes");
+  assert.deepEqual([policy.submitFacts().post, policy.submitFacts().check, policy.fixedFailure()], ["not_reached", "deadline", "mm_gasless_expired"]);
+  clock = deadline; exchange = new TransactionExchange();
+  policy = new HelperNetworkPolicy(networkContextServerTransaction(input(), PROJECT, token, () => new Date(clock)), exchange);
+  await assert.rejects(policy.fetch(COLLECTION, { method: "POST", headers, body: serverTransactionBody(input()) }));
+  assert.equal(exchange.requests.length, 0, "past the deadline the request is refused before the transport");
+  // In the helper: a deadline already past refuses with nothing sent, and its diagnostic says the POST did not leave.
+  const home = await syntheticHome(), past = new Date(Date.now() - 1).toISOString();
+  try {
+    exchange = new TransactionExchange();
+    const result = await executeHelperRequest(submit(input({ expiresAt: past })), { homeDirectory: home.home, exchange });
+    assert.equal(result.ok, false); assert.equal(exchange.requests.length, 0);
+    assert.deepEqual(!result.ok && [result.failure.reason, result.submitDiagnostic?.post, result.submitDiagnostic?.check],
+      ["mm_gasless_expired", "not_reached", "deadline"]);
+  } finally { await home.cleanup(); }
+});
+
 test("a malformed request, another project or another selected wallet refuses in the helper before any network call", async (t) => {
   const home = await syntheticHome(); t.after(home.cleanup);
   const good = input();
   for (const bad of [{ ...good, requestId: RID.toUpperCase() }, { ...good, requestId: "5d1f6a2e-3b4c-1d5e-8f60-718293a4b5c6" },
+    { ...good, expiresAt: "tomorrow" }, (({ expiresAt: _deadline, ...rest }) => rest)(good),
     { ...good, projectHash: "abc" }, { ...good, intent: ` ${INTENT}` }, { ...good, intent: "" }, { ...good, extra: true },
     { ...good, tx: { ...good.tx, from: "0x1111111111111111111111111111111111111111".replace("0x1", "0xA") } },
     { ...good, tx: { ...good.tx, to: USDC } }, { ...good, tx: { ...good.tx, value: "0x1" } }, { ...good, tx: { ...good.tx, nonce: 1.5 } },
@@ -202,10 +235,11 @@ test("the parent sends once through the helper and keeps every failure after the
   // A helper answer that is not exactly the bound fields, or names another request, is never taken as the server's.
   forged = { version: MM_HELPER_VERSION, ok: true, result: { requestId: RID, status: "SIGNING", txHash: null, mfa: null, responseHash: "1".repeat(64), link: PRIVATE } };
   assert.deepEqual((await sendMetaMaskServerTransaction(input(), 4321, client)).kind, "unknown");
+  // The client binds the helper's answer to the request it sent: one naming another id is never taken.
   forged = { version: MM_HELPER_VERSION, ok: true, result: { requestId: "00000000-0000-4000-8000-000000000099", status: "SIGNING", txHash: null, mfa: null,
     responseHash: "1".repeat(64) } };
   const named = await sendMetaMaskServerTransaction(input(), 4321, client);
-  assert.equal(named.kind === "unknown" && named.reason, "provider_request_identity_conflict");
+  assert.deepEqual(named.kind === "unknown" && [named.reason, named.diagnostic?.check], ["provider_handoff_outcome_unknown", "response_invalid"]);
   forged = { version: MM_HELPER_VERSION, ok: true, result: { requestId: RID, status: "SIGNING", txHash: null, mfa: { expiresAt: EXPIRES, authMethod: "qr" },
     responseHash: "1".repeat(64) } };
   assert.equal((await sendMetaMaskServerTransaction(input(), 4321, client)).kind, "unknown", "an MFA window only for AWAITING_MFA");

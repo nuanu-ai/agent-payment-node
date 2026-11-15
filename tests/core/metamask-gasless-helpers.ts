@@ -139,6 +139,8 @@ export class MmTestRpc implements MetaMaskGaslessRpcPort {
     nonceAtomic: "0", gasLimitAtomic: "60000", maxFeePerGasAtomic: "2000000000", maxPriorityFeePerGasAtomic: "1000000",
     l1FeeUpperWei: "0", operatorFeeUpperWei: "0", maximumNativeCostWei: "120000000000000", nativeBalanceWei: "500000000000000" };
   revocations: Array<{ readonly intent: MetaMaskGaslessIntent; readonly call: MetaMaskDisableCall }> = [];
+  /** The native balance the send-time read answers; the priced chain's own balance unless a test sets another. */
+  sendBalanceWei: string | undefined;
   constructor(readonly chainId: MetaMaskGaslessChainId, readonly now: Date, designation: "empty" | "pinned" = "empty") {
     const row = mmRegistry(chainId).row;
     this.state = { protocolCodeHashes: Object.fromEntries(Object.entries(row.protocol).map(([key, value]) =>
@@ -162,6 +164,11 @@ export class MmTestRpc implements MetaMaskGaslessRpcPort {
     this.calls.push("revocation"); this.revocations.push({ intent, call });
     if (this.revocationChain instanceof Error) throw this.revocationChain;
     return this.revocationChain;
+  }
+  async revocationBalance(): Promise<string> {
+    this.calls.push("revocationBalance");
+    if (this.revocationChain instanceof Error) throw this.revocationChain;
+    return this.sendBalanceWei ?? this.revocationChain.nativeBalanceWei;
   }
   async observe(intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor): Promise<MetaMaskGaslessRpcObservation> {
     this.calls.push("observe"); const row = mmRegistry(this.chainId).row;

@@ -204,7 +204,7 @@ async function mfaScenario() {
   assert.notEqual(RID2, RID); assert.match(second.data.mfa_task.owner_action, /never sends it again/u);
   // Its request was sent by the helper, so mm's local list never holds it: observe reads it from MetaMask's server, no watch.
   await rm(watchAnswer, { force: true });
-  await answer(serverAnswer, { outcome: "verified", status: "DENIED", transactionHash: null, responseHash: "5".repeat(64) });
+  await answer(serverAnswer, { outcome: "verified", status: "DENIED", transactionHash: null, mfa: null, responseHash: "5".repeat(64) });
   const watchesBefore = (await children()).filter((argv) => argv[1] === "requests").length;
   const denied = await observeCli(second.data.operation_id);
   assert.equal((await children()).filter((argv) => argv[1] === "requests").length, watchesBefore, "no mm watch for a helper hand-off");

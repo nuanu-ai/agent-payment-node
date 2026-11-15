@@ -1,4 +1,5 @@
 import type { Address, Hex } from "./model.js";
+import type { MetaMaskApprovalWindow } from "./metamask-gasless/client/server-transaction.js";
 import { ApnError } from "./errors.js";
 import { MetaMaskGaslessProviderClient } from "./metamask-gasless/client/process.js";
 import type { MetaMaskServerRequestQuery, MetaMaskServerRequestRead } from "./metamask-gasless/client/server-request.js";
@@ -8,13 +9,15 @@ export interface MetaMaskNativeRequestBinding { readonly sender: Address; readon
 
 /**
  * MetaMask's server answer for one native transfer request, read by its stored id. `verified`: it named this request,
- * kind transaction, the operation's sender and chain, with this job status token. `not_found`: the server answered 404
+ * kind transaction, the operation's sender and chain, with this job status token and, for AWAITING_MFA, the owner's
+ * approval window (`mfa`: its exact `expiresAt` and the session's `authMethod`). `not_found`: the server answered 404
  * for this id in this project. `refused`: APN read nothing it could use; `reason` says why (a closed reason, never
  * provider text) and `check` names the answer check that refused, when one did. Only `verified` says anything about the
  * request, and that is the provider's word, never chain evidence.
  */
 export type MetaMaskNativeServerRequestAnswer =
-  | { readonly outcome: "verified"; readonly status: string; readonly transactionHash: Hex | null; readonly responseHash: string }
+  | { readonly outcome: "verified"; readonly status: string; readonly transactionHash: Hex | null; readonly mfa: MetaMaskApprovalWindow | null;
+      readonly responseHash: string }
   | { readonly outcome: "not_found" }
   | { readonly outcome: "refused"; readonly reason: string; readonly check: string | null };
 
@@ -42,5 +45,6 @@ export async function readMetaMaskNativeServerRequest(requestId: string, project
     return { outcome: "refused", reason: reason === "mm_gasless_binding_changed" ? "metamask_session_project_changed" : reason, check };
   }
   if (read.requestId !== requestId) return { outcome: "refused", reason: "provider_request_identity_conflict", check: null };
-  return read.found ? { outcome: "verified", status: read.status, transactionHash: read.txHash, responseHash: read.responseHash } : { outcome: "not_found" };
+  return read.found ? { outcome: "verified", status: read.status, transactionHash: read.txHash, mfa: read.mfa, responseHash: read.responseHash }
+    : { outcome: "not_found" };
 }

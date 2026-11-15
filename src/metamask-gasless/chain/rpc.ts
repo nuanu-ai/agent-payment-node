@@ -20,7 +20,7 @@ import { observeMetaMaskGasless } from "./observe.js";
 import { recheckBlock, rpcBlock, rpcQuantity, rpcRecord, type MmRpcCall, type MmRpcMethod } from "./abi.js";
 import { readMetaMaskChainState, validateMetaMaskGaslessSnapshot } from "./snapshot.js";
 import type { MetaMaskDisableCall } from "../revocation/call.js";
-import { readMetaMaskRevocationChain, type MetaMaskRevocationChain } from "../revocation/chain.js";
+import { readMetaMaskRevocationBalance, readMetaMaskRevocationChain, type MetaMaskRevocationChain } from "../revocation/chain.js";
 
 export { validateMetaMaskGaslessSnapshot } from "./snapshot.js";
 
@@ -162,6 +162,14 @@ export class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
     await this.assertChain();
     const call: MmRpcCall = async (method, params) => await this.call(method, params, REVOCATION_METHODS.has(method));
     return await readMetaMaskRevocationChain(call, mmObservedDeployment(intent, this.deployment), intent, disable, operationId);
+  }
+
+  /** The delegator's native balance at the latest block, right before its disable is sent. */
+  async revocationBalance(intent: MetaMaskGaslessIntent, disable: MetaMaskDisableCall): Promise<string> {
+    this.assertIntent(intent);
+    await this.assertChain();
+    const call: MmRpcCall = async (method, params) => await this.call(method, params, REVOCATION_METHODS.has(method));
+    return await readMetaMaskRevocationBalance(call, disable);
   }
 
   /**

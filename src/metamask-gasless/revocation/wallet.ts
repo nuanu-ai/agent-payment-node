@@ -14,14 +14,15 @@ import type { MetaMaskSubmitDiagnostic } from "../client/submit-diagnostic.js";
  * What the wallet answered for the one disable request, named by the hash of APN's own request id in every answer. An
  * unknown answer is not proof that nothing was sent; the revoke's next actions say which chain reads must hold before
  * another disable. It names MetaMask's error code from a refusing answer (`providerErrorCode`), the request's job status
- * when MetaMask answered one APN does not treat as live (`providerStatus`), and the send's closed facts
- * (`submitDiagnostic`), so its cause can be read later.
+ * when MetaMask answered one APN does not treat as live (`providerStatus`), the send's closed facts (`submitDiagnostic`)
+ * and the helper's own closed refusal reason (`helperFailure`, an `mm_gasless_*` reason), so its cause can be read later.
  */
 export type MetaMaskRevocationSubmission =
   | { readonly disposition: "acknowledged"; readonly transactionHash: Hex; readonly requestIdHash: string }
   | { readonly disposition: "pending"; readonly requestIdHash: string }
   | { readonly disposition: "unknown"; readonly reason: string; readonly requestIdHash: string; readonly transactionHash?: Hex;
-      readonly providerStatus?: string; readonly providerErrorCode?: string; readonly submitDiagnostic?: MetaMaskSubmitDiagnostic };
+      readonly providerStatus?: string; readonly providerErrorCode?: string; readonly submitDiagnostic?: MetaMaskSubmitDiagnostic;
+      readonly helperFailure?: string };
 export interface MetaMaskRevocationWalletPort {
   send(input: { readonly chainId: number; readonly from: Address; readonly payload: MetaMaskCliPayload;
     readonly intent: string }): Promise<MetaMaskRevocationSubmission>;
@@ -52,11 +53,24 @@ export class MetaMaskSdkRevocationWallet implements MetaMaskRevocationWalletPort
     } finally { selected.stdout.fill(0); }
     // Built and checked before the helper starts: a malformed request refuses with nothing sent.
     const requestId = randomUUID();
+    // The helper lets the POST leave only within its own kill bound.
     const transaction = metaMaskServerTransaction({ requestId, projectHash: null, from: input.from, chainId: input.chainId,
-      payload: input.payload, intent: input.intent });
+      payload: input.payload, intent: input.intent, expiresAt: new Date(Date.now() + SUBMIT_TIMEOUT_MS).toISOString() });
     return revocationSubmission(await sendMetaMaskServerTransaction(transaction, SUBMIT_TIMEOUT_MS, this.client),
       metaMaskRevocationRequestIdHash(requestId));
   }
+}
+
+/**
+ * Whether the helper's own closed facts say the disable never reached the network: it stopped before its process
+ * started, at the session or selected-wallet read, while loading or hydrating the SDK, or at its deadline or clock check
+ * right before the bytes would go. The disposition stays unknown; only the next step differs.
+ */
+export function metaMaskRevocationStoppedBeforeNetwork(submission: MetaMaskRevocationSubmission): boolean {
+  if (submission.disposition !== "unknown" || submission.submitDiagnostic === undefined) return false;
+  const d = submission.submitDiagnostic;
+  return d.post === "not_reached" && (["launch", "private_state", "sdk_load", "hydrate", "binding"].includes(d.stage) ||
+    d.check === "deadline" || d.check === "clock");
 }
 
 /** The provider's request id stays private; its hash names it in output, as it has since 0.5.105. */
@@ -73,7 +87,8 @@ function revocationSubmission(outcome: MetaMaskServerTransactionOutcome, request
   if (outcome.kind === "unknown") {
     const d = outcome.diagnostic;
     return { disposition: "unknown", reason: outcome.reason, requestIdHash,
-      ...(d !== undefined && d.providerError !== null ? { providerErrorCode: d.providerError } : {}), ...(d === undefined ? {} : { submitDiagnostic: d }) };
+      ...(d !== undefined && d.providerError !== null ? { providerErrorCode: d.providerError } : {}), ...(d === undefined ? {} : { submitDiagnostic: d }),
+      ...(outcome.helperFailure === undefined ? {} : { helperFailure: outcome.helperFailure }) };
   }
   const { status, txHash } = outcome.answer, closed = MM_REQUEST_CLOSED_STATUSES.includes(status);
   if (txHash !== null && !closed) return { disposition: "acknowledged", transactionHash: txHash, requestIdHash };

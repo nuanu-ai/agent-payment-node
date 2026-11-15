@@ -8,7 +8,7 @@ import type { MetaMaskGaslessRpcFactory } from "../ports.js";
 import { mmDisableCall } from "./call.js";
 import { mmRevocationPayload } from "./chain.js";
 import { metaMaskRevocationSummary, type MetaMaskRevocationApprovalPort } from "./consent.js";
-import type { MetaMaskRevocationWalletPort } from "./wallet.js";
+import { metaMaskRevocationStoppedBeforeNetwork, type MetaMaskRevocationWalletPort } from "./wallet.js";
 
 /** The states in which a dispatched delegation may still be redeemable and nothing proves its outcome. */
 const REVOCABLE = ["submitted_pending", "unknown_finality", "failed_effects_pending", "abandoned_unknown"] as const;
@@ -48,24 +48,21 @@ export async function revokeMetaMaskGasless(state: StateStore, op: MetaMaskGasle
   const owner = evmAddressLock(op.intent.binding.address);
   await state.withLocks([owner], assertAvailable);
   const dispatched = mmDispatchIntent(op), chainId = dispatched.request.chainId, call = mmDisableCall(dispatched);
-  const rpc = rpcFor(chainId);
-  if (rpc.chainId !== chainId || rpc.revocation === undefined) {
+  const rpc = rpcFor(chainId), revocationBalance = rpc.revocationBalance;
+  if (rpc.chainId !== chainId || rpc.revocation === undefined || revocationBalance === undefined) {
     throw new ApnError("APN_RPC_CONFIG", "The configured RPC cannot price a delegation disable.", { reason: "mm_revoke_rpc" });
   }
   const chain = await rpc.revocation(dispatched, call, id);
-  if (BigInt(chain.nativeBalanceWei) < BigInt(chain.maximumNativeCostWei)) {
-    throw new ApnError("APN_INSUFFICIENT_GAS", `The server wallet ${call.from} holds ${chain.nativeBalanceWei} wei of native gas on chain ` +
-      `${chainId}; this disable can cost up to ${chain.maximumNativeCostWei} wei. Nothing was sent.`,
-    { reason: "mm_revoke_native_gas", chain_id: chainId, address: call.from, native_balance_wei: chain.nativeBalanceWei,
-      maximum_native_cost_wei: chain.maximumNativeCostWei, nextActions: [
-        `Send at least ${(BigInt(chain.maximumNativeCostWei) - BigInt(chain.nativeBalanceWei)).toString()} wei of chain ${chainId}'s native coin (no USDC) to ${call.from}, then rerun: apn gasless transfer revoke --operation ${id}`] });
-  }
+  assertNativeGas(chain.nativeBalanceWei, chain.maximumNativeCostWei, chainId, call.from, id);
   const summary = metaMaskRevocationSummary(id, chainId, call, chain);
   if (!await approval.confirm(summary)) {
     throw new ApnError("APN_OPERATION_BLOCKED", "The delegation disable was not confirmed; nothing was sent.", { reason: "mm_revoke_refused" });
   }
   const submitted = await state.withLocks([owner, "provider-session:metamask-agent-wallet"], async () => {
     await assertAvailable();
+    // `mm wallet send-transaction` read the wallet's native balance right before its POST; the helper does not. The same
+    // refusal as at pricing, with nothing sent, when the balance no longer covers the priced maximum.
+    assertNativeGas(await revocationBalance.call(rpc, dispatched, call), chain.maximumNativeCostWei, chainId, call.from, id);
     return await wallet.send({ chainId, from: call.from, payload: mmRevocationPayload(call, chain),
       intent: `APN ${id}: disable delegation ${call.delegationHash}` });
   });
@@ -74,8 +71,30 @@ export async function revokeMetaMaskGasless(state: StateStore, op: MetaMaskGasle
     nonce_atomic: chain.nonceAtomic, gas_limit_atomic: chain.gasLimitAtomic, max_fee_per_gas_atomic: chain.maxFeePerGasAtomic,
     maximum_native_cost_wei: chain.maximumNativeCostWei, submission: submitted, proof_class: "owner_wallet_handoff_unproven",
     next_actions: [...submitted.disposition === "pending" ? ["Confirm this disable request in MetaMask Mobile or the email registered to your MetaMask dashboard."] : [],
-      ...submitted.disposition === "unknown" ? [unconfirmedDisable(submitted.providerErrorCode, call.from, chain.nonceAtomic, id)] : [],
+      ...submitted.disposition === "unknown" ? [metaMaskRevocationStoppedBeforeNetwork(submitted)
+        ? unsentDisable(submitted.helperFailure, call.from, chain.nonceAtomic, id)
+        : unconfirmedDisable(submitted.providerErrorCode, call.from, chain.nonceAtomic, id)] : [],
       resume] };
+}
+
+/** The server wallet's native balance must cover the disable's priced maximum cost; otherwise nothing is sent. */
+function assertNativeGas(balanceWei: string, maximumWei: string, chainId: number, from: string, id: string): void {
+  if (BigInt(balanceWei) >= BigInt(maximumWei)) return;
+  throw new ApnError("APN_INSUFFICIENT_GAS", `The server wallet ${from} holds ${balanceWei} wei of native gas on chain ` +
+    `${chainId}; this disable can cost up to ${maximumWei} wei. Nothing was sent.`,
+  { reason: "mm_revoke_native_gas", chain_id: chainId, address: from, native_balance_wei: balanceWei, maximum_native_cost_wei: maximumWei,
+    nextActions: [`Send at least ${(BigInt(maximumWei) - BigInt(balanceWei)).toString()} wei of chain ${chainId}'s native coin (no USDC) to ${from}, then rerun: apn gasless transfer revoke --operation ${id}`] });
+}
+
+/**
+ * After a helper that stopped before any network call (its own closed facts): no disable left this machine and its nonce
+ * is untouched, so the cause is the MetaMask session or the selected server wallet. The answer stays unknown.
+ */
+function unsentDisable(reason: string | undefined, from: string, nonce: string, id: string): string {
+  const hex = `0x${BigInt(nonce).toString(16)}`;
+  return `The MetaMask helper stopped before any network call${reason === undefined ? "" : ` (${reason})`}: no disable left this machine, ` +
+    `and nonce ${hex} (${nonce}) of ${from} is untouched. Sign in to the MetaMask Agent Wallet again if its session expired, or select ` +
+    `the server wallet ${from} in it, then run apn gasless transfer revoke --operation ${id} again.`;
 }
 
 /**

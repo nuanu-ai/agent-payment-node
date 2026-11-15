@@ -12,7 +12,7 @@ import { ApnError } from "../../src/errors.js";
 import { executeHelperRequest, MetaMaskGaslessProviderClient, type MetaMaskGaslessHelperRunner } from "../../src/metamask-gasless/client/index.js";
 import type { FetchExchange, FetchExchangeRequest, FetchExchangeResponse } from "../../src/metamask-gasless/client/network.js";
 import { runnerDiagnostic, submitFailureError } from "../../src/metamask-gasless/client/submit-diagnostic.js";
-import { MetaMaskSdkRevocationWallet } from "../../src/metamask-gasless/revocation/wallet.js";
+import { MetaMaskSdkRevocationWallet, metaMaskRevocationStoppedBeforeNetwork } from "../../src/metamask-gasless/revocation/wallet.js";
 import type { MetaMaskProcessRunnerPort } from "../../src/metamask-process-runner.js";
 import { OWNER, PROJECT, syntheticHome } from "./metamask-gasless-client-fixtures/sdk.js";
 
@@ -41,11 +41,15 @@ function mm(address: string = OWNER): MetaMaskProcessRunnerPort & { readonly cal
     calls.push(argv); return { exitCode: 0, stdout: Buffer.from(JSON.stringify({ ok: true, data: { mode: "server", chainNamespace: "evm", address } })) };
   }, async runForeground() { throw new Error("TEST no foreground mm"); } };
 }
-async function wallet(t: test.TestContext, server: Server, failure?: unknown, selected?: string) {
-  const home = await syntheticHome(); t.after(home.cleanup);
+async function wallet(t: test.TestContext, server: Server, failure?: unknown, selected?: string,
+  session: Parameters<typeof syntheticHome>[0] = {}) {
+  const home = await syntheticHome(session); t.after(home.cleanup);
   let runs = 0;
   const runner: MetaMaskGaslessHelperRunner = { async run(request, options) {
     runs += 1; assert.equal(request.mode, "submitTransaction"); assert.equal(options.timeoutMs, 120_000);
+    // The helper lets the POST leave only within its own kill bound.
+    const deadline = request.mode === "submitTransaction" ? Date.parse(request.transaction.expiresAt) - Date.now() : 0;
+    assert.ok(deadline > 0 && deadline <= 120_000, "the send's deadline is its kill bound");
     if (failure !== undefined) throw failure;
     return await executeHelperRequest(request, { homeDirectory: home.home, exchange: server });
   } };
@@ -103,4 +107,21 @@ test("every answer names the request by its hash: acknowledged with a live hash,
   const timedOut = await send(lost.wallet);
   assert.equal(timedOut.disposition, "unknown"); assert.match(timedOut.requestIdHash, /^[0-9a-f]{64}$/u);
   assert.equal(timedOut.disposition === "unknown" && timedOut.submitDiagnostic?.check, "runner_timeout"); assert.equal(quiet.requests.length, 0);
+});
+
+test("a helper that stopped before any network call stays unknown, names its reason, and is told apart from one that sent", async (t) => {
+  const other = "0x2222222222222222222222222222222222222222", server = new Server();
+  // mm's read says the delegator is selected, but the session the helper reads has another server wallet selected.
+  const moved = await wallet(t, server, undefined, undefined, { ref: { address: other },
+    remoteWallets: [{ address: OWNER, namespace: "evm" }, { address: other, namespace: "evm" }] });
+  const stopped = await send(moved.wallet);
+  assert.equal(server.requests.length, 0); assert.equal(stopped.disposition, "unknown");
+  assert.deepEqual(stopped.disposition === "unknown" && [stopped.helperFailure, stopped.submitDiagnostic?.post, stopped.submitDiagnostic?.stage],
+    ["mm_gasless_binding_changed", "not_reached", "private_state"]);
+  assert.equal(metaMaskRevocationStoppedBeforeNetwork(stopped), true);
+  const refusing = new Server({}, 422, JSON.stringify({ error: { code: "POLICY_VIOLATION" } })), sent = await wallet(t, refusing);
+  const answered = await send(sent.wallet);
+  assert.equal(answered.disposition, "unknown"); assert.equal(metaMaskRevocationStoppedBeforeNetwork(answered), false, "this one left the machine");
+  const lost = await wallet(t, new Server(), submitFailureError("mm_gasless_submit_unknown", runnerDiagnostic("runner_timeout", true)));
+  assert.equal(metaMaskRevocationStoppedBeforeNetwork(await send(lost.wallet)), false, "a helper killed after its start may have sent");
 });

@@ -39,7 +39,7 @@ await mock.module(moduleUrl('metamask-server-transaction.js'),{namedExports:{...
 const realServerRead=await import(moduleUrl('metamask-native-request-server-read.js'));
 await mock.module(moduleUrl('metamask-native-request-server-read.js'),{namedExports:{...realServerRead,readMetaMaskNativeServerRequest:async(requestId,hash,binding)=>{
   assert.equal(requestId,sentTransaction.requestId);assert.equal(hash,projectHash);assert.equal(binding.chainId,1);
-  return {outcome:'verified',status:'CONFIRMED',transactionHash:'0x'+'e'.repeat(64),responseHash:'3'.repeat(64)};
+  return {outcome:'verified',status:'CONFIRMED',transactionHash:'0x'+'e'.repeat(64),mfa:null,responseHash:'3'.repeat(64)};
 }}});
 const balances=(q)=>({address:q.sender,asset:{schemaVersion:'apn.evm-asset.v1',chainId:q.chainId,kind:'erc20',address:q.token,decimals:6,decimalsSource:'onchain'},nativeAtomic:scenario==='balance'?'0':'1000000000',assetAtomic:'10000',blockNumberAtomic:'100',blockHash:'0x'+'a'.repeat(64),rpcOrigin:'https://test-rpc.example',observedAt:new Date().toISOString()});
 await mock.module(moduleUrl('metamask-native-transfer-rpc.js'), {namedExports:{
@@ -105,7 +105,8 @@ try {
  assert.equal(sent.length,1);
  if(sent.length){const first=children.findIndex(a=>a[1]==='send-transaction');assert.equal(first,6,'three READs before consent and three in the one final guard before send');
    // The request mm 6.1.5 built from 0.5.107's payload: lowercase addresses, numeric nonce, gas as gasLimit.
-   const sentTx=JSON.parse(sent[0][2]),tx=sentTx.tx;assert.deepEqual(Object.keys(sentTx),['requestId','projectHash','tx','intent']);assert.equal(sentTx.projectHash,projectHash);
+   const sentTx=JSON.parse(sent[0][2]),tx=sentTx.tx;assert.deepEqual(Object.keys(sentTx),['requestId','projectHash','tx','intent','expiresAt']);assert.equal(sentTx.projectHash,projectHash);
+   assert.equal(sentTx.expiresAt,selectedQuote.expiresAt,'the helper lets the POST leave only before the consent deadline');
    assert.deepEqual(Object.keys(tx),['from','to','chainId','data','value','nonce','gasLimit','maxFeePerGas','maxPriorityFeePerGas']);
    assert.equal(tx.from,payer);assert.equal(tx.to,selectedQuote.token.toLowerCase());assert.equal(tx.chainId,1);assert.equal(tx.nonce,7);assert.equal(tx.gasLimit,'0xfde8');assert.equal(tx.value,'0x0');
    assert.equal(tx.maxFeePerGas,'0xc8');assert.equal(tx.maxPriorityFeePerGas,'0xa');assert.equal(sentTx.intent,`APN ${result.operation_id}: ${amount} atomic USDC to ${getAddress(recipientInput)}`);}

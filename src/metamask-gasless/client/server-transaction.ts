@@ -1,7 +1,7 @@
 import { isPlainRecord } from "../../canonical.js";
 import type { Hex } from "../../model.js";
 import { mmFail, type MetaMaskGaslessFailureReason } from "../reasons.js";
-import { mmCanonicalAddress, mmExact, mmHash, mmHex, mmUuid } from "../validation.js";
+import { mmCanonicalAddress, mmExact, mmHash, mmHex, mmIso, mmUuid } from "../validation.js";
 import { jobTx } from "./job-tx.js";
 import { submitToken, type SubmitCheck } from "./submit-diagnostic.js";
 import type { MetaMaskJobTx } from "./job-tx.js";
@@ -12,6 +12,8 @@ import type { MetaMaskJobTx } from "./job-tx.js";
  * `mm wallet send-transaction` (metamask-server-transaction.ts): `from` is the sending server wallet, which must be the
  * signed-in session's selected wallet, and `chainId` the request's chain. `projectHash` is the plain SHA-256 of the
  * session project the request must be sent in, or null where any project that holds `from` may send it (the revoke).
+ * `expiresAt` is the instant from which the POST never leaves: the network policy checks it right before the bytes go
+ * (the native transfer's consent deadline; the revoke's send bound). It is not part of the request.
  */
 export interface MetaMaskServerTransactionTx {
   readonly from: `0x${string}`;
@@ -29,6 +31,7 @@ export interface MetaMaskServerTransactionInput {
   readonly projectHash: string | null;
   readonly tx: MetaMaskServerTransactionTx;
   readonly intent: string;
+  readonly expiresAt: string;
 }
 /**
  * The server's answer to the one POST, as bound fields only: this request id, its job status token, a transaction hash
@@ -40,7 +43,7 @@ export interface MetaMaskServerTransactionAnswer {
   readonly requestId: string;
   readonly status: string;
   readonly txHash: Hex | null;
-  readonly mfa: { readonly expiresAt: string | null; readonly authMethod: string | null } | null;
+  readonly mfa: MetaMaskApprovalWindow | null;
   readonly responseHash: string;
 }
 
@@ -51,9 +54,9 @@ const INTENT = /^[\x21-\x7e](?:[\x20-\x7e]{0,510}[\x21-\x7e])?$/u;
 const TX_KEYS = ["from", "to", "chainId", "data", "value", "nonce", "gasLimit", "maxFeePerGas", "maxPriorityFeePerGas"] as const;
 
 export function serverTransactionInput(value: unknown): MetaMaskServerTransactionInput {
-  const i = mmExact(value, ["requestId", "projectHash", "tx", "intent"], INPUT);
+  const i = mmExact(value, ["requestId", "projectHash", "tx", "intent", "expiresAt"], INPUT);
   // A canonical v4 UUID only, as the SDK itself would generate one.
-  mmUuid(i.requestId, INPUT);
+  mmUuid(i.requestId, INPUT); mmIso(i.expiresAt, INPUT);
   if (i.projectHash !== null) mmHash(i.projectHash, INPUT);
   if (typeof i.intent !== "string" || !INTENT.test(i.intent)) mmFail(INPUT);
   const t = mmExact(i.tx, TX_KEYS, INPUT);
@@ -102,26 +105,42 @@ export function serverTransactionAnswer(value: unknown, input: MetaMaskServerTra
   if (value.txHash !== undefined && value.txHash !== null) seen.check = "response_hash";
   const txHash = value.txHash === undefined || value.txHash === null ? null : mmHex(value.txHash, 32, ANSWER);
   seen.check = undefined;
-  const approval = isPlainRecord(value.approval) ? value.approval : {};
-  const mfa = status === "AWAITING_MFA" ? { expiresAt: exactInstant(approval.expiresAt), authMethod: authMethodToken(sessionAuthMethod) } : null;
-  return { requestId: input.requestId, status, txHash, mfa, responseHash };
+  return { requestId: input.requestId, status, txHash, mfa: approvalWindow(status, value.approval, sessionAuthMethod), responseHash };
 }
 
-/** The helper's answer as the parent accepts it: exactly these fields, a v4 id, and an MFA window only for AWAITING_MFA. */
-export function serverTransactionResult(value: unknown): MetaMaskServerTransactionAnswer {
+/**
+ * The helper's answer as the parent accepts it, for the very request it was sent: exactly these fields, this request id
+ * (another names another request: identity conflict), and an MFA window only for AWAITING_MFA.
+ */
+export function serverTransactionResult(value: unknown, input: MetaMaskServerTransactionInput): MetaMaskServerTransactionAnswer {
   const r = mmExact(value, ["requestId", "status", "txHash", "mfa", "responseHash"], ANSWER);
-  mmUuid(r.requestId, ANSWER); mmHash(r.responseHash, ANSWER);
+  mmHash(r.responseHash, ANSWER);
+  if (r.requestId !== input.requestId) mmFail(ANSWER);
   const status = submitToken(r.status);
   if (status === null || (r.txHash !== null && mmHex(r.txHash, 32, ANSWER) !== r.txHash)) mmFail(ANSWER);
-  if (status !== "AWAITING_MFA" ? r.mfa !== null : !isPlainRecord(r.mfa)) mmFail(ANSWER);
-  if (r.mfa !== null) {
-    const m = mmExact(r.mfa, ["expiresAt", "authMethod"], ANSWER);
-    if (m.expiresAt !== exactInstant(m.expiresAt) || m.authMethod !== authMethodToken(m.authMethod)) mmFail(ANSWER);
-  }
+  assertApprovalWindow(r.mfa, status, ANSWER);
   return r as unknown as MetaMaskServerTransactionAnswer;
 }
 
-/** An instant in its exact ISO form, or null: a value in any other form is never guessed (metaMaskMfaNotice's rule). */
+/** The owner-facing approval window of a request MetaMask holds for MFA: when it closes and how the owner confirms. */
+export interface MetaMaskApprovalWindow { readonly expiresAt: string | null; readonly authMethod: string | null }
+/**
+ * For `AWAITING_MFA` only: the job's `approval.expiresAt` (as `mm` reads it from the job status it polls) in its exact
+ * ISO form, and the signed-in session's `authMethod` (as `mm` reads `session.load()?.authMethod`); a value in any other
+ * form is null, never guessed (metaMaskMfaNotice's rule). No other approval field leaves the helper.
+ */
+export function approvalWindow(status: string, approval: unknown, sessionAuthMethod: unknown): MetaMaskApprovalWindow | null {
+  if (status !== "AWAITING_MFA") return null;
+  return { expiresAt: exactInstant(isPlainRecord(approval) ? approval.expiresAt : undefined), authMethod: authMethodToken(sessionAuthMethod) };
+}
+/** The parent's check of a window the helper returned: present exactly for AWAITING_MFA, each field exact or null. */
+export function assertApprovalWindow(value: unknown, status: string, reason: MetaMaskGaslessFailureReason): void {
+  if (status !== "AWAITING_MFA" ? value !== null : !isPlainRecord(value)) mmFail(reason);
+  if (value === null) return;
+  const m = mmExact(value, ["expiresAt", "authMethod"], reason);
+  if (m.expiresAt !== exactInstant(m.expiresAt) || m.authMethod !== authMethodToken(m.authMethod)) mmFail(reason);
+}
+
 function exactInstant(value: unknown): string | null {
   return typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value ? value : null;
 }

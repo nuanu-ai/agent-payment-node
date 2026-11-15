@@ -121,6 +121,15 @@ test("the disable refuses before any send without consent, gas, a foreground ter
   assert.equal(unfunded.error?.code, "APN_INSUFFICIENT_GAS"); assert.equal(unfunded.error?.details?.native_balance_wei, "0");
   assert.deepEqual(unfunded.next_actions, [`Send at least 120000000000000 wei of chain 1329's native coin (no USDC) to ${f.binding.address}, then rerun: apn gasless transfer revoke --operation ${id}`]);
   assert.equal(poor.seen.length, 0); assert.equal(poorWallet.sent.length, 0);
+  // The balance is read again inside the send lock, right before the helper: mm's send read it there, the helper does not.
+  f.rpc.revocationChain = { ...(f.rpc.revocationChain as Json), nativeBalanceWei: "500000000000000" } as never;
+  f.rpc.sendBalanceWei = "119999999999999";
+  const drained = new Approval(), drainedWallet = new Wallet();
+  const late = await core(drained, drainedWallet).execute({ command: "gasless.transfer.revoke", operationId: id });
+  assert.equal(late.error?.code, "APN_INSUFFICIENT_GAS"); assert.equal(late.error?.details?.reason, "mm_revoke_native_gas");
+  assert.equal(late.error?.details?.native_balance_wei, "119999999999999");
+  assert.equal(drained.seen.length, 1, "the owner had confirmed"); assert.equal(drainedWallet.sent.length, 0, "nothing was sent");
+  f.rpc.sendBalanceWei = undefined;
   const other = await temporaryState(); t.after(other.cleanup);
   const fresh = await mmFixture(other.root), waiting = await fresh.prepare();
   const never = await new ApnCore({ state: fresh.state, clock: fresh.clock, metaMaskGasless: { ...fresh.dependencies,
@@ -157,4 +166,12 @@ test("an unknown disable answer names MetaMask's error code and when another dis
   const plain = await core(new Approval(), new Wallet({ disposition: "unknown", reason: "provider_handoff_outcome_unknown", requestIdHash: "e".repeat(64) }))
     .execute({ command: "gasless.transfer.revoke", operationId: id });
   assert.match(plain.next_actions![0]!, /^MetaMask did not confirm this disable\. Run the resume below/u);
+  // The helper's own closed facts say nothing left the machine: the answer stays unknown, and the step names the cause.
+  const unsent = await core(new Approval(), new Wallet({ disposition: "unknown", reason: "provider_handoff_outcome_unknown", requestIdHash: "e".repeat(64),
+    helperFailure: "mm_gasless_binding_changed", submitDiagnostic: { mode: "submit", stage: "private_state", post: "not_reached", httpStatus: null,
+      check: "unclassified", providerError: null, providerStatus: null, responseTx: null } })).execute({ command: "gasless.transfer.revoke", operationId: id });
+  assert.equal((unsent.data as Json).submission.disposition, "unknown");
+  assert.deepEqual(unsent.next_actions, [`The MetaMask helper stopped before any network call (mm_gasless_binding_changed): no disable left this machine, ` +
+    `and nonce 0x0 (0) of ${from} is untouched. Sign in to the MetaMask Agent Wallet again if its session expired, or select the server wallet ` +
+    `${from} in it, then run apn gasless transfer revoke --operation ${id} again.`, `apn operation resume --operation ${id}`]);
 });

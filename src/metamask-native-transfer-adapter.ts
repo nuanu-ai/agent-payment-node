@@ -206,9 +206,11 @@ async function prepareNativeHandoff(scope: MetaMaskNativeOwnedScope, context: Me
   const quote = validateMetaMaskNativeFeeQuote(context.quote);
   chain(quote.chainId);
   const t = quote.transaction, transfer = metaMaskNativeQuoteTransfer(quote);
-  // The payload 0.5.107 handed `mm wallet send-transaction`; EIP-1559 fees force the ordinary type-2 request.
+  // The payload 0.5.107 handed `mm wallet send-transaction`; EIP-1559 fees force the ordinary type-2 request. The helper
+  // lets the POST leave only before the consent deadline.
   const transaction = metaMaskServerTransaction({ requestId: metaMaskNativeOwnedRequestId(scope, context), projectHash: context.vendorProjectHash,
     from: quote.sender, chainId: quote.chainId, intent: `APN ${context.operationId}: ${transfer.amountAtomic} atomic USDC to ${transfer.recipient}`,
+    expiresAt: deadline.utcExpiresAt,
     payload: { to: t.to, data: t.data, value: "0x0", gas: quantity(t.gasLimitAtomic), nonce: quantity(t.nonceAtomic),
       maxFeePerGas: quantity(t.maxFeePerGasAtomic), maxPriorityFeePerGas: quantity(t.maxPriorityFeePerGasAtomic) } });
   await assertMetaMaskNativeOwnedContextCurrent(scope, context);
@@ -309,7 +311,7 @@ async function readRequest(requestId: string, vendorProjectHash: string, read: R
     observation.guard_step = null;
     if (read.source === "server") {
       observation.stage = "server_read";
-      hint = await serverRequestHint(requestId, vendorProjectHash, read.binding, observation, hint);
+      hint = await serverRequestHint(requestId, vendorProjectHash, read.binding, observation, hint, true);
     } else {
       observation.stage = "watch";
       const result = await runner.runJson(["wallet", "requests", "watch", requestId, "--wallet-timeout", "1", "--json"], 6_000);
@@ -322,7 +324,7 @@ async function readRequest(requestId: string, vendorProjectHash: string, read: R
       // The precise trigger only: mm itself said its local list does not hold this very request. No other answer is retried.
       if (read.binding !== undefined && hint.disposition === "unknown" && hint.reason === "metamask_request_not_in_local_state") {
         observation.stage = "server_read";
-        hint = await serverRequestHint(requestId, vendorProjectHash, read.binding, observation, hint);
+        hint = await serverRequestHint(requestId, vendorProjectHash, read.binding, observation, hint, false);
       }
     }
     observation.stage = "after_guard"; observation.guard_step = "project_after";
@@ -364,10 +366,12 @@ function requestHint(result: MetaMaskProcessResult, requestId: string, observati
 /**
  * The server's own record of the request, read when mm's local list does not hold it. A verified answer is classified
  * by `jobHint` exactly as a watch's `request` and `status` of this very request; a 404 stays unknown, and a refused read
- * keeps the reason it had before the read (the watch's own, or that no read answered).
+ * keeps the reason it had before the read (the watch's own, or that no read answered). `withWindow`: the read of a
+ * request APN sent itself also keeps the AWAITING_MFA approval window the answer names; the 0.5.107 fallback read of an
+ * earlier request records it as it always did, with no window.
  */
 async function serverRequestHint(requestId: string, projectHash: string, binding: MetaMaskNativeRequestBinding,
-  observation: MutableReadObservation, missed: RequestHint): Promise<RequestHint> {
+  observation: MutableReadObservation, missed: RequestHint, withWindow: boolean): Promise<RequestHint> {
   const answer = await readMetaMaskNativeServerRequest(requestId, projectHash, binding);
   observation.server_read = Object.freeze({outcome: answer.outcome, response_hash: answer.outcome === "verified" ? answer.responseHash : null,
     reason: answer.outcome === "refused" ? answer.reason : null, check: answer.outcome === "refused" ? answer.check : null});
@@ -375,7 +379,8 @@ async function serverRequestHint(requestId: string, projectHash: string, binding
   if (answer.outcome === "refused") return missed;
   return jobHint({pollingId: requestId, kind: "transaction", namespace: "evm", chainId: binding.chainId},
     {status: answer.status, ...(answer.transactionHash === null ? {} : {txHash: answer.transactionHash})}, true, requestId, observation,
-    {expiresAt: null, authMethod: null, evidenceHash: answer.responseHash});
+    {expiresAt: withWindow ? answer.mfa?.expiresAt ?? null : null, authMethod: withWindow ? answer.mfa?.authMethod ?? null : null,
+      evidenceHash: answer.responseHash});
 }
 
 /** One provider record of the request (a watch's `request` and `status`): its identity, chain, hash and status. */

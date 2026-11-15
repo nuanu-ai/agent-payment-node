@@ -33,8 +33,8 @@ import { MetaMaskNativeJournal, METAMASK_NATIVE_OPERATION_SCHEMA, METAMASK_NATIV
   metaMaskNativeRequestHash, metaMaskNativeHasRequest, metaMaskNativeObserveCommand, metaMaskNativeRequestIdHash, metaMaskNativeRequestLabel,
   metaMaskNativeRequestMatches, patchMetaMaskNativeOperation as patch, publicMetaMaskNativeOperation as publicOperation,
   type MetaMaskNativeOperation as NativeOperation, type MetaMaskNativeOwnedContext } from "./metamask-native-journal.js";
-import { metaMaskNativeHandoffFields, metaMaskNativeRequestTask, openMetaMaskNativeRequest, publicMetaMaskNativeReadObservation,
-  sealMetaMaskNativeRequest, type MetaMaskNativePublicReadObservation } from "./metamask-native-request-reference.js";
+import { metaMaskNativeHandoffFields, metaMaskNativeReadEvidence, metaMaskNativeRequestTask, openMetaMaskNativeRequest,
+  publicMetaMaskNativeReadObservation, sealMetaMaskNativeRequest, type MetaMaskNativePublicReadObservation } from "./metamask-native-request-reference.js";
 import type { ProviderRequestReferencePort } from "./provider-request-reference-store.js";
 import { assetUsageReservationId } from "./asset-usage-ledger.js";
 import { refreshOperationIndex } from "./operation-index/refresh.js";
@@ -187,6 +187,8 @@ export async function runMetaMaskNativeTransfer(stateRoot: string, input: MetaMa
   const initial=await state.withLocks([`profile:${allowlistProfileHash(profileName)}`,`profile:${state.profileHash(profileName)}`],()=>loadMetaMaskNativeOwner(state,profileName));
   const payer=initial.profile.public_address.toLowerCase();
   await closeExpiredNativeTransfersOf(stateRoot,chainId,payer);
+  // The operation lock is held from before the effect marker until the hand-off's outcome and holds are recorded:
+  // readMetaMaskNativeTransfer relies on it (recordInterruptedHandoff).
   return state.withLocks([`profile:${allowlistProfileHash(profileName)}`,`profile:${state.profileHash(profileName)}`,`operation:${id}`,"provider-session:metamask-agent-wallet",evmAddressLock(payer),`account-chain-nonce:${payer}:${chainId}`], async () => {
     const existing = await journal.read(id);
     if (existing !== null) return replay(existing);
@@ -317,6 +319,23 @@ export async function closeExpiredNativeTransfersOf(stateRoot:string,chainId:num
     } catch { /* The next status closes it; meanwhile it no longer blocks. */ }
   }
 }
+/**
+ * A helper hand-off whose sending command ended at its effect marker (`effect_started`). The send holds this operation's
+ * lock from before the marker until it has recorded the outcome and moved the holds, so a reader that holds the lock and
+ * still finds the marker knows that command is gone, whatever it did. Its outcome is UNKNOWN, as the send's own failure
+ * path records it, before any read can add a hash, a receipt or a task: every hold still `reserved` moves to
+ * `unknown_finality` first (a crash between the two leaves the marker, and this runs again), then the journal says why.
+ * A record without the helper path (0.5.107 and earlier) is left exactly as it is.
+ */
+async function recordInterruptedHandoff(stateRoot:string,journal:MetaMaskNativeJournal,op:NativeOperation):Promise<NativeOperation> {
+  if(op.state!=="effect_started"||op.effectAttempts!==1||op.handoffPath!==METAMASK_NATIVE_SDK_HANDOFF)return op;
+  const ledger=new AssetUsageLedger(stateRoot);
+  for (const r of op.reservations) await ledger.transition({...transitionIdentity(r),state:"unknown_finality",now:new Date(),expectedCurrentStates:["reserved","unknown_finality"]});
+  // Built at call time: this module sits in an import cycle with the adapter.
+  const interrupted=validateMetaMaskNativeDiagnostic({stage:"post_handoff",code:"interrupted",exitCode:null,signal:null,durationMs:0,remainingMs:0,
+    stderrClass:"none",providerCode:"none"});
+  return await journal.persist(patch(op,{state:"unknown",...(op.diagnostic===undefined?{diagnostic:interrupted}:{})}));
+}
 function failureDiagnostic(error: unknown, context: MetaMaskNativeOwnedContext, scope: MetaMaskNativeOwnedScope | undefined): MetaMaskNativeDiagnostic {
   const e = scope === undefined ? undefined : scopes.get(scope), deadline = Date.parse(nativeContextDeadline(context));
   return takeMetaMaskNativeProcessFailureDiagnostic(error)??(error instanceof ApnError&&"nativeDiagnostic" in error?validateMetaMaskNativeDiagnostic(error.nativeDiagnostic):undefined)??validateMetaMaskNativeDiagnostic({
@@ -335,6 +354,8 @@ export async function readMetaMaskNativeTransfer(stateRoot:string,idInput:string
   return journal.withLocks([`operation:${id}`],async()=>{
     let op=await journal.read(id); if(op===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Native transfer operation does not exist.");
     op=await closeExpiredBeforeEffect(stateRoot,journal,op,new Date());
+    // Observing, under the operation lock: a helper hand-off whose command ended at its marker is UNKNOWN first.
+    if(observe)op=await recordInterruptedHandoff(stateRoot,journal,op);
     let readObservation: MetaMaskNativePublicReadObservation | undefined = observe ? publicMetaMaskNativeReadObservation(Object.freeze({stage:"not_requested",guard_step:null,
       request_id:op.providerRequestId,watch_returned:false,before_guard_verified:false,after_guard_verified:false,
       request_identity_verified:false,provider_status:null,transaction_hash:op.transactionHash,chain_id:op.context.quote.chainId,
@@ -353,7 +374,7 @@ export async function readMetaMaskNativeTransfer(stateRoot:string,idInput:string
       const hash="transactionHash" in hint ? hint.transactionHash : undefined, mfa=hint.disposition==="pending"?hint.mfa:undefined;
       if(hash!==undefined)op=await journal.persist(patch(op,{state:"unknown",transactionHash:hash,mfaTask:undefined}));
       // A verified notice or AWAITING_MFA status for this very request: the owner's task, kept beside the UNKNOWN outcome.
-      else if(mfa!==undefined&&op.state==="unknown")op=await journal.persist(patch(op,{mfaTask:metaMaskNativeRequestTask(op,mfa,"watch")}));
+      else if(mfa!==undefined&&op.state==="unknown")op=await journal.persist(patch(op,{mfaTask:metaMaskNativeRequestTask(op,metaMaskNativeReadEvidence(op,mfa),"watch")}));
       // The provider's own record of this request shows it past the approval (signing, denied, expired...): no task is left.
       else if(op.mfaTask!==undefined&&op.state==="unknown"&&hint.readObservation?.request_identity_verified===true)op=await journal.persist(patch(op,{mfaTask:undefined}));
     }

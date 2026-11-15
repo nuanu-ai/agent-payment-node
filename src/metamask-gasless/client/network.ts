@@ -44,7 +44,8 @@ export type ModeContext =
       readonly token: string; readonly now: () => Date }
   | { readonly mode: "readRequest"; readonly query: MetaMaskServerRequestQuery; readonly projectId: string; readonly token: string }
   /** One server-wallet transaction request with APN's own id: its one POST, whose body is fully fixed by the input. */
-  | { readonly mode: "submitTransaction"; readonly input: MetaMaskServerTransactionInput; readonly projectId: string; readonly token: string };
+  | { readonly mode: "submitTransaction"; readonly input: MetaMaskServerTransactionInput; readonly projectId: string; readonly token: string;
+      readonly now: () => Date };
 
 export class HelperNetworkPolicy {
   readonly fetch: typeof globalThis.fetch;
@@ -162,13 +163,13 @@ export class HelperNetworkPolicy {
       mmFail(this.sends() ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
     }
     this.counts.set(key, 1);
-    if (this.context.mode === "submit") this.assertSubmitDeadline();
+    if (this.sends()) this.assertSubmitDeadline();
     const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
     // From the last deadline check on, the POST may reach the provider: it counts as sent even without an answer.
     const request: FetchExchangeRequest = { url, method, headers, body, maxBytes: MAX_RESPONSE, timeoutMs: 15_000,
-      ...(signal ? { signal } : {}), ...(this.context.mode === "submit" ? { beforeSend: () => {
-        this.assertSubmitDeadline(); if (key === "submit") this.#submitPost = "sent";
-      } } : this.context.mode === "submitTransaction" ? { beforeSend: () => { this.#submitPost = "sent"; } } : {}) };
+      ...(signal ? { signal } : {}), ...(this.sends() ? { beforeSend: () => {
+        this.assertSubmitDeadline(); if (key === "submit" || key === "submit-transaction") this.#submitPost = "sent";
+      } } : {}) };
     const response = await this.exchange.request(request);
     if (key === "submit" || key === "submit-transaction") {
       this.#submitStatus = Number.isSafeInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : null;
@@ -218,9 +219,11 @@ export class HelperNetworkPolicy {
     if (key === "rpc-balance") this.#usdcBalance = BigInt(parseBody(body).result as string);
     if (key === "sentinel-quote") this.#quotedFee = sentinelQuotedFee(parseBody(body), this.context.input.token);
   }
+  /** The send's own deadline (a gasless intent's, a server transaction's), checked at the request and right before its bytes go. */
   private assertSubmitDeadline(): void {
-    if (this.context.mode !== "submit") return;
-    const current = this.context.now().getTime(), deadline = Date.parse(this.context.intent.expiresAt);
+    if (this.context.mode !== "submit" && this.context.mode !== "submitTransaction") return;
+    const current = this.context.now().getTime();
+    const deadline = Date.parse(this.context.mode === "submit" ? this.context.intent.expiresAt : this.context.input.expiresAt);
     if (!Number.isSafeInteger(current) || !Number.isSafeInteger(deadline)) { this.deadlineFailure = "mm_gasless_clock"; this.submitRefused("clock"); mmFail("mm_gasless_clock"); }
     if (this.lastClockMs !== undefined && current < this.lastClockMs) { this.deadlineFailure = "mm_gasless_clock"; this.submitRefused("clock"); mmFail("mm_gasless_clock"); }
     this.lastClockMs = current;
@@ -476,6 +479,7 @@ export function networkContextEmpty(mode: "inspect" | "buildUnsigned"): ModeCont
 export function networkContextServerRequest(query: MetaMaskServerRequestQuery, projectId: string, token: string): ModeContext {
   return { mode: "readRequest", query: structuredClone(query), projectId, token };
 }
-export function networkContextServerTransaction(input: MetaMaskServerTransactionInput, projectId: string, token: string): ModeContext {
-  return { mode: "submitTransaction", input: structuredClone(input), projectId, token };
+export function networkContextServerTransaction(input: MetaMaskServerTransactionInput, projectId: string, token: string,
+  now: () => Date): ModeContext {
+  return { mode: "submitTransaction", input: structuredClone(input), projectId, token, now };
 }

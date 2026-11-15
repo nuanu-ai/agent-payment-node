@@ -1,5 +1,5 @@
 import { ApnError } from "./errors.js";
-import { metaMaskNativeMfaTask, metaMaskNativeRequestIdHash, metaMaskNativeRequestReference,
+import { METAMASK_NATIVE_SDK_HANDOFF, metaMaskNativeMfaTask, metaMaskNativeRequestIdHash, metaMaskNativeRequestReference,
   metaMaskNativeSealedMfaTask, type MetaMaskNativeMfaTask, type MetaMaskNativeOperation,
   type patchMetaMaskNativeOperation } from "./metamask-native-journal.js";
 import type { MetaMaskNativeMfaEvidence, MetaMaskNativeReadObservation, MetaMaskNativeSubmission } from "./metamask-native-transfer-adapter.js";
@@ -53,6 +53,20 @@ export function metaMaskNativeRequestTask(op: Pick<MetaMaskNativeOperation, "pro
   if (op.providerRequestIdHash !== undefined) return metaMaskNativeSealedMfaTask(op.providerRequestIdHash, evidence, source);
   if (op.providerRequestId === null) throw new ApnError("APN_STATE_CORRUPT", "Native transfer stores no provider request for an MFA task.");
   return metaMaskNativeMfaTask(op.providerRequestId, evidence, source);
+}
+
+/**
+ * The approval window a read of a request APN sent itself records. A server answer that names no `approval.expiresAt`
+ * keeps the non-null `expiresAt` the task already holds for the same request (the same `requestIdHash`), from the send or
+ * an earlier read, rather than erasing it: the window of one request does not move. Every other field is the read's
+ * own. A record 0.5.107 or earlier wrote takes the read's evidence as it always did.
+ */
+export function metaMaskNativeReadEvidence(op: Pick<MetaMaskNativeOperation, "handoffPath" | "providerRequestIdHash" | "mfaTask">,
+  evidence: MetaMaskNativeMfaEvidence): MetaMaskNativeMfaEvidence {
+  const task = op.mfaTask;
+  if (op.handoffPath !== METAMASK_NATIVE_SDK_HANDOFF || evidence.expiresAt !== null || task === undefined || !("requestIdHash" in task) ||
+    task.requestIdHash !== op.providerRequestIdHash || task.expiresAt === null) return evidence;
+  return { ...evidence, expiresAt: task.expiresAt };
 }
 
 /** A read observation as output shows it: `request_id_hash`, the record's own hash, in place of a sealed id. */
