@@ -12,7 +12,7 @@ import { ApnError } from "../../src/errors.js";
 import { executeHelperRequest, MetaMaskGaslessProviderClient, type MetaMaskGaslessHelperRunner } from "../../src/metamask-gasless/client/index.js";
 import type { FetchExchange, FetchExchangeRequest, FetchExchangeResponse } from "../../src/metamask-gasless/client/network.js";
 import { runnerDiagnostic, submitFailureError } from "../../src/metamask-gasless/client/submit-diagnostic.js";
-import { MetaMaskSdkRevocationWallet, metaMaskRevocationStoppedBeforeNetwork } from "../../src/metamask-gasless/revocation/wallet.js";
+import { MetaMaskSdkRevocationWallet, metaMaskRevocationUnsentCause } from "../../src/metamask-gasless/revocation/wallet.js";
 import type { MetaMaskProcessRunnerPort } from "../../src/metamask-process-runner.js";
 import { OWNER, PROJECT, syntheticHome } from "./metamask-gasless-client-fixtures/sdk.js";
 
@@ -118,10 +118,10 @@ test("a helper that stopped before any network call stays unknown, names its rea
   assert.equal(server.requests.length, 0); assert.equal(stopped.disposition, "unknown");
   assert.deepEqual(stopped.disposition === "unknown" && [stopped.helperFailure, stopped.submitDiagnostic?.post, stopped.submitDiagnostic?.stage],
     ["mm_gasless_binding_changed", "not_reached", "private_state"]);
-  assert.equal(metaMaskRevocationStoppedBeforeNetwork(stopped), true);
+  assert.equal(metaMaskRevocationUnsentCause(stopped), "session_binding");
   const refusing = new Server({}, 422, JSON.stringify({ error: { code: "POLICY_VIOLATION" } })), sent = await wallet(t, refusing);
   const answered = await send(sent.wallet);
-  assert.equal(answered.disposition, "unknown"); assert.equal(metaMaskRevocationStoppedBeforeNetwork(answered), false, "this one left the machine");
+  assert.equal(answered.disposition, "unknown"); assert.equal(metaMaskRevocationUnsentCause(answered), undefined, "this one left the machine");
   const lost = await wallet(t, new Server(), submitFailureError("mm_gasless_submit_unknown", runnerDiagnostic("runner_timeout", true)));
-  assert.equal(metaMaskRevocationStoppedBeforeNetwork(await send(lost.wallet)), false, "a helper killed after its start may have sent");
+  assert.equal(metaMaskRevocationUnsentCause(await send(lost.wallet)), undefined, "a helper killed after its start may have sent");
 });
