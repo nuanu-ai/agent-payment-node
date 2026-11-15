@@ -100,7 +100,7 @@ test("every answer names the request by its hash: acknowledged with a live hash,
   const policy = await send(w);
   assert.deepEqual(policy, { disposition: "unknown", reason: "provider_handoff_outcome_unknown", requestIdHash: hashOf(refusing.requestId()),
     providerErrorCode: "POLICY_VIOLATION", submitDiagnostic: { mode: "submit", stage: "post", post: "sent", httpStatus: 422, check: "http_status",
-      providerError: "POLICY_VIOLATION", providerStatus: null, responseTx: null } });
+      providerError: "POLICY_VIOLATION", providerStatus: null, responseTx: null }, helperFailure: "mm_gasless_submit_unknown" });
   assert.equal(JSON.stringify(policy).includes(PRIVATE), false);
   // A helper killed after it started: the request may have left, and is still named.
   const quiet = new Server(), lost = await wallet(t, quiet, submitFailureError("mm_gasless_submit_unknown", runnerDiagnostic("runner_timeout", true)));
