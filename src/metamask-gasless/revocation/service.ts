@@ -87,7 +87,7 @@ export async function revokeMetaMaskGasless(state: StateStore, op: MetaMaskGasle
  */
 function unconfirmedDisable(code: string | undefined, from: string, nonce: string, id: string): string {
   const hex = `0x${BigInt(nonce).toString(16)}`;
-  return `MetaMask did not confirm this disable${code === undefined ? "" : ` (mm error code ${code})`}. Run the resume below: ` +
+  return `MetaMask did not confirm this disable${code === undefined ? "" : ` (MetaMask error code ${code})`}. Run the resume below: ` +
     `it reads whether the delegation is disabled. If it is not, and eth_getTransactionCount(${from}, "latest") and ` +
     `eth_getTransactionCount(${from}, "pending") on this chain both still answer ${hex} (${nonce}), no transaction used ` +
     `this disable's nonce or waits for it: remove the cause, then run apn gasless transfer revoke --operation ${id} again. ` +

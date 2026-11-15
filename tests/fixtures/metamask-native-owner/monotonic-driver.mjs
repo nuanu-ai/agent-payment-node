@@ -22,7 +22,17 @@ await mock.module(moduleUrl('metamask-package.js'),{namedExports:{...originalPac
   if(stateRoot&&scenario.startsWith('paused-wall')){const files=await readdir(join(stateRoot,'metamask-native-operations')).catch(()=>[]);if(files.length){const op=JSON.parse(await readFile(join(stateRoot,'metamask-native-operations',files[0]),'utf8'));if(op.effectAttempts===1&&!markerAt){markerAt=performance.now();await new Promise(r=>setTimeout(r,650));}}}
   if(stateRoot&&scenario==='resolver-late'){const files=await readdir(join(stateRoot,'metamask-native-operations')).catch(()=>[]);if(files.length){const op=JSON.parse(await readFile(join(stateRoot,'metamask-native-operations',files[0]),'utf8'));if(op.effectAttempts===1){mock.timers.enable({apis:['Date'],now:Date.now()});mock.timers.tick(61000);}}}return script;
 }}});
-await writeFile(script,`const fs=require('node:fs');const a=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(log)},JSON.stringify(a)+'\\n');const payer=${JSON.stringify(payer)},policy=${JSON.stringify(policy)},project=${JSON.stringify(project)},scenario=${JSON.stringify(scenario)};let data;if(a[0]==='auth')data={authenticated:true,summary:{mode:'session',projectId:project}};else if(a[1]==='address')data={mode:'server',address:payer,chainNamespace:'evm'};else if(a[1]==='trading-mode')data={mode:'guard',address:payer};else if(a[1]==='policy')data={address:payer,policy};else if(a[1]==='requests')data={request:{pollingId:'TEST-pending-request',kind:'transaction',namespace:'evm',chainId:1},status:{txHash:'0x'+'e'.repeat(64),status:'CONFIRMED'}};else if(a[1]==='send-transaction'){if(scenario==='nonce-advanced')data={mode:'server',address:payer,status:'AWAITING_MFA',pollingId:'TEST-pending-request'};else if(scenario==='send-refused'){process.stderr.write(JSON.stringify({error:{code:'POLICY_REJECTED',message:'TEST secret must not escape'}}));process.stdout.write(JSON.stringify({_notice:{kind:'AWAITING_MFA',pollingId:'TEST-pending-request'}}));process.exitCode=1;}else data={mode:'server',address:payer,hash:'0x'+'e'.repeat(64),chainId:1,projectId:project};}else throw new Error('TEST unexpected fixed argv');if(data)process.stdout.write(JSON.stringify({ok:true,data}));`,{mode:0o600});
+await writeFile(script,`const fs=require('node:fs');const a=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(log)},JSON.stringify(a)+'\\n');const payer=${JSON.stringify(payer)},policy=${JSON.stringify(policy)},project=${JSON.stringify(project)},scenario=${JSON.stringify(scenario)};let data;if(a[0]==='auth')data={authenticated:true,summary:{mode:'session',projectId:project}};else if(a[1]==='address')data={mode:'server',address:payer,chainNamespace:'evm'};else if(a[1]==='trading-mode')data={mode:'guard',address:payer};else if(a[1]==='policy')data={address:payer,policy};else throw new Error('TEST unexpected fixed argv');if(data)process.stdout.write(JSON.stringify({ok:true,data}));`,{mode:0o600});
+// 0.5.108: the hand-off is the sandboxed helper, not an mm child; `childCount` still counts mm send children (none). The
+// double checks that the helper's kill timeout is the original monotonic scope bound while the wall clock is paused,
+// then answers as a helper killed at that bound: the outcome is unknown, with the request APN named.
+let sentTransaction,helperSends=0;
+const realSend=await import(moduleUrl('metamask-server-transaction.js'));
+await mock.module(moduleUrl('metamask-server-transaction.js'),{namedExports:{...realSend,sendMetaMaskServerTransaction:async(transaction,timeoutMs)=>{
+  helperSends++;sentTransaction=transaction;assert.equal(scenario,'paused-wall-financial','only a guard that passed in time reaches the helper');
+  assert.ok(Number.isSafeInteger(timeoutMs)&&timeoutMs>0&&timeoutMs<=2350,`the helper timeout ${timeoutMs} ms is the monotonic scope remainder, not the paused wall clock's 3000 ms`);
+  return {kind:'unknown',reason:'provider_handoff_outcome_unknown',diagnostic:{mode:'submit',stage:'runner',post:'unknown',httpStatus:null,check:'runner_timeout',providerError:null,providerStatus:null,responseTx:null}};
+}}});
 const balances=(q)=>({address:q.sender,asset:{schemaVersion:'apn.evm-asset.v1',chainId:q.chainId,kind:'erc20',address:q.token,decimals:6,decimalsSource:'onchain'},nativeAtomic:scenario==='balance'?'0':'1000000000',assetAtomic:'10000',blockNumberAtomic:'100',blockHash:'0x'+'a'.repeat(64),rpcOrigin:'https://test-rpc.example',observedAt:new Date().toISOString()});
 await mock.module(moduleUrl('metamask-native-transfer-rpc.js'), {namedExports:{
   readMetaMaskNativeFunding:async(_chain,_sender,deadline)=>{guardBalances++;nonceReads++;if(deadline)assert.ok(Date.parse(typeof deadline==='string'?deadline:deadline.utcExpiresAt)>Date.now());if(scenario==='paused-wall-rpc'){assert.ok(Object.isFrozen(deadline));await new Promise(r=>setTimeout(r,2600));}const sent=(await readFile(log,'utf8')).includes('send-transaction');return {balances:balances(selectedQuote),nonceAtomic:scenario==='nonce-advanced'&&sent?'8':'7'};},
@@ -60,21 +70,22 @@ try {
  }
  const {NodeMetaMaskProcessRunner}=await import(moduleUrl('metamask-process-runner.js'));
  const originalRun=NodeMetaMaskProcessRunner.prototype.runJson;
- NodeMetaMaskProcessRunner.prototype.runJson=async function(argv,...rest){if(scenario==='paused-wall-financial'&&argv[0]==='wallet'&&argv[1]==='send-transaction'||scenario==='paused-wall-policy'&&markerAt&&argv[0]==='auth'&&!slowRead){slowRead=true;const originalResolver=this.binResolver,originalLaunch=this.capturedLaunch;this.binResolver=async()=>{await new Promise(r=>setTimeout(r,2600));return originalResolver();};this.capturedLaunch=(...args)=>{if(argv[1]==='send-transaction')sendAt=performance.now();return originalLaunch(...args);};}return originalRun.call(this,argv,...rest);};
+ NodeMetaMaskProcessRunner.prototype.runJson=async function(argv,...rest){if(scenario==='paused-wall-policy'&&markerAt&&argv[0]==='auth'&&!slowRead){slowRead=true;const originalResolver=this.binResolver,originalLaunch=this.capturedLaunch;this.binResolver=async()=>{await new Promise(r=>setTimeout(r,2600));return originalResolver();};this.capturedLaunch=(...args)=>{if(argv[1]==='send-transaction')sendAt=performance.now();return originalLaunch(...args);};}return originalRun.call(this,argv,...rest);};
  const owner=await import(moduleUrl('metamask-native-transfer-owner.js'));
  // QA F26: a synthetic wrapping secret seals the MetaMask request id the hand-off returns; the Keychain is never touched.
  const {EncryptedProviderRequestReferenceStore}=await import(moduleUrl('provider-request-reference-store.js'));
  const {metaMaskNativeRequestIdHash,metaMaskNativeRequestReference}=await import(moduleUrl('metamask-native-journal.js'));
  const references=new EncryptedProviderRequestReferenceStore({root},{async load(){return Buffer.alloc(32,7);},async create(){return Buffer.alloc(32,7);}});
- const sealedRequest=async(journal,bytes)=>{assert.equal(journal.providerRequestId,null);assert.equal(journal.providerRequestIdHash,metaMaskNativeRequestIdHash('TEST-pending-request'));
-   assert.ok(!bytes.toString('utf8').includes('TEST-pending-request'),'the journal never names the request id');
-   assert.equal(await references.open(metaMaskNativeRequestReference(journal,journal.providerRequestIdHash)),'TEST-pending-request');};
+ const sealedRequest=async(journal,bytes)=>{const id=sentTransaction.requestId;assert.equal(journal.providerRequestId,null);assert.equal(journal.handoffPath,'sdk_helper');
+   assert.equal(journal.providerRequestIdHash,metaMaskNativeRequestIdHash(id));
+   assert.ok(!bytes.toString('utf8').includes(id),'the journal never names the request id');
+   assert.equal(await references.open(metaMaskNativeRequestReference(journal,journal.providerRequestIdHash)),id);};
  const run=(chainId,key)=>owner.runMetaMaskNativeTransfer(root,{profile,chainId,recipient:recipientInput,amountAtomic:amount,idempotencyKey:key},references);
  if(scenario!=='paused-wall-financial'){
    // The scope deadline passes before the vendor child starts: proven no hand-off closes as failed_before_effect (R4).
    await assert.rejects(()=>run(1,'native-test-static-0001'));
    const children=(await readFile(log,'utf8')).trim().split('\n').map(JSON.parse),sent=children.filter(a=>a[1]==='send-transaction');
-   assert.equal(sent.length,0);assert.equal(sendAt,0);
+   assert.equal(sent.length,0);assert.equal(sendAt,0);assert.equal(helperSends,0);
    const files=await readdir(join(root,'metamask-native-operations')),journal=JSON.parse(await readFile(join(root,'metamask-native-operations',files[0]),'utf8'));
    assert.equal(journal.state,'failed_before_effect');assert.equal(journal.effectAttempts,1);
    const {AssetUsageLedger}=await import(moduleUrl('asset-usage-ledger.js'));const ledger=new AssetUsageLedger(root);
@@ -85,11 +96,13 @@ try {
  }
  const result=await run(1,'native-test-static-0001');
  const children=(await readFile(log,'utf8')).trim().split('\n').map(JSON.parse),sent=children.filter(a=>a[1]==='send-transaction');
- assert.equal(result.effect_attempts,1);assert.equal(result.state,'unknown');assert.equal(sent.length,0);assert.equal(sendAt,0);
+ assert.equal(result.effect_attempts,1);assert.equal(result.state,'unknown');assert.equal(sent.length,0);assert.equal(sendAt,0);assert.equal(helperSends,1);
  process.stdout.write(JSON.stringify({TEST_ORIGINAL_MONOTONIC_BOUND:true,scenario,scopeWindowMs:3000,markerToReturnMs:performance.now()-markerAt,childCount:sent.length,finalState:result.state,effectAttempts:result.effect_attempts})+'\n');
  if(sent.length){const first=children.findIndex(a=>a[1]==='send-transaction');assert.equal(first,6,'three READs before consent and three in the one final guard before send');const payload=JSON.parse(sent[0][sent[0].indexOf('--payload')+1]);assert.equal(payload.nonce,'0x7');assert.equal(payload.gas,'0xfde8');assert.equal(payload.value,'0x0');assert.deepEqual(Object.keys(payload),['to','data','value','gas','nonce','maxFeePerGas','maxPriorityFeePerGas']);}
  const journalFile=join(root,'metamask-native-operations',result.operation_id+'.json'),bytes=await readFile(journalFile),journal=JSON.parse(bytes);
  assert.equal(journal.effectAttempts,1);assert.ok(journal.diagnostic);assert.ok(!JSON.stringify(result).includes('TEST secret'));
+ // A helper killed at the scope bound leaves the request APN named, sealed and journaled before it started.
+ await sealedRequest(journal,bytes);assert.equal(journal.diagnostic.stage,'sdk_send');assert.equal(journal.diagnostic.code,'timeout');
  if(scenario==='send-refused'){await sealedRequest(journal,bytes);assert.equal(result.diagnostic.providerCode,'policy');assert.equal(result.diagnostic.stage,'sdk_send');}
  if(scenario==='resolver-late')assert.equal(result.diagnostic.stage,'sdk_resolver');
  if(scenario==='rpc-late')assert.equal(result.diagnostic.stage,'rpc_balance');

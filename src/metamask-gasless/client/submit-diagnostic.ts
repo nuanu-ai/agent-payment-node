@@ -4,8 +4,8 @@ import { jobTxDetails, takeJobTx, validateJobTx, type MetaMaskJobTx } from "./jo
 import { readDataRecord } from "./read-diagnostic.js";
 
 /**
- * Where a MetaMask gasless submit stopped, as closed facts only: the
- * helper stage, whether APN's network policy let the one POST out, its HTTP status, the check that refused, the
+ * Where a MetaMask gasless submit, or a server-wallet transaction request (submitTransaction), stopped, as closed facts
+ * only: the helper stage, whether APN's network policy let the one POST out, its HTTP status, the check that refused, the
  * provider's error code or job status when they have a closed token form, and how the answer's `tx` compared with the
  * request when that check refused it (job-tx.ts). No body, URL, header or identifier leaves.
  * It is shown with the attempt's own output and never stored: the outcome stays unknown whatever it says.

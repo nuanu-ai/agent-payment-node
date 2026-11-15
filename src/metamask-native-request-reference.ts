@@ -1,5 +1,5 @@
 import { ApnError } from "./errors.js";
-import { METAMASK_NATIVE_REQUEST_UNSEALED, metaMaskNativeMfaTask, metaMaskNativeRequestIdHash, metaMaskNativeRequestReference,
+import { metaMaskNativeMfaTask, metaMaskNativeRequestIdHash, metaMaskNativeRequestReference,
   metaMaskNativeSealedMfaTask, type MetaMaskNativeMfaTask, type MetaMaskNativeOperation,
   type patchMetaMaskNativeOperation } from "./metamask-native-journal.js";
 import type { MetaMaskNativeMfaEvidence, MetaMaskNativeReadObservation, MetaMaskNativeSubmission } from "./metamask-native-transfer-adapter.js";
@@ -7,13 +7,14 @@ import type { ProviderRequestReferencePort } from "./provider-request-reference-
 
 /**
  * The MetaMask request id of a native transfer (the request the owner's MFA approval waits on). A record 0.5.106 or
- * earlier wrote keeps the id itself and is read, observed and projected as it always was. A later release seals the id
- * the hand-off returns under the Keychain wrapping secret (provider-request-reference-store.ts) and keeps only its hash
- * (`providerRequestIdHash`); the id is opened only to read that request again, and output shows only the hash.
+ * earlier wrote keeps the id itself and is read, observed and projected as it always was. 0.5.107 sealed the id the
+ * hand-off returned; 0.5.108 and later name the id themselves and seal it before the hand-off. Both seal it under the
+ * Keychain wrapping secret (provider-request-reference-store.ts) and keep only its hash (`providerRequestIdHash`); the
+ * id is opened only to send the request once and to read it again, and output shows only the hash.
  */
 type StoredRequest = Pick<MetaMaskNativeOperation, "operationId" | "context" | "providerRequestId" | "providerRequestIdHash">;
 
-/** Seals the request id the hand-off returned for `op` and returns the hash its journal keeps in its place. */
+/** Seals APN's request id for `op` and returns the hash its effect marker keeps in its place; the caller holds the lock. */
 export async function sealMetaMaskNativeRequest(references: ProviderRequestReferencePort, op: Pick<MetaMaskNativeOperation, "operationId" | "context">,
   requestId: string): Promise<string> {
   const requestIdHash = metaMaskNativeRequestIdHash(requestId);
@@ -21,35 +22,18 @@ export async function sealMetaMaskNativeRequest(references: ProviderRequestRefer
   return requestIdHash;
 }
 
-/** What the journal keeps of a request id the hand-off returned: the hash of its seal, or that it could not be sealed. */
-export type MetaMaskNativeKeptRequest = { readonly requestIdHash: string } | { readonly unsealed: true };
-
 /**
- * Seals the request id the hand-off returned. This runs after the hand-off, so nothing may stop its outcome from being
- * recorded: a seal that fails (the wrapping secret was read before consent, so only a write can fail) drops the id,
- * which is never kept in plaintext, and the journal says why it keeps no request.
- */
-export async function keepMetaMaskNativeRequest(references: ProviderRequestReferencePort, op: Pick<MetaMaskNativeOperation, "operationId" | "context">,
-  requestId: string): Promise<MetaMaskNativeKeptRequest> {
-  try { return { requestIdHash: await sealMetaMaskNativeRequest(references, op, requestId) }; }
-  catch { return { unsealed: true }; }
-}
-
-/**
- * The journal fields the hand-off's result writes: its state, transaction hash and diagnostic as returned, the hash of a
- * sealed request id with the owner's MFA task, or `providerRequestReason` for a request id that could not be sealed.
+ * The journal fields the hand-off's result writes: its state, transaction hash and diagnostic as returned, and the
+ * owner's MFA task named by `requestIdHash`, the hash the effect marker already keeps (it stays as written).
  */
 export function metaMaskNativeHandoffFields(result: MetaMaskNativeSubmission,
-  kept: MetaMaskNativeKeptRequest | undefined): Parameters<typeof patchMetaMaskNativeOperation>[1] {
+  requestIdHash: string): Parameters<typeof patchMetaMaskNativeOperation>[1] {
   const diagnostic = result.diagnostic === undefined ? {} : { diagnostic: result.diagnostic };
   if (result.disposition === "acknowledged") return { ...diagnostic, state: "acknowledged", transactionHash: result.transactionHash };
-  const requestIdHash = kept !== undefined && "requestIdHash" in kept ? kept.requestIdHash : undefined;
   // A pending or unknown hand-off stays financially UNKNOWN; an owner approval the provider waits on is kept beside it.
-  const mfa = requestIdHash !== undefined && result.mfa !== undefined && result.transactionHash === undefined
+  const mfa = result.mfa !== undefined && result.transactionHash === undefined
     ? { mfaTask: metaMaskNativeSealedMfaTask(requestIdHash, result.mfa, "send") } : {};
-  return { ...diagnostic, state: "unknown", transactionHash: result.transactionHash ?? null, providerRequestId: null,
-    ...(requestIdHash === undefined ? {} : { providerRequestIdHash: requestIdHash }),
-    ...(kept !== undefined && "unsealed" in kept ? { providerRequestReason: METAMASK_NATIVE_REQUEST_UNSEALED } : {}), ...mfa };
+  return { ...diagnostic, state: "unknown", transactionHash: result.transactionHash ?? null, ...mfa };
 }
 
 /**

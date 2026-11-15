@@ -1,8 +1,9 @@
 // TEST ONLY. The real CLI path (`runCli`: argv binding, core dispatch, owner, the real vendor adapter and process runner,
 // the real RPC module and EvmRpc, journal and usage ledger) for a profile that is not the owner's, with its own recipient
-// and amount. Only the edges are synthetic: a fake `mm` child script, an in-memory JSON-RPC chain and a synthetic wrapping
-// secret that seals the MetaMask request id (QA F26). No HOME, Keychain, network or money. Runs in a pseudo-terminal so the
-// real foreground consent prompt is answered.
+// and amount. Only the edges are synthetic: a fake `mm` child script for the reads, a double of the sandboxed helper's one
+// send and of its server read (0.5.108), an in-memory JSON-RPC chain and a synthetic wrapping secret that seals the
+// MetaMask request id APN names (QA F26). No HOME, Keychain, network or money. Runs in a pseudo-terminal so the real
+// foreground consent prompt is answered.
 import { mock } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
@@ -22,8 +23,9 @@ const PROFILE = "qa-mm-wallet", AMOUNT = "2500", USDC = getAddress("0xA0b86991c6
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const temp = await realpath(await mkdtemp(join(tmpdir(), "apn-mm-any-TEST-")));
 const script = join(temp, "mm.cjs"), log = join(temp, "children.jsonl");
-// Scenario "mfa": the next send and watch answers, written by the driver before each command (exact 6.1.5 output bytes).
-const sendAnswer = join(temp, "send.json"), watchAnswer = join(temp, "watch.json");
+// Scenario "mfa": the next helper send, watch and server read answers, written by the driver before each command (the
+// watch in exact 6.1.5 output bytes).
+const sendAnswer = join(temp, "send.json"), watchAnswer = join(temp, "watch.json"), serverAnswer = join(temp, "server.json");
 let root = join(temp, "home");
 
 // The vendor's Guard policy for this user: their own wallet, their own recipients, other sections the reader ignores.
@@ -39,19 +41,41 @@ const payer=${JSON.stringify(PAYER.toLowerCase())},project="TEST-any-profile-pro
 if(a[0]==="auth")data={authenticated:true,summary:{mode:"session",projectId:project}};
 else if(a[1]==="trading-mode")data={mode:"guard",address:payer};
 else if(a[1]==="policy")data={address:payer,policy:${JSON.stringify(vendorPolicy)}};
-else if(a[1]==="send-transaction"&&fs.existsSync(${JSON.stringify(sendAnswer)}))data=JSON.parse(fs.readFileSync(${JSON.stringify(sendAnswer)},"utf8"));
-else if(a[1]==="send-transaction"){const payload=a[a.indexOf("--payload")+1];data={mode:"server",address:payer,hash:"0x"+crypto.createHash("sha256").update(payload).digest("hex"),chainId:1,projectId:project};}
 else if(a[1]==="requests"&&a[2]==="watch")data=JSON.parse(fs.readFileSync(${JSON.stringify(watchAnswer)},"utf8"));
 else throw new Error("TEST unexpected vendor argv");
 if(typeof data.stdout==="string"){process.stdout.write(data.stdout);process.exitCode=data.exit;}
 else process.stdout.write(JSON.stringify({ok:true,data}));`, { mode: 0o600 });
 const originalPackage = await import(moduleUrl("metamask-package.js"));
 await mock.module(moduleUrl("metamask-package.js"), { namedExports: { ...originalPackage, resolveMetaMaskBin: async () => script } });
+// 0.5.108: the hand-off is the sandboxed helper's one POST, never an mm child. The double records the request in the child
+// log (reads and the send keep their order) and answers as MetaMask would: from `send.json` when the scenario wrote one,
+// else with a broadcast whose hash is the SHA-256 of the request's tx. A request APN sent itself is read from MetaMask's
+// server by its id (`server.json`), never watched through mm.
+let lastRequestId;
+const realSend = await import(moduleUrl("metamask-server-transaction.js"));
+await mock.module(moduleUrl("metamask-server-transaction.js"), { namedExports: { ...realSend, sendMetaMaskServerTransaction: async (transaction, timeoutMs) => {
+  const { appendFile } = await import("node:fs/promises"), { createHash: digest } = await import("node:crypto");
+  const tx = JSON.stringify(transaction.tx);
+  await appendFile(log, `${JSON.stringify(["sdk-helper", "send-transaction", tx, JSON.stringify(transaction)])}\n`);
+  assert.ok(Number.isSafeInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 60_000, "the helper is killed at the consent deadline");
+  lastRequestId = transaction.requestId;
+  const written = await readFile(sendAnswer, "utf8").then(JSON.parse, () => null);
+  const answer = written ?? { status: "BROADCASTED", txHash: `0x${digest("sha256").update(tx).digest("hex")}`, mfa: null };
+  return { kind: "answered", answer: { requestId: transaction.requestId, responseHash: "4".repeat(64), ...answer } };
+} } });
+const realServerRead = await import(moduleUrl("metamask-native-request-server-read.js"));
+await mock.module(moduleUrl("metamask-native-request-server-read.js"), { namedExports: { ...realServerRead,
+  readMetaMaskNativeServerRequest: async (requestId, _projectHash, binding) => {
+    const { appendFile } = await import("node:fs/promises");
+    await appendFile(log, `${JSON.stringify(["sdk-helper", "read-request", requestId])}\n`);
+    assert.equal(binding.sender, PAYER); assert.equal(binding.chainId, 1);
+    return JSON.parse(await readFile(serverAnswer, "utf8"));
+  } } });
 
 // In-memory chain: answers by phase (prepare, guard before the hand-off, observe after it) and counts every RPC call.
 const counts = { prepare: 0, guard: 0, observe: 0 };
 const children = async () => (await readFile(log, "utf8").catch(() => "")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
-const sends = async () => (await children()).filter((argv) => argv[1] === "send-transaction").map((argv) => argv[argv.indexOf("--payload") + 1]);
+const sends = async () => (await children()).filter((argv) => argv[1] === "send-transaction").map((argv) => argv[2]);
 const word = (value) => `0x${BigInt(value).toString(16).padStart(64, "0")}`;
 const { createHash } = await import("node:crypto");
 async function chain(method, params) {
@@ -75,11 +99,11 @@ async function chain(method, params) {
       const tx = mined.get(params[0]);
       if (tx === undefined) return null;
       const tag = `0x${tx.block.toString(16)}`, blockHash = `0x${tx.block.toString(16).padStart(64, "b")}`, p = tx.payload;
-      if (method === "eth_getTransactionByHash") return { hash: params[0], chainId: "0x1", blockHash, blockNumber: tag, from: PAYER.toLowerCase(), to: p.to,
-        type: "0x2", value: "0x0", nonce: p.nonce, gas: p.gas, maxFeePerGas: p.maxFeePerGas, maxPriorityFeePerGas: p.maxPriorityFeePerGas, input: p.data };
+      if (method === "eth_getTransactionByHash") return { hash: params[0], chainId: "0x1", blockHash, blockNumber: tag, from: PAYER.toLowerCase(), to: getAddress(p.to),
+        type: "0x2", value: "0x0", nonce: `0x${p.nonce.toString(16)}`, gas: p.gasLimit, maxFeePerGas: p.maxFeePerGas, maxPriorityFeePerGas: p.maxPriorityFeePerGas, input: p.data };
       const to = `0x${p.data.slice(34, 74)}`, amount = BigInt(`0x${p.data.slice(74, 138)}`);
       return { transactionHash: params[0], blockHash, blockNumber: tag, status: "0x1", gasUsed: "0xc350", effectiveGasPrice: "0x2", logs: [{
-        address: p.to, topics: [TRANSFER_TOPIC, word(PAYER), word(to)], data: word(amount), transactionHash: params[0], blockHash, blockNumber: tag, removed: false }] };
+        address: getAddress(p.to), topics: [TRANSFER_TOPIC, word(PAYER), word(to)], data: word(amount), transactionHash: params[0], blockHash, blockNumber: tag, removed: false }] };
     }
   }
   throw new Error(`TEST unexpected RPC ${method}`);
@@ -105,25 +129,27 @@ const usage = async (asset) => (await new AssetUsageLedger(root).usage({ account
 const NATIVE = { kind: "native", identifier: null }, TOKEN = { kind: "token", identifier: USDC };
 
 /**
- * A Guard that needs the owner's approval.
- * The vendor bytes are 6.1.5's own: `send-transaction` without --wait writes the AWAITING_MFA `_notice` and the pending
- * `_summary` (exit 0); `requests watch` before approval writes the notice alone (its `_error` goes to stderr, exit 1).
+ * A Guard that needs the owner's approval. The helper's send answers AWAITING_MFA with the approval window and the session's
+ * auth method (0.5.108). The watch bytes of a record an earlier release wrote are 6.1.5's own: `requests watch` before
+ * approval writes the notice alone (its `_error` goes to stderr, exit 1).
  */
 async function mfaScenario() {
   const { canonicalJson, hashObject } = await import(moduleUrl("canonical.js"));
   const { createMcpServer } = await import(moduleUrl("mcp-server.js"));
   const { Client, InMemoryTransport } = await import("@modelcontextprotocol/client");
-  const RID = "8cc50f3c-ca4e-41d1-98bb-b30f7bcaa3aa", RID2 = "TEST-denied-request-0002", sha = (text) => createHash("sha256").update(text).digest("hex");
+  const sha = (text) => createHash("sha256").update(text).digest("hex");
   const notice = (pollingId, expiresAt, source) => JSON.stringify({ _notice: { kind: "AWAITING_MFA", ...(source === undefined ? {} : { source }), pollingId, expiresAt,
     authMethod: "social", message: `Approval required: check the email registered to your dashboard and confirm to proceed.\nRequest ID: ${pollingId}` } });
-  const sent = (pollingId, expiresAt) => ({ exit: 0, stdout: `${notice(pollingId, expiresAt, "wallet:send-transaction")}\n${JSON.stringify({ _summary: {
-    mode: "server", address: PAYER.toLowerCase(), status: "AWAITING_MFA", pollingId } })}\n` });
+  const sent = (expiresAt) => ({ status: "AWAITING_MFA", txHash: null, mfa: { expiresAt, authMethod: "social" } });
   const answer = async (path, value) => await writeFile(path, JSON.stringify(value));
   const observeCli = (id) => cli(["wallet", "metamask", "native-transfer-observe", "--operation", id]);
   const later = new Date(Date.now() + 600_000).toISOString();
-  await answer(sendAnswer, sent(RID, later));
+  await answer(sendAnswer, sent(later));
   const first = await transfer(RECIPIENT, AMOUNT, "qa-native-mfa-0001");
   assert.equal(first.ok, true, JSON.stringify(first.error));
+  // The request id is APN's own v4 UUID: the helper sent it and the journal names it only by its hash.
+  const RID = lastRequestId;
+  assert.match(RID, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
   const id = first.data.operation_id, observe = `apn wallet metamask native-transfer-observe --operation ${id}`, task = first.data.mfa_task;
   assert.equal(first.data.state, "unknown"); assert.equal(first.data.transaction_hash, null); assert.equal(first.data.effect_attempts, 1);
   // QA F26: the journal and every output keep only the request id's hash; the id itself is sealed apart.
@@ -135,9 +161,10 @@ async function mfaScenario() {
   assert.deepEqual(first.next_actions, [observe]);
   const journalPath = join(root, "metamask-native-operations", `${id}.json`), sealedText = await readFile(journalPath, "utf8");
   assert.equal(sealedText.includes(RID), false); assert.equal(JSON.parse(sealedText).providerRequestIdHash, metaMaskNativeRequestIdHash(RID));
-  // The record 0.5.52 wrote for the captured transfer: UNKNOWN with its request id in plaintext and no task. It recovers
-  // through the normal observer, unchanged.
-  const { recordHash: _hash, mfaTask: _task, providerRequestIdHash: _sealed, ...sealedBody } = JSON.parse(sealedText);
+  assert.equal(JSON.parse(sealedText).handoffPath, "sdk_helper");
+  // The record 0.5.52 wrote for the captured transfer: UNKNOWN with its request id in plaintext, no task and no helper
+  // path (mm sent it). It recovers through the normal observer, unchanged: watched through mm first.
+  const { recordHash: _hash, mfaTask: _task, providerRequestIdHash: _sealed, handoffPath: _path, ...sealedBody } = JSON.parse(sealedText);
   const body = { ...sealedBody, providerRequestId: RID };
   await writeFile(journalPath, `${canonicalJson({ ...body, recordHash: hashObject(body) })}\n`);
   const old = await cli(["wallet", "metamask", "native-transfer-status", "--operation", id]);
@@ -171,13 +198,18 @@ async function mfaScenario() {
   assert.equal(settled.data.mfa_task, undefined); assert.deepEqual(settled.next_actions, []); assert.equal((await sends()).length, 1);
   assert.equal(await usage(TOKEN), AMOUNT);
   // A window that has already closed shows as expired; the provider's DENIED drops the task but never the UNKNOWN or its hold.
-  await answer(sendAnswer, sent(RID2, new Date(Date.now() - 1000).toISOString()));
-  const second = await transfer(RECIPIENT, "1000", "qa-native-mfa-0002");
+  await answer(sendAnswer, sent(new Date(Date.now() - 1000).toISOString()));
+  const second = await transfer(RECIPIENT, "1000", "qa-native-mfa-0002"), RID2 = lastRequestId;
   assert.equal(second.ok, true, JSON.stringify(second.error)); assert.equal(second.data.mfa_task.status, "expired");
-  assert.match(second.data.mfa_task.owner_action, /never sends it again/u);
-  await answer(watchAnswer, { exit: 0, stdout: JSON.stringify({ ok: true, data: { request: { pollingId: RID2, kind: "transaction", namespace: "evm", chainId: 1 },
-    status: { status: "DENIED" } } }) });
+  assert.notEqual(RID2, RID); assert.match(second.data.mfa_task.owner_action, /never sends it again/u);
+  // Its request was sent by the helper, so mm's local list never holds it: observe reads it from MetaMask's server, no watch.
+  await rm(watchAnswer, { force: true });
+  await answer(serverAnswer, { outcome: "verified", status: "DENIED", transactionHash: null, responseHash: "5".repeat(64) });
+  const watchesBefore = (await children()).filter((argv) => argv[1] === "requests").length;
   const denied = await observeCli(second.data.operation_id);
+  assert.equal((await children()).filter((argv) => argv[1] === "requests").length, watchesBefore, "no mm watch for a helper hand-off");
+  assert.deepEqual((await children()).filter((argv) => argv[1] === "read-request").map((argv) => argv[2]), [RID2]);
+  assert.equal(denied.data.read_observation.server_read.outcome, "verified"); assert.equal(denied.data.read_observation.watch_returned, false);
   assert.equal(denied.ok, true, JSON.stringify(denied.error)); assert.equal(denied.data.state, "unknown"); assert.equal(denied.data.mfa_task, undefined);
   assert.equal(denied.data.read_observation.provider_status, "DENIED");
   // The verified DENIED names the owner's exit: the transfer stays UNKNOWN with its hold, and abandon frees the account.
@@ -237,10 +269,12 @@ try {
     // Three vendor reads before consent, three in the last guard, one hand-off (PROV-12: was 6 + 6 + 1).
     const argv = await children();
     assert.deepEqual(argv.map((a) => a[1]), ["status", "trading-mode", "policy", "status", "trading-mode", "policy", "send-transaction"]);
-    const send = argv[6], payload = JSON.parse(send[send.indexOf("--payload") + 1]);
-    assert.equal(payload.data, encodeFunctionData({ abi: [{ type: "function", name: "transfer", stateMutability: "nonpayable", inputs: [{ type: "address" }, { type: "uint256" }], outputs: [{ type: "bool" }] }],
+    // The request mm 6.1.5 built from 0.5.107's payload and intent, sent by the helper with APN's own id.
+    const send = argv[6], tx = JSON.parse(send[2]), request = JSON.parse(send[3]);
+    assert.equal(tx.data, encodeFunctionData({ abi: [{ type: "function", name: "transfer", stateMutability: "nonpayable", inputs: [{ type: "address" }, { type: "uint256" }], outputs: [{ type: "bool" }] }],
       functionName: "transfer", args: [RECIPIENT, 2500n] }));
-    assert.equal(payload.to, USDC); assert.equal(send[send.indexOf("--intent") + 1], `APN ${op.operation_id}: 2500 atomic USDC to ${RECIPIENT}`);
+    assert.deepEqual([tx.from, tx.to, tx.chainId, tx.value, tx.nonce], [PAYER.toLowerCase(), USDC.toLowerCase(), 1, "0x0", 7]);
+    assert.equal(request.intent, `APN ${op.operation_id}: 2500 atomic USDC to ${RECIPIENT}`);
     const journal = JSON.parse(await readFile(join(root, "metamask-native-operations", `${op.operation_id}.json`), "utf8"));
     assert.equal(journal.schemaVersion, "apn.metamask-native-operation.v2"); assert.equal("stateRoot" in journal.context, false);
     assert.equal(journal.context.quote.schemaVersion, "apn.metamask-native-fee-quote.v2"); assert.equal(journal.context.quote.recipient, RECIPIENT);

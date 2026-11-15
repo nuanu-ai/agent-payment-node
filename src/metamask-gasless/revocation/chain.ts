@@ -2,10 +2,10 @@ import { encodeFunctionData, serializeTransaction } from "viem";
 import { ApnError } from "../../errors.js";
 import { directEvmNetwork } from "../../evm-direct-networks.js";
 import { OP_STACK_GAS_ORACLE, OP_STACK_GAS_ORACLE_ABI } from "../../evm-direct-reads.js";
-import type { Hex } from "../../model.js";
 import { quantity, rpcBlock, rpcHex, rpcQuantity, rpcWord, type MmRpcCall } from "../chain/abi.js";
 import { mmDelegationDisabled, mmRedemptionCount } from "../chain/scan.js";
 import type { MetaMaskGaslessBlock, MetaMaskGaslessDeployment, MetaMaskGaslessIntent } from "../model.js";
+import type { MetaMaskCliPayload } from "../../metamask-server-transaction.js";
 import type { MetaMaskDisableCall } from "./call.js";
 
 /** What the chain says right before a disable is handed to the wallet; every refusal here happens before any send. */
@@ -86,7 +86,8 @@ export async function readMetaMaskRevocationChain(call: MmRpcCall, deployment: M
     operatorFeeUpperWei: operator.toString(), maximumNativeCostWei: maximum.toString(), nativeBalanceWei: balance.toString() };
 }
 
-export const mmRevocationPayload = (disable: MetaMaskDisableCall, chain: MetaMaskRevocationChain): Readonly<Record<string, Hex>> => ({
+/** The disable as the `--payload` 0.5.107 handed `mm wallet send-transaction`; the helper sends the request mm built from it. */
+export const mmRevocationPayload = (disable: MetaMaskDisableCall, chain: MetaMaskRevocationChain): MetaMaskCliPayload => ({
   to: disable.to, data: disable.data, value: "0x0", gas: quantity(BigInt(chain.gasLimitAtomic)), nonce: quantity(BigInt(chain.nonceAtomic)),
   maxFeePerGas: quantity(BigInt(chain.maxFeePerGasAtomic)), maxPriorityFeePerGas: quantity(BigInt(chain.maxPriorityFeePerGasAtomic)),
 });

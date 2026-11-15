@@ -63,12 +63,8 @@ for (const file of files) {
       file === join(sourceRoot, "metamask-smart-account-consent.ts")) continue;
     if (["--chain-id", "--token"].includes(needle) && file === join(sourceRoot, "metamask-direct-adapter.ts")) continue;
     if (needle === "--chain-id" && file === join(sourceRoot, "metamask-x402-adapter.ts")) continue;
-    // Exact private vendor handoff only: the claimed owner scope binds the finite validated quote chain.
-    // Public named-chain discovery/binding does not expose this SDK argument. All other needles remain forbidden.
-    if (needle === "--chain-id" && file === join(sourceRoot, "metamask-native-transfer-adapter.ts")) continue;
-    // Exact private vendor handoff only: the delegation disable is sent on the saved operation's own chain, after
-    // foreground consent; no public option names a chain id.
-    if (needle === "--chain-id" && file === join(sourceRoot, "metamask-gasless/revocation/wallet.ts")) continue;
+    // Since 0.5.108 the native transfer and the delegation disable are sent by the sandboxed SDK helper, never handed to
+    // `mm wallet send-transaction`: their files take no vendor chain argument and have no exception.
     if (needle === "--scheme" && file === join(sourceRoot, "awal-x402-adapter.ts")) continue;
     // Audited frozen-operation custody only: USDT validates saved owner/operation/expiry before local signing.
     // This exact path does not authorize adjacent or generic typed-data signers.

@@ -16,11 +16,12 @@ import { mmClassify, mmFail, mmFailure } from "../reasons.js";
 import { mmValidateUnsigned } from "../unsigned.js";
 import { mmAddress, mmHex, mmUint } from "../validation.js";
 import { HelperNetworkPolicy, networkContextEmpty, networkContextQuote, networkContextRequest, networkContextServerRequest,
-  type FetchExchange } from "./network.js";
+  networkContextServerTransaction, type FetchExchange } from "./network.js";
 import { readPrivateSession, readPrivateState, type PrivateSession, type PrivateState } from "./private-state.js";
 import { serverRequestAnswer, serverRequestNotFound, type MetaMaskServerRequestQuery, type MetaMaskServerRequestRead } from "./server-request.js";
 import { assertProjectWallet } from "./project-wallets.js";
-import { helperRequest, MM_HELPER_VERSION, type HelperRequest, type HelperResponse, type HelperResult } from "./protocol.js";
+import { helperRequest, helperSends, MM_HELPER_VERSION, type HelperRequest, type HelperResponse, type HelperResult } from "./protocol.js";
+import { assertServerTransactionSession, submitServerTransaction } from "./server-transaction-submit.js";
 import { hydrateSdkState } from "./session.js";
 
 const transferAbi = parseAbi(["function transfer(address,uint256) returns (bool)"]);
@@ -63,6 +64,16 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
       const result = await readServerRequest(request.query, session, policy, seen);
       policy.assertComplete();
       return { version: MM_HELPER_VERSION, ok: true, result };
+    } else if (request.mode === "submitTransaction") {
+      const session = await readPrivateSession(home, now());
+      // Only the request's own project and selected server wallet: another one refuses before any network call.
+      assertServerTransactionSession(session, request.transaction);
+      policy = new HelperNetworkPolicy(networkContextServerTransaction(request.transaction, session.projectId, session.token), options.exchange);
+      globalThis.fetch = policy.fetch;
+      const result = await submitServerTransaction(request.transaction, session, home, now, policy, sent);
+      sent.stage = "complete";
+      policy.assertComplete();
+      return { version: MM_HELPER_VERSION, ok: true, result };
     } else {
       const expected = request.mode === "quote" ? request.input.binding : request.intent.binding;
       const firstObservedAt = now();
@@ -99,7 +110,7 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
         invariant, context?.network, context?.httpStatus, null, "none", false, context?.validationPredicate, context?.tokenFeesShape,
         { ...context?.feeFacts, ...relay, ...usdc, ...wallets }) };
     }
-    if (request.mode === "submit") {
+    if (helperSends(request.mode)) {
       const facts = policy?.submitFacts();
       // A sent POST answered outside 2xx, with no check of APN's own refusing, is the provider's answer itself; a sent
       // POST with no answer at all (a transport failure after it left) says so.
@@ -356,7 +367,7 @@ function assertBeforeDeadline(value: string, now: Date): void {
   if (!Number.isSafeInteger(expires) || !Number.isSafeInteger(current) || current >= expires) mmFail("mm_gasless_expired");
 }
 function fallback(mode: HelperRequest["mode"]) {
-  return mode === "submit" ? "mm_gasless_submit_unknown" as const : mode === "buildUnsigned" ?
+  return helperSends(mode) ? "mm_gasless_submit_unknown" as const : mode === "buildUnsigned" ?
     "mm_gasless_internal" as const : "mm_gasless_provider_unavailable" as const;
 }
 function logger() { return { debug: (_message: string) => undefined, info: (_message: string) => undefined,

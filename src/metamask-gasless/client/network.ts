@@ -10,6 +10,7 @@ import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, type Pinned
 import type { MetaMaskGaslessProviderIntent, MetaMaskGaslessQuote } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
 import type { MetaMaskServerRequestQuery } from "./server-request.js";
+import { serverTransactionBody, type MetaMaskServerTransactionInput } from "./server-transaction.js";
 import { MM_SENTINEL_SLUG, mmRegistry } from "../registry.js";
 import { mmFail } from "../reasons.js";
 import { encodeFunctionData, parseAbi } from "viem";
@@ -41,7 +42,9 @@ export type ModeContext =
       readonly projectId: string }
   | { readonly mode: "submit" | "observe"; readonly intent: MetaMaskGaslessProviderIntent; readonly projectId: string;
       readonly token: string; readonly now: () => Date }
-  | { readonly mode: "readRequest"; readonly query: MetaMaskServerRequestQuery; readonly projectId: string; readonly token: string };
+  | { readonly mode: "readRequest"; readonly query: MetaMaskServerRequestQuery; readonly projectId: string; readonly token: string }
+  /** One server-wallet transaction request with APN's own id: its one POST, whose body is fully fixed by the input. */
+  | { readonly mode: "submitTransaction"; readonly input: MetaMaskServerTransactionInput; readonly projectId: string; readonly token: string };
 
 export class HelperNetworkPolicy {
   readonly fetch: typeof globalThis.fetch;
@@ -69,7 +72,9 @@ export class HelperNetworkPolicy {
   submitFacts(): { readonly post: SubmitPost; readonly httpStatus: number | null; readonly check: SubmitCheck; readonly providerError: string | null } {
     return { post: this.#submitPost, httpStatus: this.#submitStatus, check: this.#submitCheck, providerError: this.#submitError };
   }
-  private submitRefused(check: SubmitCheck): void { if (this.context.mode === "submit" && this.#submitCheck === "none") this.#submitCheck = check; }
+  private submitRefused(check: SubmitCheck): void { if (this.sends() && this.#submitCheck === "none") this.#submitCheck = check; }
+  /** The two modes whose one POST may create a provider request: the gasless relay submit and a server transaction. */
+  private sends(): boolean { return this.context.mode === "submit" || this.context.mode === "submitTransaction"; }
   /** Closed facts of the two validated relay inventories for the quoted chain, once both were read. */
   relaySupportFacts(): RelaySupportFacts | undefined {
     return this.#relayListing === undefined || this.#relayFlag === undefined ? undefined
@@ -109,7 +114,7 @@ export class HelperNetworkPolicy {
     return quote;
   }
   didObserveNotFound(): boolean { return this.notFound; }
-  /** The SHA-256 of the server request read's 2xx answer bytes, once it came; never the answer itself. */
+  /** The SHA-256 of the 2xx answer bytes of the server request read or transaction POST, once it came; never the answer itself. */
   requestBodyHash(): string | undefined { return this.#requestBodyHash; }
   fixedFailure(): "mm_gasless_expired" | "mm_gasless_clock" | "mm_gasless_session_unavailable" | undefined {
     return this.deadlineFailure ?? (this.sessionFailure ? "mm_gasless_session_unavailable" : undefined);
@@ -130,11 +135,11 @@ export class HelperNetworkPolicy {
     const expected = this.context.mode === "quote" ? ["project-wallets", "mimir-networks", "accounts-networks", "sentinel-networks",
       "rpc-decimals", ...(this.#sponsoredAccepted ? [] : ["rpc-balance"]), "sentinel-quote"] :
       this.context.mode === "submit" ? ["submit"] : this.context.mode === "observe" ? ["observe"] :
-        this.context.mode === "readRequest" ? ["read-request"] : [];
+        this.context.mode === "readRequest" ? ["read-request"] : this.context.mode === "submitTransaction" ? ["submit-transaction"] : [];
     const walletListed = this.context.mode !== "quote" || this.#projectWallets?.listed === true;
     if (this.counts.size !== expected.length || expected.some((key) => this.counts.get(key) !== 1) || !walletListed) {
       this.submitRefused("incomplete");
-      mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
+      mmFail(this.sends() ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
     }
     if (this.context.mode === "quote" && expected.some((key) => !this.successes.has(key) && !(key === "sentinel-quote" && this.#sponsoredAccepted))) mmFail("mm_gasless_provider_unavailable");
   }
@@ -154,7 +159,7 @@ export class HelperNetworkPolicy {
     }
     if ((this.counts.get(key) ?? 0) !== 0) {
       this.submitRefused("duplicate_request");
-      mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
+      mmFail(this.sends() ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
     }
     this.counts.set(key, 1);
     if (this.context.mode === "submit") this.assertSubmitDeadline();
@@ -163,9 +168,9 @@ export class HelperNetworkPolicy {
     const request: FetchExchangeRequest = { url, method, headers, body, maxBytes: MAX_RESPONSE, timeoutMs: 15_000,
       ...(signal ? { signal } : {}), ...(this.context.mode === "submit" ? { beforeSend: () => {
         this.assertSubmitDeadline(); if (key === "submit") this.#submitPost = "sent";
-      } } : {}) };
+      } } : this.context.mode === "submitTransaction" ? { beforeSend: () => { this.#submitPost = "sent"; } } : {}) };
     const response = await this.exchange.request(request);
-    if (this.context.mode === "submit" && key === "submit") {
+    if (key === "submit" || key === "submit-transaction") {
       this.#submitStatus = Number.isSafeInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : null;
       if (this.#submitStatus !== null && this.#submitStatus >= 300 && typeof response.body === "string" && Buffer.byteLength(response.body) <= MAX_RESPONSE) {
         this.#submitError = submitErrorCode(response.body);
@@ -177,7 +182,7 @@ export class HelperNetworkPolicy {
     // The project's wallet list answers 200, or 404 for a project with none; any other status is refused with it recorded.
     if (key === "project-wallets" && response.status !== 200 && response.status !== 404) mmFail("mm_gasless_provider_unavailable");
     if ((this.context.mode === "observe" || this.context.mode === "readRequest") && response.status === 404) this.notFound = true;
-    if (key === "read-request" && response.status >= 200 && response.status < 300) this.#requestBodyHash = sha256(response.body);
+    if ((key === "read-request" || key === "submit-transaction") && response.status >= 200 && response.status < 300) this.#requestBodyHash = sha256(response.body);
     if (response.status >= 200 && response.status < 300) {
       try {
         if (key === "sentinel-quote" && response.status === 200 && this.context.mode === "quote" && body !== null)
@@ -231,6 +236,7 @@ export class HelperNetworkPolicy {
       if (url === own && method === "GET" && body === null) return "read-request";
       return mmFail("mm_gasless_provider_unavailable");
     }
+    if (this.context.mode === "submitTransaction") return this.classifyServerTransaction(this.context, url, method, headers, body);
     if (this.context.mode !== "submit" && this.context.mode !== "observe") return mmFail("mm_gasless_provider_unavailable");
     exactProviderUrl(url);
     const collection = `${MIMIR}/v1/projects/${encodeURIComponent(this.context.projectId)}/transaction-requests`;
@@ -244,6 +250,24 @@ export class HelperNetworkPolicy {
     if (this.context.mode === "observe" && url === `${collection}/${this.context.intent.requestId}` && method === "GET" && body === null) return "observe";
     this.submitRefused("unexpected_request");
     return mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
+  }
+  /**
+   * One POST to the session project's transaction-request collection, with the session's own bearer token and exactly
+   * the bytes `serverTransactionBody` fixes for the input (request id, chain, tx and intent); any other request,
+   * body or second request is refused before it can leave.
+   */
+  private classifyServerTransaction(context: Extract<ModeContext, { mode: "submitTransaction" }>, url: string, method: string,
+    headers: Record<string, string>, body: string | null): string {
+    exactProviderUrl(url); requireBearer(headers, context.token);
+    if (url === `${MIMIR}/v1/projects/${encodeURIComponent(context.projectId)}/transaction-requests` && method === "POST" && body !== null) {
+      if (body === serverTransactionBody(context.input)) return "submit-transaction";
+      // A POST that may already have left is never downgraded to refused.
+      if (this.#submitPost !== "sent") this.#submitPost = "refused";
+      this.submitRefused("body_mismatch");
+      return mmFail("mm_gasless_submit_unknown");
+    }
+    this.submitRefused("unexpected_request");
+    return mmFail("mm_gasless_submit_unknown");
   }
 }
 
@@ -451,4 +475,7 @@ export function networkContextRequest(mode: "submit" | "observe", intent: MetaMa
 export function networkContextEmpty(mode: "inspect" | "buildUnsigned"): ModeContext { return { mode }; }
 export function networkContextServerRequest(query: MetaMaskServerRequestQuery, projectId: string, token: string): ModeContext {
   return { mode: "readRequest", query: structuredClone(query), projectId, token };
+}
+export function networkContextServerTransaction(input: MetaMaskServerTransactionInput, projectId: string, token: string): ModeContext {
+  return { mode: "submitTransaction", input: structuredClone(input), projectId, token };
 }
