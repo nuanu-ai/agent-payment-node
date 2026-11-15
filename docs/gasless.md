@@ -789,7 +789,7 @@ stored. It contains closed facts only; no body, URL, header or identifier is inc
 | `stage` | The helper stage the submit stopped at. |
 | `post` | Whether the single POST could have left (values below). |
 | `http_status` | The POST's HTTP status, when it was sent and answered. |
-| `check` | The check that refused: APN's body or response checks, a duplicate or unexpected request, the deadline or clock, the session, an answer outside 2xx, no usable answer after it left, or the helper runner. |
+| `check` | The check that refused: APN's body or response checks, a duplicate or unexpected request, the deadline or clock, the APN command that spawned the helper having exited (`parent_exited`), the session, an answer outside 2xx, no usable answer after it left, or the helper runner. |
 | `provider_error` | MetaMask's error code from a non-2xx answer, when it is a short upper-case token. |
 | `provider_status` | The job status of a 2xx answer that APN did not recognize, or whose `tx` it refused, when it is a short upper-case token. |
 | `response_tx` | Only when `check` is `response_tx`: how the answer's `tx` compared with the request (table below); otherwise `null`. |
@@ -843,8 +843,11 @@ wallet is the sender and, for a native transfer, that its project hashes to the 
 admits exactly one POST to the project's `transaction-requests` with exactly the bytes `mm wallet send-transaction`
 (6.1.5) sent for the same payload and intent, and nothing else, and it lets that POST leave only before the send's
 deadline: checked at the request and again once TLS is up, right before the request is written, with the exchange's
-timeout capped at the time left, so the request is destroyed at the deadline. The helper exits by itself when the APN
-command that spawned it is gone. See
+timeout capped at the time left, so the request is destroyed at the deadline. The helper records its parent's pid as
+the first statement of its bootstrap, checks it every 100 ms and right before a send is written, and exits, with
+nothing written, once the APN command that spawned it is gone. A command that dies during Node's own startup of the
+helper, before that statement, or after the request was written, is not covered; the deadline still bounds every send.
+See
 [metamask-native-cli-sourceprep.md](metamask-native-cli-sourceprep.md#the-hand-off).
 
 ### MFA and provider outcomes
@@ -1015,7 +1018,9 @@ The `revoke` output reports `submission`. Every answer carries `requestIdHash`, 
   revoke again is safe. It names the cause those facts give, from a closed list, with its own step: the 120-second
   bound passed before the request was written (run it again), an invalid or backward clock (correct it), the helper
   process did not start (run it again), the session is in another project or has another wallet selected (select the
-  server wallet), the session is signed out or expired or its files could not be read (sign in again), the bundled
+  server wallet), the session is signed out or expired or its files could not be read (sign in again), another `mm`
+  process was writing its files (run it again), its files are not private to this user (make the MetaMask Agent
+  Wallet's directory and files owned by this user and private to it, with no symbolic link on the way), the bundled
   MetaMask SDK did not load (run it again, reinstall APN if it repeats), the SDK could not restore the session (sign in
   again), or the SDK named another server wallet (select the server wallet).
   The next actions say when another disable is safe: the resume still finds the delegation not disabled, and

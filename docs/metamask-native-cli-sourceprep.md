@@ -111,8 +111,17 @@ Another body, URL or token, or a second request, is refused before it leaves. Th
 deadline at the request, and again once the TLS session is up, right before the request is written: nothing of it is
 handed to the socket while DNS, TCP or the handshake run. The exchange's timeout is the time left to the deadline (at
 most 15 seconds), so the request is destroyed at the deadline, written or not. The parent kills the helper at that
-deadline, as it killed the `mm` child, and the helper exits by itself when the APN command that spawned it is gone, so
-an orphan never sends. It returns only bound fields of MetaMask's answer for this very request ID: its status, a transaction hash
+deadline, as it killed the `mm` child.
+
+The helper also watches the APN command that spawned it. The first statement of its bootstrap records its parent's
+pid, before any other module loads. Every 100 ms, and right before a send's request is written, it checks that its
+parent has not changed. When the command died (and its operation lock with it), the helper exits, and the gate refuses
+a send with nothing written (`check: "parent_exited"`, `post: "not_reached"`). Not covered: a command that dies during
+Node's own startup of the helper, before that first statement, and a request already written when the command died.
+Either may still reach MetaMask, and the transfer stays `unknown` as recorded. The deadline gate bounds every send in
+all cases: nothing is written after the deadline, and the exchange ends there.
+
+It returns only bound fields of MetaMask's answer for this very request ID: its status, a transaction hash
 when there is one and, for `AWAITING_MFA`, the approval's `expiresAt` and the session's `authMethod`.
 
 The hand-off's answer decides the journal's state. A `pending` answer is not a state of its own: the journal records
