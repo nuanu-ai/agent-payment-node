@@ -6,7 +6,9 @@
  * HOME, Keychain or network.
  */
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
+import type { ClientRequest } from "node:http";
 import { join } from "node:path";
 import test from "node:test";
 import { sha256 } from "../../src/canonical.js";
@@ -15,6 +17,7 @@ import { executeHelperRequest, MetaMaskGaslessProviderClient, MM_HELPER_VERSION,
   "../../src/metamask-gasless/client/index.js";
 import { HelperNetworkPolicy, networkContextServerTransaction, type FetchExchange, type FetchExchangeRequest,
   type FetchExchangeResponse } from "../../src/metamask-gasless/client/network.js";
+import { endRequestWhenSecure } from "../../src/metamask-gasless/client/https-exchange.js";
 import { helperRequest } from "../../src/metamask-gasless/client/protocol.js";
 import { serverTransactionBody, type MetaMaskServerTransactionInput } from "../../src/metamask-gasless/client/server-transaction.js";
 import { runnerDiagnostic, submitFailureError } from "../../src/metamask-gasless/client/submit-diagnostic.js";
@@ -151,6 +154,62 @@ test("the send's deadline is checked at the request and again right before its b
   } finally { await home.cleanup(); }
 });
 
+/** A Node request as the transport sees it: what `end` wrote, and whether it was destroyed. */
+class WrittenRequest extends EventEmitter {
+  readonly written: (string | undefined)[] = [];
+  destroyed = false;
+  end(body?: string): this { this.written.push(body); return this; }
+  destroy(): this { this.destroyed = true; return this; }
+}
+/** The production gate on a request whose TLS handshake runs `duringConnect` before it completes. */
+class ConnectingExchange implements FetchExchange {
+  readonly req = new WrittenRequest();
+  timeoutMs: number | undefined;
+  constructor(readonly duringConnect: () => void = () => undefined) {}
+  async request(request: FetchExchangeRequest): Promise<FetchExchangeResponse> {
+    this.timeoutMs = request.timeoutMs;
+    const socket = new EventEmitter();
+    return await new Promise((resolve, reject) => {
+      endRequestWhenSecure(this.req as unknown as ClientRequest, request, reject);
+      this.req.emit("socket", socket);
+      assert.deepEqual(this.req.written, [], "nothing of a send is written before TLS is up");
+      this.duringConnect();
+      socket.emit("secureConnect");
+      if (this.req.written.length === 1) {
+        const posted = JSON.parse(this.req.written[0]!) as { requestId: string; tx: unknown };
+        resolve({ status: 200, body: JSON.stringify({ requestId: posted.requestId, status: "EVALUATING", tx: posted.tx }) });
+      }
+    });
+  }
+}
+
+test("a send is written only once TLS is up, after its last deadline check, and its exchange ends at the deadline", async () => {
+  const token = "synthetic-token", headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const deadline = Date.parse(DEADLINE), body = serverTransactionBody(input());
+  let clock = deadline - 1;
+  // The deadline passes while DNS, TCP or the handshake run: nothing is written and the request is destroyed.
+  let exchange = new ConnectingExchange(() => { clock = deadline; });
+  let policy = new HelperNetworkPolicy(networkContextServerTransaction(input(), PROJECT, token, () => new Date(clock)), exchange);
+  await assert.rejects(policy.fetch(COLLECTION, { method: "POST", headers, body }),
+    (error: unknown) => error instanceof ApnError && error.details?.reason === "mm_gasless_expired");
+  assert.deepEqual([exchange.req.written, exchange.req.destroyed, exchange.timeoutMs], [[], true, 1]);
+  assert.deepEqual([policy.submitFacts().post, policy.submitFacts().check, policy.fixedFailure()], ["not_reached", "deadline", "mm_gasless_expired"]);
+  // Before it, the exact bytes go once TLS is up, and the exchange's timeout is the time left to the deadline.
+  clock = deadline - 4_000; exchange = new ConnectingExchange();
+  policy = new HelperNetworkPolicy(networkContextServerTransaction(input(), PROJECT, token, () => new Date(clock)), exchange);
+  assert.equal((await policy.fetch(COLLECTION, { method: "POST", headers, body })).status, 200);
+  assert.deepEqual([exchange.req.written, exchange.req.destroyed, exchange.timeoutMs, policy.submitFacts().post], [[body], false, 4_000, "sent"]);
+  // A deadline further away than the transport's own bound keeps that bound.
+  clock = deadline - 3_600_000; exchange = new ConnectingExchange();
+  policy = new HelperNetworkPolicy(networkContextServerTransaction(input(), PROJECT, token, () => new Date(clock)), exchange);
+  await policy.fetch(COLLECTION, { method: "POST", headers, body });
+  assert.equal(exchange.timeoutMs, 15_000);
+  // A read has no gate and is written at once.
+  const read = new WrittenRequest();
+  endRequestWhenSecure(read as unknown as ClientRequest, { body: null }, () => assert.fail("a read has no gate"));
+  assert.deepEqual(read.written, [undefined]);
+});
+
 test("a malformed request, another project or another selected wallet refuses in the helper before any network call", async (t) => {
   const home = await syntheticHome(); t.after(home.cleanup);
   const good = input();
@@ -244,4 +303,8 @@ test("the parent sends once through the helper and keeps every failure after the
     responseHash: "1".repeat(64) } };
   assert.equal((await sendMetaMaskServerTransaction(input(), 4321, client)).kind, "unknown", "an MFA window only for AWAITING_MFA");
   assert.equal(runs, 7);
+  // Any other port is held to the same request id: its answer for another request is never taken.
+  const other = { async submitServerTransaction() { return { requestId: "00000000-0000-4000-8000-000000000099", status: "SIGNING", txHash: null,
+    mfa: null, responseHash: "1".repeat(64) }; } };
+  assert.deepEqual(await sendMetaMaskServerTransaction(input(), 4321, other), { kind: "unknown", reason: "provider_request_identity_conflict" });
 });

@@ -62,15 +62,20 @@ export class MetaMaskSdkRevocationWallet implements MetaMaskRevocationWalletPort
 }
 
 /**
- * Whether the helper's own closed facts say the disable never reached the network: it stopped before its process
- * started, at the session or selected-wallet read, while loading or hydrating the SDK, or at its deadline or clock check
- * right before the bytes would go. The disposition stays unknown; only the next step differs.
+ * Why the disable never reached the network, when the helper's own closed facts say so: its deadline or clock check right
+ * before the bytes would go, its process that never started, the session read (another project or selected wallet, signed
+ * out or expired, or its files unreadable), the SDK load, the SDK's session restore, or the SDK's server wallet. Any other
+ * fact is `undefined`: the request may have left. The disposition stays unknown either way; only the next step differs.
  */
-export function metaMaskRevocationStoppedBeforeNetwork(submission: MetaMaskRevocationSubmission): boolean {
-  if (submission.disposition !== "unknown" || submission.submitDiagnostic === undefined) return false;
+export type MetaMaskRevocationUnsentCause = "deadline" | "clock" | "launch" | "session_binding" | "session_signed_out" | "session_files" |
+  "sdk_load" | "hydrate" | "binding";
+export function metaMaskRevocationUnsentCause(submission: MetaMaskRevocationSubmission): MetaMaskRevocationUnsentCause | undefined {
+  if (submission.disposition !== "unknown" || submission.submitDiagnostic === undefined || submission.submitDiagnostic.post !== "not_reached") return undefined;
   const d = submission.submitDiagnostic;
-  return d.post === "not_reached" && (["launch", "private_state", "sdk_load", "hydrate", "binding"].includes(d.stage) ||
-    d.check === "deadline" || d.check === "clock");
+  if (d.check === "deadline" || d.check === "clock") return d.check;
+  if (d.stage === "private_state") return submission.helperFailure === "mm_gasless_binding_changed" ? "session_binding"
+    : submission.helperFailure === "mm_gasless_session_unavailable" ? "session_signed_out" : "session_files";
+  return d.stage === "launch" || d.stage === "sdk_load" || d.stage === "hydrate" || d.stage === "binding" ? d.stage : undefined;
 }
 
 /** The provider's request id stays private; its hash names it in output, as it has since 0.5.105. */

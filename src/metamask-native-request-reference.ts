@@ -58,15 +58,16 @@ export function metaMaskNativeRequestTask(op: Pick<MetaMaskNativeOperation, "pro
 /**
  * The approval window a read of a request APN sent itself records. A server answer that names no `approval.expiresAt`
  * keeps the non-null `expiresAt` the task already holds for the same request (the same `requestIdHash`), from the send or
- * an earlier read, rather than erasing it: the window of one request does not move. Every other field is the read's
- * own. A record 0.5.107 or earlier wrote takes the read's evidence as it always did.
+ * an earlier read, rather than erasing it: the window of one request does not move. The kept expiry keeps the
+ * `evidenceHash` of the answer that named it, since the new answer's hash does not cover it; the auth method is the
+ * read's own. A record 0.5.107 or earlier wrote takes the read's evidence as it always did.
  */
 export function metaMaskNativeReadEvidence(op: Pick<MetaMaskNativeOperation, "handoffPath" | "providerRequestIdHash" | "mfaTask">,
   evidence: MetaMaskNativeMfaEvidence): MetaMaskNativeMfaEvidence {
   const task = op.mfaTask;
   if (op.handoffPath !== METAMASK_NATIVE_SDK_HANDOFF || evidence.expiresAt !== null || task === undefined || !("requestIdHash" in task) ||
     task.requestIdHash !== op.providerRequestIdHash || task.expiresAt === null) return evidence;
-  return { ...evidence, expiresAt: task.expiresAt };
+  return { ...evidence, expiresAt: task.expiresAt, evidenceHash: task.evidenceHash };
 }
 
 /** A read observation as output shows it: `request_id_hash`, the record's own hash, in place of a sealed id. */

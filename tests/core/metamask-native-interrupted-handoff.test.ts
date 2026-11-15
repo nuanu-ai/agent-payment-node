@@ -5,7 +5,8 @@
  * a receipt or the owner's task. So a hash the server names settles through the receipt, and a later status no longer
  * fails on a hold that was never moved. A record without the helper path (0.5.107 and earlier) is left as it is.
  * A send that ended after its journal outcome and before its hold transitions (any release) leaves holds `reserved`:
- * status and observe move each to the state that send would have written, before any receipt or settlement.
+ * status and observe move each to the state that send would have written, before any receipt or settlement. One that
+ * ended after recording `failed_before_effect` and before releasing its holds gets them released on the next status.
  * The vendor and chain reads are doubles; the state, the journal, the usage ledger and the sealed reference are real.
  * Nothing here imports helpers.ts: it loads src/core.js before the mocks below could apply.
  */
@@ -13,6 +14,7 @@ import assert from "node:assert/strict";
 import { chmod, cp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test, { mock } from "node:test";
+import type { AssetUsageIdentity } from "../../src/asset-usage-ledger.js";
 import { ReferenceTestSecret, referenceTemporaryState } from "./provider-request-reference-helpers.js";
 
 const RID = "8cc50f3c-ca4e-41d1-98bb-b30f7bcaa3aa", TX = `0x${"e".repeat(64)}` as const, EXPIRES = "2099-10-20T09:51:13.922Z";
@@ -57,6 +59,7 @@ const { MetaMaskNativeJournal, metaMaskNativeRequestIdHash, metaMaskNativeReques
 const { EncryptedProviderRequestReferenceStore } = await import("../../src/provider-request-reference-store.js");
 const { canonicalJson, hashObject } = await import("../../src/canonical.js");
 const { seal, withoutDigest } = await import("../../src/asset-usage-ledger-record.js");
+const { AssetUsageLedger } = await import("../../src/asset-usage-ledger.js");
 
 const HASH = metaMaskNativeRequestIdHash(RID);
 const observation = (status: string | null, verified: boolean, transactionHash: string | null) => Object.freeze({ stage: "complete", guard_step: null,
@@ -225,4 +228,44 @@ test("holds the send already moved are left alone, and a missing hold still refu
   await assert.rejects(readMetaMaskNativeTransfer(missing.root, missing.id), /MetaMask settlement hold is absent/u);
   // The token hold the send left reserved is moved and stays charged; nothing is released or finalized.
   assert.equal((await rows(missing.root)).get(tokenHold!.reservationId)!.row.state, "unknown_finality");
+});
+
+test("an interrupted hand-off whose hold is already submitted still moves it to unknown_finality, and observe succeeds", async (t) => {
+  const { root, id, references, op } = await crashed(t, () => ({ state: "effect_started" }), true, ["submitted", "reserved"]);
+  answer = { disposition: "unknown", reason: "metamask_request_not_found_on_server", requestId: RID, readObservation: observation(null, false, null) };
+  assert.equal((await readMetaMaskNativeTransfer(root, id, true, references)).state, "unknown");
+  assert.deepEqual(await holdStates(root, op), ["unknown_finality", "unknown_finality"]);
+  assert.equal((await readMetaMaskNativeTransfer(root, id, true, references)).state, "unknown");
+});
+
+/** Each usage bucket of `op`'s sender and chain, as the daily limit reads it. */
+const usage = async (root: string, op: { readonly reservations: readonly AssetUsageIdentity[] }) =>
+  Promise.all(op.reservations.map(async r => (await new AssetUsageLedger(root).usage({ account: r.account, chain: r.chain, asset: r.asset }, new Date())).amountAtomic));
+
+test("a send that ended after recording failed_before_effect, before releasing its holds: the next status releases them", async (t) => {
+  const digest = (id: string) => hashObject({ id, kind: "failed_before_effect" });
+  // The helper never started after the marker (the send's proven no-spawn path), and a transfer that never reached it.
+  for (const [fields, handoffPath] of [[{ state: "failed_before_effect" }, true], [{ state: "failed_before_effect", effectAttempts: 0 }, false]] as const) {
+    const { root, id, op, path } = await crashed(t, () => fields, handoffPath);
+    const before = await journalBytes(path), held = await usage(root, op);
+    assert.deepEqual(held, [op.reservations[0]!.amountAtomic, op.reservations[1]!.amountAtomic], "the reserved holds count against the limit");
+    assert.equal((await readMetaMaskNativeTransfer(root, id)).state, "failed_before_effect");
+    const released = await rows(root), states = op.reservations.map(r => released.get(r.reservationId)!.row);
+    assert.deepEqual(states.map(row => [row.state, row.outcomeDigest]), [["failed_before_effect", digest(id)], ["failed_before_effect", digest(id)]]);
+    assert.deepEqual(await usage(root, op), ["0", "0"], "the daily limit is free again");
+    assert.deepEqual(await journalBytes(path), before, "no journal field changes");
+    const again = await holdRows(root);
+    await readMetaMaskNativeTransfer(root, id);
+    assert.deepEqual(await holdRows(root), again, "a second status does nothing");
+  }
+  // Only this operation's exact rows: a hold whose amount is not the quote's stays reserved.
+  const { root, id, op } = await crashed(t, () => ({ state: "failed_before_effect" }), true);
+  const token = (await rows(root)).get(op.reservations[1]!.reservationId)!;
+  await writeFile(token.path, `${canonicalJson(seal({ ...withoutDigest(token.row as never), amountAtomic: "1" }))}\n`, { mode: 0o600 });
+  await readMetaMaskNativeTransfer(root, id);
+  assert.deepEqual(await holdStates(root, op), ["failed_before_effect", "reserved"]);
+  // The holds of a transfer whose outcome is UNKNOWN are never released: they only move to unknown_finality.
+  const unknown = await crashed(t, () => ({ state: "unknown" }), true);
+  await readMetaMaskNativeTransfer(unknown.root, unknown.id);
+  assert.deepEqual(await holdStates(unknown.root, unknown.op), ["unknown_finality", "unknown_finality"]);
 });

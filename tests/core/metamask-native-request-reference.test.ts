@@ -237,10 +237,11 @@ test("a read that names no approval window keeps the one known for the same requ
   answer = pendingWith(null);
   const kept = await readMetaMaskNativeTransfer(temporary.root, id, true, helper.references);
   assert.deepEqual([kept.mfa_task?.expires_at, kept.mfa_task?.auth_method, kept.mfa_task?.source, kept.mfa_task?.evidence_hash],
-    [EXPIRES, "social", "watch", "1".repeat(64)], "the known expiry stays; every other field is the read's own");
+    [EXPIRES, "social", "watch", EVIDENCE], "the known expiry stays with the evidence that named it; the rest is the read's own");
   const LATER = "2099-10-21T09:51:13.922Z";
   answer = pendingWith(LATER);
-  assert.equal((await readMetaMaskNativeTransfer(temporary.root, id, true, helper.references)).mfa_task?.expires_at, LATER, "a window the read names replaces it");
+  const replaced = await readMetaMaskNativeTransfer(temporary.root, id, true, helper.references);
+  assert.deepEqual([replaced.mfa_task?.expires_at, replaced.mfa_task?.evidence_hash], [LATER, "1".repeat(64)], "a window the read names replaces it");
   assert.deepEqual(serverReads, [RID, RID]);
   // A record 0.5.107 wrote takes the read's evidence as it always did.
   const older = await temporaryState(); t.after(older.cleanup);

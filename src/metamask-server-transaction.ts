@@ -63,9 +63,10 @@ export const MM_REQUEST_CLOSED_STATUSES: readonly string[] = ["FAILED", "BROADCA
 
 /**
  * What one send says. `answered`: the helper's bound fields of the server's answer for this very request (the client
- * accepts no answer for another id). `unknown`: the helper failed once it may have started, so the POST may have left;
- * `provider_request_identity_conflict` when the server's answer named another request; `diagnostic` is the submit's
- * closed facts and `helperFailure` the helper's closed refusal reason, when they came. Never a refusal before the send.
+ * accepts no answer for another id, and this send checks it again). `unknown`: the helper failed once it may have
+ * started, so the POST may have left; `provider_request_identity_conflict` when the server's answer named another
+ * request; `diagnostic` is the submit's closed facts and `helperFailure` the helper's closed refusal reason, when they
+ * came. Never a refusal before the send.
  */
 export type MetaMaskServerTransactionOutcome =
   | { readonly kind: "answered"; readonly answer: MetaMaskServerTransactionAnswer }
@@ -85,6 +86,8 @@ export async function sendMetaMaskServerTransaction(transaction: MetaMaskServerT
     return { kind: "unknown", reason: diagnostic?.check === "response_request_id" ? "provider_request_identity_conflict" : "provider_handoff_outcome_unknown",
       ...(diagnostic === undefined ? {} : { diagnostic }), helperFailure };
   }
+  // The production client binds the answer to the request id already; any other port is held to the same rule here.
+  if (answer.requestId !== transaction.requestId) return { kind: "unknown", reason: "provider_request_identity_conflict" };
   return { kind: "answered", answer };
 }
 

@@ -282,14 +282,31 @@ function transitionIdentity(r:AssetUsageReservation) { return {account:r.account
  */
 async function closeExpiredBeforeEffect(stateRoot:string,journal:MetaMaskNativeJournal,op:NativeOperation,now:Date):Promise<NativeOperation> {
   if(!metaMaskNativeExpiredBeforeEffect(op,now.getTime()))return op;
-  const closed=await journal.persist(patch(op,{state:"failed_before_effect"})), ledger=new AssetUsageLedger(stateRoot), q=closed.context.quote;
-  for (const asset of [{kind:"native" as const,identifier:null},{kind:"token" as const,identifier:q.token}]) {
-    const identity={account:q.sender,chain:`eip155:${q.chainId}`,asset};
-    const held=await ledger.load(identity,assetUsageReservationId(identity,`apn.metamask-native:${op.operationId}:${asset.kind}`));
-    if(held?.state==="reserved"&&held.metamaskNativeReservation?.operationId===op.operationId)await ledger.transition({...transitionIdentity(held),state:"failed_before_effect",
-      now,outcomeDigest:hashObject({id:op.operationId,kind:"failed_before_effect"}),expectedCurrentStates:["reserved"]});
-  }
+  const closed=await journal.persist(patch(op,{state:"failed_before_effect"}));
+  await releaseHoldsFailedBeforeEffect(stateRoot,closed,now);
   return closed;
+}
+/**
+ * A transfer that failed before its effect releases its usage holds, as the send (or the expiry close above) does right
+ * after it records `failed_before_effect`. A command that ended between the two left holds `reserved` that count against
+ * the daily limit forever. Under the operation lock this releases exactly those: only a journal `failed_before_effect`
+ * with no transaction hash, which APN writes only with nothing handed off: from `prepared` (effect attempts 0), or from a
+ * marker whose hand-off provably never started (effect attempts 1, the send's `MetaMaskNativeHandoffNotStarted` path;
+ * the journal admits no other attempt count for this state). Only the two rows of this very operation (their ids derive
+ * from it, so a crash before the journal named them is covered too), only from `reserved`, with the operation's quote,
+ * policy and amounts, and with the send's own outcome digest. Any other row is left as it is.
+ */
+async function releaseHoldsFailedBeforeEffect(stateRoot:string,op:NativeOperation,now:Date):Promise<void> {
+  if(op.state!=="failed_before_effect"||op.transactionHash!==null)return;
+  const ledger=new AssetUsageLedger(stateRoot), q=op.context.quote, transfer=metaMaskNativeQuoteTransfer(q);
+  for (const [asset,amountAtomic] of [[{kind:"native" as const,identifier:null},q.feeQuote.totalQuoteWei],[{kind:"token" as const,identifier:q.token},transfer.amountAtomic]] as const) {
+    const identity={account:q.sender,chain:`eip155:${q.chainId}`,asset}, reservationId=assetUsageReservationId(identity,`apn.metamask-native:${op.operationId}:${asset.kind}`);
+    const held=await ledger.load(identity,reservationId), stored=op.reservations.find(r=>r.reservationId===reservationId);
+    if(held===null||held.state!=="reserved"||held.metamaskNativeReservation?.operationId!==op.operationId||held.metamaskNativeReservation.quoteHash!==q.quoteHash||
+      held.policyDigest!==op.context.policyDigest||held.amountAtomic!==amountAtomic||stored!==undefined&&held.idempotencyHash!==stored.idempotencyHash)continue;
+    await ledger.transition({...transitionIdentity(held),state:"failed_before_effect",now,outcomeDigest:hashObject({id:op.operationId,kind:"failed_before_effect"}),
+      expectedCurrentStates:["reserved"]});
+  }
 }
 /**
  * This read verified that MetaMask closed the very request at its approval step (`EXPIRED` or `DENIED`, which `mm`
@@ -330,7 +347,10 @@ export async function closeExpiredNativeTransfersOf(stateRoot:string,chainId:num
 async function recordInterruptedHandoff(stateRoot:string,journal:MetaMaskNativeJournal,op:NativeOperation):Promise<NativeOperation> {
   if(op.state!=="effect_started"||op.effectAttempts!==1||op.handoffPath!==METAMASK_NATIVE_SDK_HANDOFF)return op;
   const ledger=new AssetUsageLedger(stateRoot);
-  for (const r of op.reservations) await ledger.transition({...transitionIdentity(r),state:"unknown_finality",now:new Date(),expectedCurrentStates:["reserved","unknown_finality"]});
+  // A hold already `submitted` (not what this send writes before its outcome) moves too and stays charged, rather than
+  // making every later observe refuse.
+  for (const r of op.reservations) await ledger.transition({...transitionIdentity(r),state:"unknown_finality",now:new Date(),
+    expectedCurrentStates:["reserved","submitted","unknown_finality"]});
   // Built at call time: this module sits in an import cycle with the adapter.
   const interrupted=validateMetaMaskNativeDiagnostic({stage:"post_handoff",code:"interrupted",exitCode:null,signal:null,durationMs:0,remainingMs:0,
     stderrClass:"none",providerCode:"none"});
@@ -365,8 +385,12 @@ function failureDiagnostic(error: unknown, context: MetaMaskNativeOwnedContext, 
 }
 
 /**
- * Status, and with `observe` one no-send read of the stored request or transaction. A record that seals its request id
- * opens it from `references` first; one that cannot be opened refuses the read precisely, and nothing is read or written.
+ * Status, and with `observe` one no-send read of the stored request or transaction. Under the operation lock, before any
+ * seal is opened, it first brings the record's own state up to date: it closes a transfer whose consent passed before its
+ * marker, releases the holds of one that failed before its effect, with `observe` records a hand-off whose command ended
+ * at its marker UNKNOWN, and moves holds a send left `reserved` after its outcome. Those writes stay even when the seal
+ * then cannot be opened. A record that seals its request id opens it from `references` before any provider read; one
+ * that cannot be opened refuses the read precisely, and nothing is read from the provider or written after that.
  */
 export async function readMetaMaskNativeTransfer(stateRoot:string,idInput:string,observe=false,references?:ProviderRequestReferencePort) {
   const id=canonicalOperationId(idInput), journal=new MetaMaskNativeJournal(stateRoot);
@@ -374,6 +398,7 @@ export async function readMetaMaskNativeTransfer(stateRoot:string,idInput:string
   return journal.withLocks([`operation:${id}`],async()=>{
     let op=await journal.read(id); if(op===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Native transfer operation does not exist.");
     op=await closeExpiredBeforeEffect(stateRoot,journal,op,new Date());
+    await releaseHoldsFailedBeforeEffect(stateRoot,op,new Date());
     // Observing, under the operation lock: a helper hand-off whose command ended at its marker is UNKNOWN first.
     if(observe)op=await recordInterruptedHandoff(stateRoot,journal,op);
     // Status and observe alike, before any receipt or settlement: a send that ended after its journal outcome and before

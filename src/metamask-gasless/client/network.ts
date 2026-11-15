@@ -4,9 +4,9 @@ import { captureSponsoredQuote, parseSentinelResponse, sentinelFailure, sentinel
   type SentinelFailure } from "./sentinel.js";
 import { MM_SENTINEL_NETWORKS_ENDPOINT, MM_SERVER_WALLET_NETWORKS_ENDPOINT, mmProjectWalletsUrl } from "./provider-endpoints.js";
 import { readProjectWallets, type ProjectWallets } from "./project-wallets.js";
-import { request as httpsRequest } from "node:https";
 import { canonicalJson, exactKeys, isPlainRecord, sha256 } from "../../canonical.js";
-import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, type PinnedAddress } from "../../network-policy.js";
+import { parsePublicHttpsUrl } from "../../network-policy.js";
+import { HttpsFetchExchange, type FetchExchange, type FetchExchangeRequest } from "./https-exchange.js";
 import type { MetaMaskGaslessProviderIntent, MetaMaskGaslessQuote } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
 import type { MetaMaskServerRequestQuery } from "./server-request.js";
@@ -23,19 +23,7 @@ const SENTINEL_NETWORKS = MM_SENTINEL_NETWORKS_ENDPOINT;
 const MAX_RESPONSE = 4 * 1024 * 1024;
 const transferAbi = parseAbi(["function transfer(address,uint256) returns (bool)"]);
 
-export interface FetchExchangeRequest {
-  readonly url: string;
-  readonly method: "GET" | "POST";
-  readonly headers: Readonly<Record<string, string>>;
-  readonly body: string | null;
-  readonly signal?: AbortSignal;
-  readonly maxBytes: number;
-  readonly timeoutMs: number;
-  /** Internal final gate used by the production transport immediately before bytes leave the process. */
-  readonly beforeSend?: () => void;
-}
-export interface FetchExchangeResponse { readonly status: number; readonly headers?: Readonly<Record<string, string>>; readonly body: string }
-export interface FetchExchange { request(request: FetchExchangeRequest): Promise<FetchExchangeResponse> }
+export type { FetchExchange, FetchExchangeRequest, FetchExchangeResponse } from "./https-exchange.js";
 export type ModeContext =
   | { readonly mode: "inspect" | "buildUnsigned" }
   | { readonly mode: "quote"; readonly input: MetaMaskGaslessQuoteInput; readonly owner: string; readonly authToken: string;
@@ -163,10 +151,13 @@ export class HelperNetworkPolicy {
       mmFail(this.sends() ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
     }
     this.counts.set(key, 1);
-    if (this.sends()) this.assertSubmitDeadline();
+    const left = this.sends() ? this.assertSubmitDeadline() : undefined;
     const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
-    // From the last deadline check on, the POST may reach the provider: it counts as sent even without an answer.
-    const request: FetchExchangeRequest = { url, method, headers, body, maxBytes: MAX_RESPONSE, timeoutMs: 15_000,
+    // From the last deadline check on, the POST may reach the provider: it counts as sent even without an answer. The
+    // transport checks it once more when TLS is up, right before the bytes go, and a send's exchange ends at its deadline
+    // at the latest (its timeout is the time left), so no request of it is written past the deadline.
+    const request: FetchExchangeRequest = { url, method, headers, body, maxBytes: MAX_RESPONSE,
+      timeoutMs: left === undefined ? 15_000 : Math.min(15_000, left),
       ...(signal ? { signal } : {}), ...(this.sends() ? { beforeSend: () => {
         this.assertSubmitDeadline(); if (key === "submit" || key === "submit-transaction") this.#submitPost = "sent";
       } } : {}) };
@@ -219,19 +210,23 @@ export class HelperNetworkPolicy {
     if (key === "rpc-balance") this.#usdcBalance = BigInt(parseBody(body).result as string);
     if (key === "sentinel-quote") this.#quotedFee = sentinelQuotedFee(parseBody(body), this.context.input.token);
   }
-  /** The send's own deadline (a gasless intent's, a server transaction's), checked at the request and right before its bytes go. */
-  private assertSubmitDeadline(): void {
+  /**
+   * The send's own deadline (a gasless intent's, a server transaction's), checked at the request and right before its bytes
+   * go. Returns the milliseconds left to it, or `undefined` in a mode that sends nothing.
+   */
+  private assertSubmitDeadline(): number | undefined {
     // Separate branches: the `"submit" | "observe"` member is not removed by a ternary or a negated mode check.
     const c = this.context;
     let expiresAt: string;
     if (c.mode === "submitTransaction") expiresAt = c.input.expiresAt;
     else if (c.mode === "submit") expiresAt = c.intent.expiresAt;
-    else return;
+    else return undefined;
     const current = c.now().getTime(), deadline = Date.parse(expiresAt);
     if (!Number.isSafeInteger(current) || !Number.isSafeInteger(deadline)) { this.deadlineFailure = "mm_gasless_clock"; this.submitRefused("clock"); mmFail("mm_gasless_clock"); }
     if (this.lastClockMs !== undefined && current < this.lastClockMs) { this.deadlineFailure = "mm_gasless_clock"; this.submitRefused("clock"); mmFail("mm_gasless_clock"); }
     this.lastClockMs = current;
     if (current >= deadline) { this.deadlineFailure = "mm_gasless_expired"; this.submitRefused("deadline"); mmFail("mm_gasless_expired"); }
+    return deadline - current;
   }
   private classify(url: string, method: string, headers: Record<string, string>, body: string | null): string {
     if (this.context.mode === "inspect" || this.context.mode === "buildUnsigned") mmFail("mm_gasless_provider_unavailable");
@@ -432,48 +427,6 @@ function validateResponse(key: string, body: string, requestBody: string | null,
   } else if (key === "sentinel-quote") validateSentinelResponse(value, context);
 }
 interface ReadFailure extends Partial<SentinelFailure> { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean }
-export class HttpsFetchExchange implements FetchExchange {
-  async request(request: FetchExchangeRequest): Promise<FetchExchangeResponse> {
-    const url = parsePublicHttpsUrl(request.url, "APN_HTTP_CONFIG", "MetaMask service", 2048);
-    const deadline = Date.now() + request.timeoutMs;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const addresses = await Promise.race([resolvePublicAddresses(url, "APN_HTTP_CONFIG", "MetaMask service"),
-        new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("dns timeout")), request.timeoutMs); })]);
-      clearTimeout(timer); timer = undefined;
-      const remaining = deadline - Date.now(); if (remaining < 1) throw new Error("request timeout");
-      return sendHttps(url, { ...request, timeoutMs: remaining }, addresses);
-    } finally { clearTimeout(timer); }
-  }
-}
-function sendHttps(url: URL, input: FetchExchangeRequest, addresses: readonly PinnedAddress[]): Promise<FetchExchangeResponse> {
-  return new Promise((resolve, reject) => {
-    const selected = addresses[0]; if (!selected) { reject(new Error("network")); return; }
-    let done = false; const finish = (error: unknown, result?: FetchExchangeResponse) => {
-      if (done) return; done = true; clearTimeout(timer); input.signal?.removeEventListener("abort", abort);
-      error ? reject(error) : resolve(result!);
-    };
-    const headers = { ...input.headers, "accept-encoding": "identity",
-      ...(input.body === null ? {} : { "content-length": String(Buffer.byteLength(input.body)) }) };
-    const req = httpsRequest(url, { method: input.method, headers, agent: false, family: selected.family,
-      lookup: (_host, _options, callback) => callback(null, selected.address, selected.family) }, (response) => {
-      const status = response.statusCode ?? 0, encoding = response.headers["content-encoding"];
-      if ((status >= 300 && status < 400) || (encoding && encoding !== "identity")) { response.destroy(); finish(new Error("response")); return; }
-      let size = 0; const chunks: Buffer[] = [];
-      response.on("data", (chunk: Buffer) => { size += chunk.length; if (size > input.maxBytes) { response.destroy(); finish(new Error("response")); } else chunks.push(chunk); });
-      response.on("end", () => { try { const body = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, size)); finish(null, { status, body }); } catch { finish(new Error("response")); } });
-      response.on("aborted", () => finish(new Error("response"))); response.on("error", () => finish(new Error("response")));
-    });
-    req.on("socket", (socket) => socket.on("connect", () => { if (!socket.remoteAddress || !sameIpAddress(socket.remoteAddress, selected.address)) { req.destroy(); finish(new Error("network")); } }));
-    req.on("error", () => finish(new Error("network")));
-    const abort = () => { req.destroy(); finish(new DOMException("Aborted", "AbortError")); };
-    input.signal?.addEventListener("abort", abort, { once: true });
-    const timer = setTimeout(() => { req.destroy(); finish(new Error("timeout")); }, input.timeoutMs);
-    try { input.beforeSend?.(); } catch (error) { req.destroy(); finish(error); return; }
-    req.end(input.body ?? undefined);
-  });
-}
-
 export function networkContextQuote(input: MetaMaskGaslessQuoteInput, owner: string, authToken: string, projectId: string): ModeContext {
   return { mode: "quote", input: structuredClone(input), owner, authToken, projectId };
 }

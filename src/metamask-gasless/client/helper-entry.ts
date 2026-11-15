@@ -6,6 +6,11 @@ const maximum = 1024 * 1024;
 const stdout = process.stdout.write.bind(process.stdout);
 console.log = console.error = console.warn = console.info = console.debug = () => undefined;
 process.stderr.write = (() => true) as typeof process.stderr.write;
+// The helper never outlives the APN command that spawned it. Once that parent is gone (the command died after the spawn,
+// and its operation lock with it), the orphan is re-parented and exits at once, so a send it has not written yet is never
+// written. Nobody reads its answer then; the command's own record of a send that started stays unknown, as it already was.
+const parent = process.ppid;
+setInterval(() => { if (process.ppid !== parent) process.exit(1); }, 100).unref();
 let size = 0; const chunks: Buffer[] = [];
 try {
   for await (const chunk of process.stdin) {

@@ -14,7 +14,8 @@ import { readDataRecord } from "./read-diagnostic.js";
 export type SubmitStage = "launch" | "runner" | "private_state" | "sdk_load" | "hydrate" | "binding" | "body" | "post" | "response" |
   "complete" | "helper_response";
 /**
- * `not_reached`: no POST could have left (only APN's own checks before it ran, or no helper process started);
+ * `not_reached`: no POST could have left (only APN's own checks before it ran, no helper process started, or its
+ * connection never reached the TLS session the transport writes the request on);
  * `refused`: APN's body check refused it before sending; `sent`: it may have reached the provider; `unknown`: a helper
  * that ran failed, so it may or may not have left. Nothing but `not_reached` and `refused` rules out a sent POST.
  */

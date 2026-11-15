@@ -167,11 +167,25 @@ test("an unknown disable answer names MetaMask's error code and when another dis
     .execute({ command: "gasless.transfer.revoke", operationId: id });
   assert.match(plain.next_actions![0]!, /^MetaMask did not confirm this disable\. Run the resume below/u);
   // The helper's own closed facts say nothing left the machine: the answer stays unknown, and the step names the cause.
-  const unsent = await core(new Approval(), new Wallet({ disposition: "unknown", reason: "provider_handoff_outcome_unknown", requestIdHash: "e".repeat(64),
-    helperFailure: "mm_gasless_binding_changed", submitDiagnostic: { mode: "submit", stage: "private_state", post: "not_reached", httpStatus: null,
-      check: "unclassified", providerError: null, providerStatus: null, responseTx: null } })).execute({ command: "gasless.transfer.revoke", operationId: id });
+  const stopped = (helperFailure: string, stage: string, check: string) => core(new Approval(), new Wallet({ disposition: "unknown",
+    reason: "provider_handoff_outcome_unknown", requestIdHash: "e".repeat(64), helperFailure, submitDiagnostic: { mode: "submit", stage: stage as never,
+      post: "not_reached", httpStatus: null, check: check as never, providerError: null, providerStatus: null, responseTx: null } }))
+    .execute({ command: "gasless.transfer.revoke", operationId: id });
+  const safe = `No disable left this machine and nonce 0x0 (0) of ${from} is untouched, so running revoke again is safe.`;
+  const again = `apn gasless transfer revoke --operation ${id} again`;
+  const unsent = await stopped("mm_gasless_binding_changed", "private_state", "unclassified");
   assert.equal((unsent.data as Json).submission.disposition, "unknown");
-  assert.deepEqual(unsent.next_actions, [`The MetaMask helper stopped before any network call (mm_gasless_binding_changed): no disable left this machine, ` +
-    `and nonce 0x0 (0) of ${from} is untouched. Sign in to the MetaMask Agent Wallet again if its session expired, or select the server wallet ` +
-    `${from} in it, then run apn gasless transfer revoke --operation ${id} again.`, `apn operation resume --operation ${id}`]);
+  assert.deepEqual(unsent.next_actions, [`The MetaMask helper stopped before any network call: the signed-in MetaMask Agent Wallet is in another ` +
+    `project or has another wallet than ${from} selected (mm_gasless_binding_changed). ${safe} Select the server wallet ${from} in the MetaMask ` +
+    `Agent Wallet, then run ${again}.`, `apn operation resume --operation ${id}`]);
+  // Each stop names its own cause: the deadline, the session, the SDK load. None blames the session or wallet for another.
+  assert.equal((await stopped("mm_gasless_expired", "post", "deadline")).next_actions![0], `The MetaMask helper stopped before any network ` +
+    `call: its 120-second send bound passed before the request was written (mm_gasless_expired). ${safe} Run ${again}.`);
+  assert.equal((await stopped("mm_gasless_session_unavailable", "private_state", "unclassified")).next_actions![0], `The MetaMask helper ` +
+    `stopped before any network call: the MetaMask Agent Wallet is signed out or its session expired (mm_gasless_session_unavailable). ${safe} ` +
+    `Sign in to the MetaMask Agent Wallet again, then run ${again}.`);
+  assert.equal((await stopped("mm_gasless_internal", "sdk_load", "unclassified")).next_actions![0], `The MetaMask helper stopped before any ` +
+    `network call: the MetaMask SDK bundled with APN did not load (mm_gasless_internal). ${safe} Run ${again}; reinstall APN if it stops here again.`);
+  // A stop past the request's own checks is not proof that nothing left: the resume step, as for any unknown answer.
+  assert.match((await stopped("mm_gasless_submit_unknown", "post", "unclassified")).next_actions![0]!, /^MetaMask did not confirm this disable\. /u);
 });

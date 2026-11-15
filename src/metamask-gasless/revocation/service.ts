@@ -8,7 +8,7 @@ import type { MetaMaskGaslessRpcFactory } from "../ports.js";
 import { mmDisableCall } from "./call.js";
 import { mmRevocationPayload } from "./chain.js";
 import { metaMaskRevocationSummary, type MetaMaskRevocationApprovalPort } from "./consent.js";
-import { metaMaskRevocationStoppedBeforeNetwork, type MetaMaskRevocationWalletPort } from "./wallet.js";
+import { metaMaskRevocationUnsentCause, type MetaMaskRevocationUnsentCause, type MetaMaskRevocationWalletPort } from "./wallet.js";
 
 /** The states in which a dispatched delegation may still be redeemable and nothing proves its outcome. */
 const REVOCABLE = ["submitted_pending", "unknown_finality", "failed_effects_pending", "abandoned_unknown"] as const;
@@ -66,14 +66,15 @@ export async function revokeMetaMaskGasless(state: StateStore, op: MetaMaskGasle
     return await wallet.send({ chainId, from: call.from, payload: mmRevocationPayload(call, chain),
       intent: `APN ${id}: disable delegation ${call.delegationHash}` });
   });
+  const unsent = metaMaskRevocationUnsentCause(submitted);
   return { operation_id: id, chain_id: chainId, kind: "metamask_delegation_disable", delegator: call.from, delegation_manager: call.to,
     delegation_hash: call.delegationHash, call_hash: call.callHash, fingerprint: summary.fingerprint,
     nonce_atomic: chain.nonceAtomic, gas_limit_atomic: chain.gasLimitAtomic, max_fee_per_gas_atomic: chain.maxFeePerGasAtomic,
     maximum_native_cost_wei: chain.maximumNativeCostWei, submission: submitted, proof_class: "owner_wallet_handoff_unproven",
     next_actions: [...submitted.disposition === "pending" ? ["Confirm this disable request in MetaMask Mobile or the email registered to your MetaMask dashboard."] : [],
-      ...submitted.disposition === "unknown" ? [metaMaskRevocationStoppedBeforeNetwork(submitted)
-        ? unsentDisable(submitted.helperFailure, call.from, chain.nonceAtomic, id)
-        : unconfirmedDisable(submitted.providerErrorCode, call.from, chain.nonceAtomic, id)] : [],
+      ...submitted.disposition === "unknown" ? [unsent === undefined
+        ? unconfirmedDisable(submitted.providerErrorCode, call.from, chain.nonceAtomic, id)
+        : unsentDisable(unsent, submitted.helperFailure, call.from, chain.nonceAtomic, id)] : [],
       resume] };
 }
 
@@ -86,15 +87,31 @@ function assertNativeGas(balanceWei: string, maximumWei: string, chainId: number
     nextActions: [`Send at least ${(BigInt(maximumWei) - BigInt(balanceWei)).toString()} wei of chain ${chainId}'s native coin (no USDC) to ${from}, then rerun: apn gasless transfer revoke --operation ${id}`] });
 }
 
+/** Each closed cause of a stop before the network, as words, and the step that removes it before running `again`. */
+const UNSENT: Readonly<Record<MetaMaskRevocationUnsentCause, (from: string, again: string) => readonly [string, string]>> = {
+  deadline: (_from, again) => ["its 120-second send bound passed before the request was written", `Run ${again}.`],
+  clock: (_from, again) => ["the system clock was invalid or moved backwards", `Correct the system clock, then run ${again}.`],
+  launch: (_from, again) => ["the helper process did not start", `Run ${again}.`],
+  session_binding: (from, again) => [`the signed-in MetaMask Agent Wallet is in another project or has another wallet than ${from} selected`,
+    `Select the server wallet ${from} in the MetaMask Agent Wallet, then run ${again}.`],
+  session_signed_out: (_from, again) => ["the MetaMask Agent Wallet is signed out or its session expired",
+    `Sign in to the MetaMask Agent Wallet again, then run ${again}.`],
+  session_files: (_from, again) => ["the MetaMask Agent Wallet's files on this machine could not be read",
+    `Sign in to the MetaMask Agent Wallet again, then run ${again}.`],
+  sdk_load: (_from, again) => ["the MetaMask SDK bundled with APN did not load", `Run ${again}; reinstall APN if it stops here again.`],
+  hydrate: (_from, again) => ["the MetaMask SDK could not restore the signed-in session",
+    `Sign in to the MetaMask Agent Wallet again, then run ${again}.`],
+  binding: (from, again) => [`the MetaMask SDK named another server wallet than ${from}`,
+    `Select the server wallet ${from} in the MetaMask Agent Wallet, then run ${again}.`],
+};
 /**
  * After a helper that stopped before any network call (its own closed facts): no disable left this machine and its nonce
- * is untouched, so the cause is the MetaMask session or the selected server wallet. The answer stays unknown.
+ * is untouched, so running revoke again is safe. The step names the cause those facts give. The answer stays unknown.
  */
-function unsentDisable(reason: string | undefined, from: string, nonce: string, id: string): string {
-  const hex = `0x${BigInt(nonce).toString(16)}`;
-  return `The MetaMask helper stopped before any network call${reason === undefined ? "" : ` (${reason})`}: no disable left this machine, ` +
-    `and nonce ${hex} (${nonce}) of ${from} is untouched. Sign in to the MetaMask Agent Wallet again if its session expired, or select ` +
-    `the server wallet ${from} in it, then run apn gasless transfer revoke --operation ${id} again.`;
+function unsentDisable(cause: MetaMaskRevocationUnsentCause, reason: string | undefined, from: string, nonce: string, id: string): string {
+  const hex = `0x${BigInt(nonce).toString(16)}`, [words, step] = UNSENT[cause](from, `apn gasless transfer revoke --operation ${id} again`);
+  return `The MetaMask helper stopped before any network call: ${words}${reason === undefined ? "" : ` (${reason})`}. No disable left this ` +
+    `machine and nonce ${hex} (${nonce}) of ${from} is untouched, so running revoke again is safe. ${step}`;
 }
 
 /**
