@@ -2,7 +2,7 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
-## Unreleased
+## 0.5.108 — 2026-11-15
 
 QA's Sei native transfer on 0.5.107 (`cee62de8…`) ended UNKNOWN with `no_stored_request_id`. `mm wallet send-transaction` names the MetaMask request itself and keeps the ID only in its own local list, after MetaMask answers. It failed after its POST without printing the ID, so nothing could find that request again. From this release APN names the request itself, records it before anything can be sent, and sends it through the sandboxed MetaMask helper.
 
