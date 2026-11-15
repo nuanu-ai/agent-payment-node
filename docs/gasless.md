@@ -842,7 +842,9 @@ From 0.5.108 the same helper also sends the MetaMask native transfer and the del
 wallet is the sender and, for a native transfer, that its project hashes to the stored project hash. Its network policy
 admits exactly one POST to the project's `transaction-requests` with exactly the bytes `mm wallet send-transaction`
 (6.1.5) sent for the same payload and intent, and nothing else, and it lets that POST leave only before the send's
-deadline, checked again right before the bytes go. See
+deadline: checked at the request and again once TLS is up, right before the request is written, with the exchange's
+timeout capped at the time left, so the request is destroyed at the deadline. The helper exits by itself when the APN
+command that spawned it is gone. See
 [metamask-native-cli-sourceprep.md](metamask-native-cli-sourceprep.md#the-hand-off).
 
 ### MFA and provider outcomes
@@ -985,7 +987,7 @@ sends the request once through the sandboxed helper above (`submitTransaction`):
 wallet. Right before the send, inside the same lock, APN reads the server wallet's native balance again (`mm` read it
 before its own POST; the helper does not) and refuses with `APN_INSUFFICIENT_GAS / mm_revoke_native_gas`, with nothing
 sent, when it no longer covers the disable's maximum native cost. The helper is killed after 120 seconds and lets the POST
-leave only before that bound. The MetaMask server wallet signs and broadcasts the call after its own Guard policy and
+leave only before that bound, checked again right before the request is written, with the exchange ending at the bound. The MetaMask server wallet signs and broadcasts the call after its own Guard policy and
 MFA. The call moves no USDC. Up to 0.5.107 `mm wallet send-transaction` sent it and named the request itself; from 0.5.108 the request is not
 in `mm`'s local request list (`mm wallet requests list`).
 Each disable pins the pending nonce it was priced at, so two disables at one nonce land at most once. A disable priced
@@ -1008,10 +1010,14 @@ The `revoke` output reports `submission`. Every answer carries `requestIdHash`, 
   facts: the helper stage, whether the POST left (`post`), its HTTP status, the check that refused, and MetaMask's error
   code or job status token when they have a closed form. `helperFailure` is the helper's own closed reason, for
   example `mm_gasless_binding_changed` or `mm_gasless_session_expired`.
-  When the helper's facts say it stopped before any network call (`post: "not_reached"` before its process started, at
-  the session or wallet read, the SDK load, or its deadline or clock check), the submission stays `unknown`, and the next action says that no
-  disable left the machine, that its nonce is untouched, and to fix the MetaMask session or the selected server wallet
-  before revoking again.
+  When the helper's facts say it stopped before any network call (`post: "not_reached"`), the submission stays
+  `unknown`, and the next action says that no disable left the machine, that its nonce is untouched and that running
+  revoke again is safe. It names the cause those facts give, from a closed list, with its own step: the 120-second
+  bound passed before the request was written (run it again), an invalid or backward clock (correct it), the helper
+  process did not start (run it again), the session is in another project or has another wallet selected (select the
+  server wallet), the session is signed out or expired or its files could not be read (sign in again), the bundled
+  MetaMask SDK did not load (run it again, reinstall APN if it repeats), the SDK could not restore the session (sign in
+  again), or the SDK named another server wallet (select the server wallet).
   The next actions say when another disable is safe: the resume still finds the delegation not disabled, and
   `eth_getTransactionCount(<server wallet>, …)` at both `latest` and `pending` still answers the disable's
   `nonce_atomic`, so no transaction of the wallet used that nonce or waits for it in the RPC's pool. Remove the cause

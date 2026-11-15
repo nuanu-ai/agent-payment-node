@@ -108,8 +108,11 @@ own token and exactly these bytes, which are what `mm` 6.1.5 sent for the same p
 ```
 
 Another body, URL or token, or a second request, is refused before it leaves. The policy also checks the consent
-deadline at the request and again right before the bytes go, and the helper is killed at that deadline, as the `mm`
-child was. It returns only bound fields of MetaMask's answer for this very request ID: its status, a transaction hash
+deadline at the request, and again once the TLS session is up, right before the request is written: nothing of it is
+handed to the socket while DNS, TCP or the handshake run. The exchange's timeout is the time left to the deadline (at
+most 15 seconds), so the request is destroyed at the deadline, written or not. The parent kills the helper at that
+deadline, as it killed the `mm` child, and the helper exits by itself when the APN command that spawned it is gone, so
+an orphan never sends. It returns only bound fields of MetaMask's answer for this very request ID: its status, a transaction hash
 when there is one and, for `AWAITING_MFA`, the approval's `expiresAt` and the session's `authMethod`.
 
 The hand-off's answer decides the journal's state. A `pending` answer is not a state of its own: the journal records
@@ -137,7 +140,8 @@ marker (`effect_started` with `handoffPath`), that command is gone. Before anyth
 still `reserved` to `unknown_finality` and records the transfer `unknown`, with `diagnostic.stage: "post_handoff"` and
 `code: "interrupted"`. Then it reads the request as for any `unknown` transfer: a transaction hash goes to receipt proof
 and settles the actual fee, `AWAITING_MFA` records the owner's task, and a 404 keeps the transfer `unknown` with its
-holds charged. `native-transfer-status` alone leaves such a marker as it is.
+holds charged. `native-transfer-status` alone leaves such a marker as it is. A hold that is already `submitted` under
+such a marker moves to `unknown_finality` too.
 
 **A command that ended after its outcome.** The send records its outcome in the journal and then moves the usage holds,
 in this release and in every earlier one. A command that ended between the two left the transfer `acknowledged`,
@@ -148,6 +152,14 @@ would have written: `submitted` for `acknowledged`, else `unknown_finality`. Bot
 releases or settles usage; settlement still needs the receipt. A hold that already moved is left alone. A missing or
 changed hold is left as it is, so its settlement still refuses. No journal field changes, so a record any release wrote
 gets the same repair, and a second read does nothing.
+
+**A command that ended after `failed_before_effect`.** The send, and the close of a transfer whose consent passed before
+its marker, record `failed_before_effect` and then release the usage holds. A command that ended between the two left
+holds `reserved` that counted against the daily limit forever. `native-transfer-status`, observe and resume release
+them under the operation's lock: only for a journal `failed_before_effect` with no transaction hash (APN writes it only
+when nothing was handed off), only the two holds of that very operation, only from `reserved` and only when each matches
+the operation's quote, policy and amount. The release uses the send's own outcome digest. Any other hold is left as it
+is.
 
 States: `prepared`, `effect_started`, `acknowledged` and `unknown` are non-terminal; `confirmed`, `confirmed_reverted`,
 `failed_before_effect` and `abandoned_unknown` are terminal.
@@ -229,7 +241,7 @@ recorded as `metamask_request_not_found_on_server`; a refused read as `provider_
 reason in `server_read.reason`. A transfer whose command ended at its effect marker (`effect_started`) also names the
 observer. For `AWAITING_MFA` the read records the approval's `expiresAt` and the session's `auth_method`, as the send
 did. When MetaMask's answer names no `approval.expiresAt`, the task keeps the expiry it already holds for the same
-request.
+request, with the `evidence_hash` of the answer that named it.
 
 **A transfer 0.5.107 or earlier sent** (no `handoffPath`) is read as before:
 
