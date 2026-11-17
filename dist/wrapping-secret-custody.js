@@ -14,6 +14,12 @@ const SEALED_DIRECTORIES = [
     "bridge-effects", "uniswap-execution-effects", "merchant-material", "gasless-effects", "metamask-gasless-request-references",
     "metamask-native-request-references", "provider-direct-request-references",
 ];
+/**
+ * The sealed directories whose records sit one level deeper, one subdirectory per operation: the MetaMask gasless
+ * delegation disable requests that 0.5.109 and later seal, `<profile hash>/<operation id>/<request hash>.json`
+ * (provider-request-reference-store.ts).
+ */
+const SEALED_PER_OPERATION_DIRECTORIES = ["metamask-revocation-request-references"];
 function wrappingSecretMissing(message) {
     return new ApnError("APN_STATE_CORRUPT", message, { reason: "wrapping_secret_missing", nextActions: [RESTORE_WRAPPING_SECRET] });
 }
@@ -33,8 +39,9 @@ export async function missingSecretNextAction(state, profile) {
     return await holdsSealedCustody(state) ? RESTORE_WRAPPING_SECRET : `apn wallet ensure --profile ${profile}`;
 }
 /**
- * A sealed record: every store writes `<name>.json`, flat or in one per-profile or per-chain subdirectory. The name never
- * starts with a dot: a profile (which starts with [a-z0-9]), a hex hash, a network-scoped key such as `~network~…` or
+ * A sealed record: every store writes `<name>.json`, flat or in one per-profile or per-chain subdirectory (the
+ * per-operation stores one level deeper). The name never starts with a dot: a profile (which starts with [a-z0-9]), a
+ * hex hash, a network-scoped key such as `~network~…` or
  * `~solana~…`, or an operation-scoped one such as `<operation>-<role>…`. Any such name counts, so the test is the dot and
  * the `.json` suffix alone. Atomic-write stages never reach a listing (recordEntries).
  */
@@ -50,7 +57,10 @@ export async function holdsSealedCustody(state) {
         if (await holdsSealedRecord(state, "wallets", "public"))
             return true;
         for (const directory of SEALED_DIRECTORIES)
-            if (await holdsSealedRecord(state, directory, "descend"))
+            if (await holdsSealedRecord(state, directory, 1))
+                return true;
+        for (const directory of SEALED_PER_OPERATION_DIRECTORIES)
+            if (await holdsSealedRecord(state, directory, 2))
                 return true;
         return false;
     }
@@ -58,6 +68,7 @@ export async function holdsSealedCustody(state) {
         return true;
     }
 }
+/** `subdirectories`: how many levels of directories the store lays out below this one; any deeper one counts as sealed. */
 async function holdsSealedRecord(state, directory, subdirectories) {
     for (const entry of await state.recordEntries(directory)) {
         if (entry.isFile()) {
@@ -65,9 +76,9 @@ async function holdsSealedRecord(state, directory, subdirectories) {
                 return true;
             continue;
         }
-        if (!entry.isDirectory() || subdirectories === "unexpected")
+        if (!entry.isDirectory() || subdirectories === 0)
             return true;
-        if (subdirectories === "descend" && await holdsSealedRecord(state, `${directory}/${entry.name}`, "unexpected"))
+        if (subdirectories !== "public" && await holdsSealedRecord(state, `${directory}/${entry.name}`, subdirectories - 1))
             return true;
     }
     return false;

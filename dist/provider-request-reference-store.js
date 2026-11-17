@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { lstat } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { canonicalJson, exactKeys, isPlainRecord, sha256 } from "./canonical.js";
 import { openNested, sealNested } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
@@ -7,14 +8,19 @@ import { loadOrCreateWrappingSecret, sealedRecordWrappingSecretMissing } from ".
 const ENVELOPE_VERSION = "apn.provider-request-reference-envelope.v1";
 const RECORD_VERSION = "apn.provider-request-reference.v1";
 /**
- * One sealed record per operation, `<directory>/<profile hash>/<operation id>.json`, in its lane's own directory: the
- * MetaMask native transfers and the provider direct transfers (`apn pay transfer`). Both count for the wrapping-secret
- * guard (SEALED_DIRECTORIES in wrapping-secret-custody.ts).
+ * Each lane's own directory. The MetaMask native transfers and the provider direct transfers (`apn pay transfer`) keep one
+ * sealed record per operation, `<directory>/<profile hash>/<operation id>.json`. The MetaMask gasless delegation disable
+ * (`apn gasless transfer revoke`) sends a new request on every run, so its lane keeps one sealed record per request,
+ * `<directory>/<profile hash>/<operation id>/<reference hash>.json`, never replaced, and removed (`discard`) only for a
+ * request that provably never left the machine. Every lane counts for the wrapping-secret guard (wrapping-secret-custody.ts).
  */
 export const PROVIDER_REQUEST_REFERENCE_DIRECTORIES = {
     "metamask-native": "metamask-native-request-references",
     "provider-direct": "provider-direct-request-references",
+    "metamask-revocation": "metamask-revocation-request-references",
 };
+/** The lanes that keep one sealed record per request of an operation, listed by `listProviderRequestReferences`. */
+const PER_REQUEST_LANES = new Set(["metamask-revocation"]);
 /** The form every provider request id APN accepts has (the MetaMask `pollingId` and `--provider-request-id`). */
 const REFERENCE = /^[A-Za-z0-9._:-]{1,256}$/u;
 const HASH = /^[a-f0-9]{64}$/u;
@@ -38,11 +44,13 @@ function envelopeSpec(binding) {
     };
 }
 /**
- * The provider request ids of MetaMask native and provider direct transfers, sealed under the login-Keychain wrapping
- * secret with the custody envelope every APN store uses. A journal written by a release after 0.5.106 keeps only the
- * id's hash; the id is sealed here once, before the journal names its hash: right after the provider named it, or, for
- * a MetaMask native transfer from 0.5.108 on, when APN names it itself, before the request is sent. It is opened only
- * to read that request again (observe and resume). Status, receipts and abandonment never open it.
+ * The provider request ids of MetaMask native and provider direct transfers and of MetaMask gasless delegation disables,
+ * sealed under the login-Keychain wrapping secret with the custody envelope every APN store uses. A journal written by a
+ * release after 0.5.106 keeps only the id's hash; the id is sealed here once, before the journal names its hash: right
+ * after the provider named it, or, for a MetaMask native transfer from 0.5.108 on, when APN names it itself, before the
+ * request is sent. A delegation disable (0.5.109 on) records nothing in its operation; APN names its id and seals it here
+ * before the request is sent, and its output names the hash. An id is opened only to read that request again (observe
+ * and resume). Status, receipts and abandonment never open it.
  */
 export class EncryptedProviderRequestReferenceStore {
     wrappingSecret;
@@ -56,7 +64,8 @@ export class EncryptedProviderRequestReferenceStore {
     }
     /**
      * The journal does not name this operation's hash yet, so a record found here is only what an interrupted earlier
-     * seal of the same operation left; it is replaced.
+     * seal of the same operation left; it is replaced. A per-request lane never replaces a record: each request has a new
+     * id, so a record already at its hash refuses (`APN_STATE_SECURITY`) and nothing is sealed.
      */
     async seal(bindingInput, reference) {
         const binding = referenceBinding(bindingInput);
@@ -87,20 +96,76 @@ export class EncryptedProviderRequestReferenceStore {
             wrapping.fill(0);
         }
     }
+    async discard(bindingInput) {
+        const binding = referenceBinding(bindingInput);
+        if (!PER_REQUEST_LANES.has(binding.lane))
+            internal();
+        await this.files.remove(binding);
+    }
 }
 class ReferenceFiles extends SecureStateStore {
     async load(binding) {
         return await this.readJson(this.path(binding));
     }
+    /** A per-operation record may replace what an interrupted seal left; a per-request record is created only once. */
     async write(binding, envelope) {
-        await this.ensureDirectory(join(PROVIDER_REQUEST_REFERENCE_DIRECTORIES[binding.lane], binding.profileHash));
-        await this.writeJson(this.path(binding), envelope);
+        const path = this.path(binding);
+        await this.ensureDirectory(dirname(path));
+        await this.writeJson(path, envelope, PER_REQUEST_LANES.has(binding.lane));
+    }
+    /** The protected delete of exactly this record's file (a regular, owner-only, single-link file); its directory stays. */
+    async remove(binding) {
+        await this.removeFile(this.path(binding));
     }
     path(binding) {
         stateIdentifier(binding.profileHash, "Provider request reference profile hash");
         stateIdentifier(binding.operationId, "Provider request reference operation ID");
-        return join(PROVIDER_REQUEST_REFERENCE_DIRECTORIES[binding.lane], binding.profileHash, `${binding.operationId}.json`);
+        const directory = PROVIDER_REQUEST_REFERENCE_DIRECTORIES[binding.lane];
+        if (!PER_REQUEST_LANES.has(binding.lane))
+            return join(directory, binding.profileHash, `${binding.operationId}.json`);
+        stateIdentifier(binding.referenceHash, "Provider request reference hash");
+        return join(directory, binding.profileHash, binding.operationId, `${binding.referenceHash}.json`);
     }
+}
+const SEALED_FILE = /^[a-f0-9]{64}\.json$/u;
+/**
+ * The requests sealed for one operation in a per-request lane, newest first (by the record file's modification time,
+ * then by hash). A directory listing of the state root the store writes to, with one `lstat` per record: no Keychain
+ * read, nothing opened. An absent directory holds none; a directory that is not the owner's own refuses
+ * (`APN_STATE_SECURITY`), as every state read does. Atomic-write stages and regular files whose name starts with a dot
+ * (Finder's .DS_Store) are not records, as the wrapping-secret guard reads them. Every other entry must be a regular
+ * file named `<64 hex>.json`, the only name the store writes; anything else (another name, a link, a directory, a
+ * dot-named link or directory) refuses the whole listing with `APN_STATE_CORRUPT /
+ * provider_request_reference_listing_invalid`, and is never skipped.
+ */
+export async function listProviderRequestReferences(state, scopeInput) {
+    const scope = referenceScope(scopeInput);
+    const directory = join(PROVIDER_REQUEST_REFERENCE_DIRECTORIES[scope.lane], scope.profileHash, scope.operationId);
+    const unlisted = () => {
+        throw new ApnError("APN_STATE_CORRUPT", `The sealed provider request references of this operation (${directory}) hold an entry APN never writes.`, { reason: "provider_request_reference_listing_invalid", operationId: scope.operationId,
+            nextActions: [`apn operation status --operation ${scope.operationId}`] });
+    };
+    const records = [];
+    for (const entry of await state.recordEntries(directory)) {
+        if (entry.isFile() && entry.name.startsWith("."))
+            continue;
+        if (!entry.isFile() || !SEALED_FILE.test(entry.name))
+            unlisted();
+        const info = await lstat(join(state.root, directory, entry.name));
+        if (!info.isFile())
+            unlisted();
+        records.push({ referenceHash: entry.name.slice(0, -".json".length), writtenAtMs: info.mtimeMs });
+    }
+    return records.sort((left, right) => right.writtenAtMs - left.writtenAtMs ||
+        (left.referenceHash < right.referenceHash ? -1 : left.referenceHash > right.referenceHash ? 1 : 0));
+}
+function referenceScope(value) {
+    if (!isPlainRecord(value) || !exactKeys(value, ["lane", "profileHash", "operationId"]) ||
+        !Object.hasOwn(PROVIDER_REQUEST_REFERENCE_DIRECTORIES, String(value.lane)) ||
+        !PER_REQUEST_LANES.has(value.lane) ||
+        ![value.profileHash, value.operationId].every(item => typeof item === "string" && HASH.test(item)))
+        internal();
+    return { lane: value.lane, profileHash: value.profileHash, operationId: value.operationId };
 }
 function referenceBinding(value) {
     if (!isPlainRecord(value) || !exactKeys(value, ["lane", "providerId", "profileHash", "operationId", "referenceHash"]) ||

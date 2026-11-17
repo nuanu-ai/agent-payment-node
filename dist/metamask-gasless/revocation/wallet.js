@@ -1,20 +1,23 @@
-import { randomUUID } from "node:crypto";
 import { isPlainRecord, sha256 } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { isMetaMaskEvmNamespace } from "../../metamask-namespace.js";
+import { readMetaMaskNativeServerRequest } from "../../metamask-native-request-server-read.js";
 import { parseMetaMaskProcessOutput } from "../../metamask-process-output.js";
 import { NodeMetaMaskProcessRunner } from "../../metamask-process-runner.js";
 import { MM_REQUEST_CLOSED_STATUSES, MM_REQUEST_PENDING_STATUSES, metaMaskServerTransaction, sendMetaMaskServerTransaction } from "../../metamask-server-transaction.js";
 import { MetaMaskGaslessProviderClient } from "../client/process.js";
+import { metaMaskRevocationRequestIdHash } from "./requests.js";
 /** The revoke's send bound, as the gasless relay submit's: the helper is killed after it and the outcome stays unknown. */
 const SUBMIT_TIMEOUT_MS = 120_000;
 /**
- * The owner's MetaMask server wallet signs and broadcasts the disable after its own Guard policy and MFA. APN first
- * checks with the MetaMask Agent Wallet CLI that its selected wallet is the delegator (a read): a selected wallet that
- * differs refuses before anything is handed over. APN then names the request id itself and sends the request once
+ * The owner's MetaMask server wallet signs and broadcasts the disable after its own Guard policy and MFA. `check` asks
+ * the MetaMask Agent Wallet CLI whether its selected wallet is the delegator (a read): a selected wallet that differs
+ * refuses before anything is sealed or handed over. `send` sends the request, under the id APN named and sealed, once
  * through the sandboxed MetaMask helper the gasless lane uses (metamask-server-transaction.ts): the very request
  * `mm wallet send-transaction` sent for the same payload and intent, from mm's signed-in session in whichever project
- * holds the server wallet, as before. mm's own local request list does not hold it.
+ * holds the server wallet, as before. mm's own local request list does not hold it. For `operation resume` it also
+ * reads a sealed request again: the session's project from `mm auth status`, then the request by its id from
+ * MetaMask's server through the same helper (the read the native transfer uses).
  */
 export class MetaMaskSdkRevocationWallet {
     runner;
@@ -23,7 +26,7 @@ export class MetaMaskSdkRevocationWallet {
         this.runner = runner;
         this.client = client;
     }
-    async send(input) {
+    async check(input) {
         const selected = await this.runner.runJson(["wallet", "address", "--chain-namespace", "evm", "--json"]);
         try {
             const parsed = parseMetaMaskProcessOutput(selected.stdout), data = parsed?.envelope?.data;
@@ -35,14 +38,41 @@ export class MetaMaskSdkRevocationWallet {
         finally {
             selected.stdout.fill(0);
         }
-        // Built and checked before the helper starts: a malformed request refuses with nothing sent.
-        const requestId = randomUUID();
-        // The helper lets the POST leave only within its own kill bound.
-        const transaction = metaMaskServerTransaction({ requestId, projectHash: null, from: input.from, chainId: input.chainId,
+        // Built and checked before the id is sealed: a malformed request refuses with nothing sealed or sent. The helper lets
+        // the POST leave only before `expiresAt`, its own kill bound from now.
+        return metaMaskServerTransaction({ requestId: input.requestId, projectHash: null, from: input.from, chainId: input.chainId,
             payload: input.payload, intent: input.intent, expiresAt: new Date(Date.now() + SUBMIT_TIMEOUT_MS).toISOString() });
-        return revocationSubmission(await sendMetaMaskServerTransaction(transaction, SUBMIT_TIMEOUT_MS, this.client), metaMaskRevocationRequestIdHash(requestId));
+    }
+    async send(request) {
+        return revocationSubmission(await sendMetaMaskServerTransaction(request, SUBMIT_TIMEOUT_MS, this.client), metaMaskRevocationRequestIdHash(request.requestId));
+    }
+    async sessionProject() {
+        let status;
+        try {
+            status = await this.runner.runJson(["auth", "status", "--json"]);
+        }
+        catch {
+            return { reason: "metamask_session_read_failed" };
+        }
+        try {
+            const parsed = parseMetaMaskProcessOutput(status.stdout), data = parsed?.envelope?.data;
+            const summary = isPlainRecord(data) ? data.summary : undefined;
+            if (status.exitCode !== 0 || parsed?.envelope?.ok !== true || !isPlainRecord(data) || data.authenticated !== true ||
+                !isPlainRecord(summary) || summary.mode !== "session" || typeof summary.projectId !== "string" ||
+                !PROJECT_ID.test(summary.projectId))
+                return { reason: "metamask_session_required" };
+            return { projectHash: sha256(summary.projectId) };
+        }
+        finally {
+            status.stdout.fill(0);
+        }
+    }
+    async read(requestId, projectHash, binding) {
+        return await readMetaMaskNativeServerRequest(requestId, projectHash, binding, this.client);
     }
 }
+/** The project id form the native transfer accepts from `mm auth status`. */
+const PROJECT_ID = /^[A-Za-z0-9._:-]{1,256}$/u;
 /** The session read's closed reasons with a cause of their own; any other reason there is `session_files`. */
 const SESSION_CAUSES = {
     mm_gasless_binding_changed: "session_binding", mm_gasless_session_unavailable: "session_signed_out",
@@ -59,10 +89,6 @@ export function metaMaskRevocationUnsentCause(submission) {
         return reason !== undefined && Object.hasOwn(SESSION_CAUSES, reason) ? SESSION_CAUSES[reason] : "session_files";
     }
     return d.stage === "launch" || d.stage === "sdk_load" || d.stage === "hydrate" || d.stage === "binding" ? d.stage : undefined;
-}
-/** The provider's request id stays private; its hash names it in output, as it has since 0.5.105. */
-export function metaMaskRevocationRequestIdHash(requestId) {
-    return sha256(`apn.metamask-revocation.request-id.v1\0${requestId}`);
 }
 /**
  * A hash with a live or settled status is acknowledged; a request still before its hash is pending (MetaMask may wait on
