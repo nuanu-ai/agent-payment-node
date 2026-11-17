@@ -556,12 +556,13 @@ minting a secret that would orphan those records and collide with the restored i
 
 APN never deletes a sealed MetaMask request reference (`metamask-gasless-request-references/`,
 `metamask-native-request-references/`, `provider-direct-request-references/`, and from 0.5.109
-`metamask-revocation-request-references/` for `apn gasless transfer revoke`), not even after its operation ends. A
-gasless prepare interrupted between its seal and its journal also leaves one that belongs to no operation. Each counts
-as sealed custody. So after the first MetaMask gasless, native or direct transfer or delegation disable that sealed a
-request ID, a lost wrapping secret makes every command listed above refuse with `APN_STATE_CORRUPT` /
-`wrapping_secret_missing`, also in a state root that holds no local wallet, where APN used to create a new secret. This
-fails closed. The owner has two options:
+`metamask-revocation-request-references/` for `apn gasless transfer revoke`), not even after its operation ends. The one
+exception is the seal of a disable request whose helper provably stopped before any network call: `revoke` removes it
+again at once. A gasless prepare interrupted between its seal and its journal also leaves one that belongs to no
+operation. Each counts as sealed custody. So after the first MetaMask gasless, native or direct transfer or delegation
+disable that sealed a request ID, a lost wrapping secret makes every command listed above refuse with
+`APN_STATE_CORRUPT` / `wrapping_secret_missing`, also in a state root that holds no local wallet, where APN used to
+create a new secret. This fails closed. The owner has two options:
 
 1. Restore the login Keychain item from a backup of the login Keychain (the restore step). Every sealed record opens
    again and nothing else changes.
