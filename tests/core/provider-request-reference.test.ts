@@ -157,12 +157,18 @@ test("the revoke lane keeps one record per request under its operation, never re
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("a revoke lane listing holds only the names the store writes; anything else refuses it, and only that lane lists", async (t) => {
+test("a revoke lane listing holds only the names the store writes; dot-files are no records, anything else refuses it", async (t) => {
   const root = await sandbox();
   try {
     const invalid = refused("APN_STATE_CORRUPT", "provider_request_reference_listing_invalid");
+    await t.test("a dot-file is not a record, as the wrapping-secret guard reads it", async () => {
+      const state = new StateStore(join(root, "dotfile")); await state.initialize();
+      const binding = bindingFor("metamask-revocation", "b".repeat(64), REVOKE_REQUEST);
+      await new EncryptedProviderRequestReferenceStore(state, new ReferenceTestSecret()).seal(binding, REVOKE_REQUEST);
+      await writeFile(join(revokeDirectory(state), ".DS_Store"), "", { mode: 0o600 });
+      assert.deepEqual(await listProviderRequestReferences(state, revokeScope), [binding.referenceHash]);
+    });
     const cases: ReadonlyArray<readonly [string, (directory: string, sealed: string) => Promise<unknown>]> = [
-      ["a dotfile", async directory => await writeFile(join(directory, ".DS_Store"), "", { mode: 0o600 })],
       ["another name", async directory => await writeFile(join(directory, "note.json"), "{}", { mode: 0o600 })],
       ["an upper-case hash", async directory => await writeFile(join(directory, `${"A".repeat(64)}.json`), "{}", { mode: 0o600 })],
       ["a directory", async directory => await mkdir(join(directory, `${"c".repeat(64)}.json`), { mode: 0o700 })],
@@ -196,5 +202,31 @@ test("the wrapping-secret guard reads the revoke lane one level deeper: an empty
     await new EncryptedProviderRequestReferenceStore(state, new ReferenceTestSecret()).seal(bindingFor("metamask-revocation", "b".repeat(64),
       REVOKE_REQUEST), REVOKE_REQUEST);
     assert.equal(await holdsSealedCustody(state), true, "a sealed request record counts");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a revoke lane record is discarded by its exact path only; the other lanes have no discard", async () => {
+  const root = await sandbox();
+  try {
+    const state = new StateStore(join(root, "state")); await state.initialize();
+    const store = new EncryptedProviderRequestReferenceStore(state, new ReferenceTestSecret());
+    const [gone, kept] = [REQUEST, REVOKE_REQUEST].map(id => bindingFor("metamask-revocation", "b".repeat(64), id)) as [ProviderRequestReferenceBinding, ProviderRequestReferenceBinding];
+    await store.seal(gone, REQUEST); await store.seal(kept, REVOKE_REQUEST);
+    for (const lane of LANES) await store.seal(bindingFor(lane), REQUEST);
+    const before = await stateFiles(state.root);
+    await store.discard(gone);
+    const after = await stateFiles(state.root);
+    assert.deepEqual([...before.keys()].filter(file => !after.has(file)), [join(revokeDirectory(state), `${gone.referenceHash}.json`)],
+      "exactly that one file went");
+    for (const [file, text] of after) assert.equal(before.get(file), text, "every other record is as it was");
+    assert.deepEqual(await listProviderRequestReferences(state, revokeScope), [kept.referenceHash]);
+    await assert.rejects(store.open(gone), refused("APN_STATE_CORRUPT", "provider_request_reference_unmatched"));
+    assert.equal(await store.open(kept), REVOKE_REQUEST);
+    await store.discard(gone);
+    assert.deepEqual(await listProviderRequestReferences(state, revokeScope), [kept.referenceHash], "an absent record stays absent");
+    for (const lane of LANES) {
+      await assert.rejects(store.discard(bindingFor(lane)), refused("APN_INTERNAL"), `${lane} records are never discarded`);
+      assert.equal(await store.open(bindingFor(lane)), REQUEST);
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

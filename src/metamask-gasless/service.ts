@@ -23,7 +23,7 @@ import { MetaMaskGaslessPreparation } from "./prepare.js";
 import { mmRegistry } from "./registry.js";
 import { mmFail } from "./reasons.js";
 import { mmChain } from "./validation.js";
-import { metaMaskRevocationRequestHashes, readMetaMaskRevocationRequests, type MetaMaskRevocationReadDependencies } from "./revocation/requests.js";
+import { openMetaMaskRevocationRequests, readMetaMaskRevocationRequests, type MetaMaskRevocationReadDependencies } from "./revocation/requests.js";
 import { revokeMetaMaskGasless, type MetaMaskRevocationDependencies } from "./revocation/service.js";
 import { mmSiblingsOutput, mmTransfersBeside } from "./siblings.js";
 import { canonicalProfile } from "../wallet-policy.js";
@@ -45,7 +45,8 @@ export interface MetaMaskGaslessDependencies {
   readonly revocation?: MetaMaskRevocationDependencies;
   /**
    * The sealed disable request ids and MetaMask's server read of each, for `operation resume` (revocation/requests.ts).
-   * Needed only when the operation holds a sealed disable request.
+   * Used only when the operation holds a sealed disable request; when it is absent then, resume reports so in
+   * `revocation_requests`.
    */
   readonly revocationReads?: MetaMaskRevocationReadDependencies;
 }
@@ -154,18 +155,18 @@ export class MetaMaskGaslessService {
   }
   /**
    * `operation resume`: the chain reads below, exactly as they are, then MetaMask's status of each disable request sealed
-   * for the operation (`revocation_requests`, present only when one is sealed). The sealed requests are listed first, so a
-   * listing APN never wrote refuses before anything is read; the requests are read after the chain, and nothing of them
-   * is written to the operation.
+   * for the operation (`revocation_requests`, present only when one is sealed or the lane cannot be listed). Under the
+   * operation lock, after the chain reads, the sealed requests are listed and their ids opened; MetaMask is read after the
+   * lock is released (those reads write nothing, and the seals are create-only). Nothing of them is written to the
+   * operation, and no failure of theirs fails the resume.
    */
   async resume(operationId: string, observationRpcEnv?: string) {
     const environmentName = observationRpcEnv === undefined ? undefined : mmObservationRpcEnv(observationRpcEnv);
-    return await this.locked(operationId, async op => {
-      const sealed = await metaMaskRevocationRequestHashes(this.context.state, op);
-      const reads = sealed.length === 0 ? undefined : this.revocationReads();
-      const result = await this.observeLocked(op, environmentName);
-      return reads === undefined ? result : { ...result, revocation_requests: await readMetaMaskRevocationRequests(reads, op, sealed) };
+    const { result, opened } = await this.locked(operationId, async op => {
+      const observed = await this.observeLocked(op, environmentName);
+      return { result: observed, opened: await openMetaMaskRevocationRequests(this.context.state, this.context.metaMaskGasless?.revocationReads, op) };
     });
+    return opened === undefined ? result : { ...result, revocation_requests: await readMetaMaskRevocationRequests(opened) };
   }
   /** The chain reads alone, as resume makes them; the observation an abandonment runs first. It opens no sealed id. */
   async observeChain(operationId: string) {
@@ -184,11 +185,6 @@ export class MetaMaskGaslessService {
     const factory = this.dependencies().observationRpcFor;
     if (factory === undefined) return mmFail("mm_gasless_rpc_binding");
     return await this.project(await this.observation({ rpc: factory(op.intent.request.chainId, environmentName), environmentName }).run(op));
-  }
-  private revocationReads(): MetaMaskRevocationReadDependencies {
-    const reads = this.dependencies().revocationReads;
-    if (reads === undefined) throw new ApnError("APN_INTERNAL", "The sealed disable request reader is unavailable.");
-    return reads;
   }
   /** The owner's on-chain disable of a disclosed delegation whose outcome is still unproved (no journal write). */
   async revoke(operationId: string) {

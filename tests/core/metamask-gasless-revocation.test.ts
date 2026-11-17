@@ -9,6 +9,7 @@ import { ApnCore } from "../../src/core.js";
 import { foregroundHandoffEnvelope } from "../../src/mcp-foreground-handoff.js";
 import { projectMcpForegroundHandoff } from "../../src/mcp-projection.js";
 import { MetaMaskGaslessRpc } from "../../src/metamask-gasless/chain/rpc.js";
+import type { MetaMaskServerTransactionInput } from "../../src/metamask-gasless/client/server-transaction.js";
 import { mmDispatchIntent } from "../../src/metamask-gasless/dispatch.js";
 import type { MetaMaskRevocationApprovalPort, MetaMaskRevocationSummary } from "../../src/metamask-gasless/revocation/consent.js";
 import { mmDisableCall } from "../../src/metamask-gasless/revocation/call.js";
@@ -16,6 +17,7 @@ import { metaMaskRevocationRequestIdHash } from "../../src/metamask-gasless/revo
 import type { MetaMaskRevocationSendInput, MetaMaskRevocationSubmission, MetaMaskRevocationWalletPort } from "../../src/metamask-gasless/revocation/wallet.js";
 import { mmRegistry } from "../../src/metamask-gasless/registry.js";
 import type { Hex } from "../../src/model.js";
+import { metaMaskServerTransaction } from "../../src/metamask-server-transaction.js";
 import { temporaryState } from "./helpers.js";
 import { mmFixture } from "./metamask-gasless-helpers.js";
 import { BASE_FEE, block, FakeRpcTransport, intent, now, RPC_URL, type Json } from "./metamask-gasless-rpc-fake.js";
@@ -31,15 +33,23 @@ class Approval implements MetaMaskRevocationApprovalPort {
   constructor(readonly answer = true) {}
   async confirm(summary: MetaMaskRevocationSummary) { this.seen.push(summary); return this.answer; }
 }
-/** The owner's wallet: the check, then the send, each recorded; every answer names the sent id's own hash. */
+/**
+ * The owner's wallet: the check builds the helper's request as the SDK wallet does, the send takes it; each is recorded,
+ * and every answer names the sent id's own hash.
+ */
 class Wallet implements MetaMaskRevocationWalletPort {
   readonly checked: MetaMaskRevocationSendInput[] = [];
-  readonly sent: MetaMaskRevocationSendInput[] = [];
+  readonly built: MetaMaskServerTransactionInput[] = [];
+  readonly sent: MetaMaskServerTransactionInput[] = [];
   constructor(readonly answer: Readonly<Record<string, unknown>> = { disposition: "pending" }) {}
-  async check(input: MetaMaskRevocationSendInput) { this.checked.push(input); }
-  async send(input: MetaMaskRevocationSendInput) {
-    this.sent.push(input);
-    return { ...this.answer, requestIdHash: metaMaskRevocationRequestIdHash(input.requestId) } as unknown as MetaMaskRevocationSubmission;
+  async check(input: MetaMaskRevocationSendInput) {
+    this.checked.push(input);
+    const request = metaMaskServerTransaction({ ...input, projectHash: null, expiresAt: new Date(Date.now() + 120_000).toISOString() });
+    this.built.push(request); return request;
+  }
+  async send(request: MetaMaskServerTransactionInput) {
+    this.sent.push(request);
+    return { ...this.answer, requestIdHash: metaMaskRevocationRequestIdHash(request.requestId) } as unknown as MetaMaskRevocationSubmission;
   }
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -104,12 +114,12 @@ test("Sei 7ca4e73c shape: the owner's wallet disables the delegation once, then 
   assert.equal(result.ok, true, JSON.stringify(result.error));
   const call = mmDisableCall(mmDispatchIntent(before)), chain = f.rpc.revocationChain as Json;
   assert.equal(approval.seen.length, 1); assert.equal(approval.seen[0]!.call.callHash, call.callHash);
-  const requestId = wallet.sent[0]?.requestId ?? "", hash = metaMaskRevocationRequestIdHash(requestId);
+  const requestId = wallet.checked[0]?.requestId ?? "", hash = metaMaskRevocationRequestIdHash(requestId);
   assert.match(requestId, UUID, "APN names the request id itself");
-  assert.deepEqual(wallet.sent, [{ requestId, chainId: 1329, from: f.binding.address, intent: `APN ${id}: disable delegation ${call.delegationHash}`,
+  assert.deepEqual(wallet.checked, [{ requestId, chainId: 1329, from: f.binding.address, intent: `APN ${id}: disable delegation ${call.delegationHash}`,
     payload: { to: call.to, data: call.data, value: "0x0", gas: "0xea60", nonce: "0x0", maxFeePerGas: "0x77359400",
       maxPriorityFeePerGas: "0xf4240" } }]);
-  assert.deepEqual(wallet.checked, wallet.sent, "the wallet checked the very request it then sent");
+  assert.equal(wallet.sent.length, 1); assert.equal(wallet.sent[0], wallet.built[0], "the send takes exactly the request the check built");
   assert.deepEqual((result.data as Json).submission, { disposition: "pending", requestIdHash: hash });
   assert.equal(JSON.stringify(result).includes(requestId), false, "the id itself is never shown");
   assert.equal((result.data as Json).maximum_native_cost_wei, chain.maximumNativeCostWei);

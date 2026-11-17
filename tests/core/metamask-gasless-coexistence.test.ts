@@ -7,7 +7,9 @@ import { mmActualGross } from "../../src/metamask-gasless/economics.js";
 import { MetaMaskGaslessOperationRepository } from "../../src/metamask-gasless/journal/repository.js";
 import type { MetaMaskGaslessOperationRecord } from "../../src/metamask-gasless/operation-model.js";
 import type { MetaMaskRevocationApprovalPort, MetaMaskRevocationSummary } from "../../src/metamask-gasless/revocation/consent.js";
+import type { MetaMaskServerTransactionInput } from "../../src/metamask-gasless/client/server-transaction.js";
 import type { MetaMaskRevocationSendInput, MetaMaskRevocationSubmission, MetaMaskRevocationWalletPort } from "../../src/metamask-gasless/revocation/wallet.js";
+import { metaMaskServerTransaction } from "../../src/metamask-server-transaction.js";
 import { evmClaim } from "../../src/operation-index/adapters/family-claims.js";
 import { admitOperation } from "../../src/operation-index/admission.js";
 import { OperationIndex } from "../../src/operation-index/index.js";
@@ -29,10 +31,12 @@ class Approval implements MetaMaskRevocationApprovalPort {
   async confirm(summary: MetaMaskRevocationSummary) { this.seen.push(summary); return true; }
 }
 class Wallet implements MetaMaskRevocationWalletPort {
-  readonly sent: MetaMaskRevocationSendInput[] = [];
-  async check(): Promise<void> {}
-  async send(input: MetaMaskRevocationSendInput): Promise<MetaMaskRevocationSubmission> {
-    this.sent.push(input); return { disposition: "pending", requestIdHash: "e".repeat(64) };
+  readonly sent: MetaMaskServerTransactionInput[] = [];
+  async check(input: MetaMaskRevocationSendInput): Promise<MetaMaskServerTransactionInput> {
+    return metaMaskServerTransaction({ ...input, projectHash: null, expiresAt: new Date(Date.now() + 120_000).toISOString() });
+  }
+  async send(request: MetaMaskServerTransactionInput): Promise<MetaMaskRevocationSubmission> {
+    this.sent.push(request); return { disposition: "pending", requestIdHash: "e".repeat(64) };
   }
 }
 

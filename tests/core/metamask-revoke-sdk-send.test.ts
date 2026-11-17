@@ -71,9 +71,9 @@ async function wallet(t: test.TestContext, server: Server, failure?: unknown, se
 }
 const input = (payload: Record<string, string> = PAYLOAD, requestId: string = randomUUID()): MetaMaskRevocationSendInput =>
   ({ requestId, chainId: 8453, from: OWNER, payload: payload as unknown as typeof PAYLOAD, intent: INTENT });
-/** The revoke's two steps around its seal: the check, then the send of the same request. */
+/** The revoke's two steps around its seal: the check builds the request, the send takes exactly that request. */
 async function send(w: MetaMaskSdkRevocationWallet, payload: Record<string, string> = PAYLOAD) {
-  const request = input(payload); await w.check(request); return await w.send(request);
+  return await w.send(await w.check(input(payload)));
 }
 /** 0.5.109: the provider request reference hash, written out independently; the id's seal is filed under it. */
 const hashOf = (requestId: string) => sha256(`provider-effect-reference\0metamask-agent-wallet\0${requestId}`);
@@ -87,12 +87,16 @@ test("the hash that names a disable request is the provider request reference ha
 });
 
 test("the disable is the request mm 6.1.5 sent for 0.5.107's payload, with APN's own id, in the session's own project", async (t) => {
-  const server = new Server(), { home, vendor, wallet: w } = await wallet(t, server);
+  const server = new Server(), { home, vendor, runs, wallet: w } = await wallet(t, server);
   const named = input();
-  await w.check(named);
+  const checked = await w.check(named);
   assert.deepEqual(vendor.calls, [["wallet", "address", "--chain-namespace", "evm", "--json"]], "the check only reads the selected wallet");
-  assert.equal(server.requests.length, 0, "the check sends nothing");
-  const submitted = await w.send(named);
+  assert.equal(runs(), 0, "the check starts no helper"); assert.equal(server.requests.length, 0, "the check sends nothing");
+  // The built request, with the send bound it was checked with; the send takes exactly this object.
+  assert.equal(checked.requestId, named.requestId); assert.equal(checked.projectHash, null); assert.equal(checked.intent, INTENT);
+  const bound = Date.parse(checked.expiresAt) - Date.now();
+  assert.ok(bound > 0 && bound <= 120_000, "the check names the send bound");
+  const submitted = await w.send(checked);
   assert.equal(vendor.calls.length, 1, "the send runs no mm child");
   assert.equal(server.requests.length, 1);
   const [request] = server.requests, requestId = server.requestId();

@@ -2,25 +2,28 @@
  * 0.5.109, QA's open item "Сохранение ID для revoke": `apn gasless transfer revoke` named its MetaMask request id, sent
  * it once and kept it nowhere, so after a `pending` or `unknown` answer nobody could read that request again. Now the id
  * is sealed (provider-request-reference-store.ts, lane `metamask-revocation`, one record per request) after the wallet's
- * own check and before the helper starts, and `operation resume` reads MetaMask's status of each sealed request by its
- * id, beside its unchanged chain reads. Status, receipts and abandonment never open a sealed id. The `mm` reads and the
- * helper are doubles; the store is the real one under a synthetic wrapping secret.
+ * own check and before the helper starts; a request whose helper provably stopped before any network call has its seal
+ * removed again. `operation resume` keeps its chain reads, then lists and opens the sealed ids under the operation lock
+ * and reads MetaMask's status of each by its id after the lock is released. Status, receipts and abandonment never open
+ * a sealed id. The `mm` reads and the helper are doubles; the store is the real one under a synthetic wrapping secret.
  */
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { rm, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { ApnCore } from "../../src/core.js";
 import { ApnError } from "../../src/errors.js";
 import { MetaMaskGaslessProviderClient } from "../../src/metamask-gasless/client/index.js";
+import type { MetaMaskServerTransactionInput } from "../../src/metamask-gasless/client/server-transaction.js";
 import type { MetaMaskRevocationApprovalPort, MetaMaskRevocationSummary } from "../../src/metamask-gasless/revocation/consent.js";
-import { metaMaskRevocationRequestIdHash, MM_REVOCATION_REQUEST_LIMIT } from "../../src/metamask-gasless/revocation/requests.js";
+import { metaMaskRevocationRequestIdHash, MM_REVOCATION_REQUEST_READ_LIMIT,
+  type MetaMaskRevocationReferencesPort } from "../../src/metamask-gasless/revocation/requests.js";
 import { MetaMaskSdkRevocationWallet, type MetaMaskRevocationSendInput, type MetaMaskRevocationSubmission,
   type MetaMaskRevocationWalletPort } from "../../src/metamask-gasless/revocation/wallet.js";
 import type { MetaMaskProcessRunnerPort } from "../../src/metamask-process-runner.js";
-import { listProviderRequestReferences, type ProviderRequestReferenceBinding,
-  type ProviderRequestReferencePort } from "../../src/provider-request-reference-store.js";
+import { metaMaskServerTransaction } from "../../src/metamask-server-transaction.js";
+import { listProviderRequestReferences, type ProviderRequestReferenceBinding } from "../../src/provider-request-reference-store.js";
 import { temporaryState } from "./helpers.js";
 import { mmFixture, mmTestWord } from "./metamask-gasless-helpers.js";
 import type { Json } from "./metamask-gasless-rpc-fake.js";
@@ -29,29 +32,44 @@ import { flipped, rewrite } from "./provider-request-reference-helpers.js";
 type Fixture = Awaited<ReturnType<typeof mmFixture>>;
 
 /** The real store, with every call written to `log` and a refusal at `ready` or `seal` when set. */
-class LoggedReferences implements ProviderRequestReferencePort {
+class LoggedReferences implements MetaMaskRevocationReferencesPort {
   failReady: Error | undefined;
   failSeal: Error | undefined;
-  constructor(readonly inner: ProviderRequestReferencePort, readonly log: string[]) {}
+  constructor(readonly inner: MetaMaskRevocationReferencesPort, readonly log: string[]) {}
   async ready() { this.log.push("ready"); if (this.failReady !== undefined) throw this.failReady; await this.inner.ready(); }
   async seal(binding: ProviderRequestReferenceBinding, reference: string) {
     this.log.push("seal"); if (this.failSeal !== undefined) throw this.failSeal; await this.inner.seal(binding, reference);
   }
   async open(binding: ProviderRequestReferenceBinding) { this.log.push("open"); return await this.inner.open(binding); }
+  async discard(binding: ProviderRequestReferenceBinding) { this.log.push("discard"); await this.inner.discard(binding); }
 }
 class Approval implements MetaMaskRevocationApprovalPort {
   readonly seen: MetaMaskRevocationSummary[] = [];
   constructor(readonly log: string[]) {}
   async confirm(summary: MetaMaskRevocationSummary) { this.log.push("consent"); this.seen.push(summary); return true; }
 }
+/** The owner's wallet: the check builds the helper's request as the SDK wallet does; the send answers `answer`. */
 class Wallet implements MetaMaskRevocationWalletPort {
-  readonly sent: MetaMaskRevocationSendInput[] = [];
-  constructor(readonly log: string[], readonly refusal?: ApnError) {}
-  async check() { this.log.push("check"); if (this.refusal !== undefined) throw this.refusal; }
-  async send(input: MetaMaskRevocationSendInput): Promise<MetaMaskRevocationSubmission> {
-    this.log.push("send"); this.sent.push(input); return { disposition: "pending", requestIdHash: metaMaskRevocationRequestIdHash(input.requestId) };
+  readonly sent: MetaMaskServerTransactionInput[] = [];
+  constructor(readonly log: string[], readonly refusal?: ApnError,
+    readonly answer: Readonly<Record<string, unknown>> = { disposition: "pending" }) {}
+  async check(input: MetaMaskRevocationSendInput) {
+    this.log.push("check"); if (this.refusal !== undefined) throw this.refusal;
+    return metaMaskServerTransaction({ ...input, projectHash: null, expiresAt: new Date(Date.now() + 120_000).toISOString() });
+  }
+  async send(request: MetaMaskServerTransactionInput): Promise<MetaMaskRevocationSubmission> {
+    this.log.push("send"); this.sent.push(request);
+    return { ...this.answer, requestIdHash: metaMaskRevocationRequestIdHash(request.requestId) } as unknown as MetaMaskRevocationSubmission;
   }
 }
+/** The helper's own closed facts for a stop before any network call: the session read refused (session_binding). */
+const UNSENT = { disposition: "unknown", reason: "provider_handoff_outcome_unknown", helperFailure: "mm_gasless_binding_changed",
+  submitDiagnostic: { mode: "submit", stage: "private_state", post: "not_reached", httpStatus: null, check: "unclassified", providerError: null,
+    providerStatus: null, responseTx: null } } as const;
+/** A POST that left and got no usable answer: the request may have reached MetaMask. */
+const MAY_HAVE_LEFT = { disposition: "unknown", reason: "provider_handoff_outcome_unknown", helperFailure: "mm_gasless_submit_unknown",
+  submitDiagnostic: { mode: "submit", stage: "post", post: "sent", httpStatus: null, check: "no_answer", providerError: null,
+    providerStatus: null, responseTx: null } } as const;
 
 /** A dispatched transfer whose submit response was lost: only its outcome is unknown, so its delegation may be disabled. */
 async function unresolved(f: Fixture): Promise<string> {
@@ -62,19 +80,28 @@ async function unresolved(f: Fixture): Promise<string> {
   assert.equal((await f.record(id)).state, "unknown_finality");
   return id;
 }
+/** QA's Sei shape: MetaMask closed the relay request, so resume proves `revoked_unused` once the delegation is disabled. */
+async function providerFailed(f: Fixture): Promise<string> {
+  const { id } = await f.prepare();
+  f.rpc.phase = "pending"; f.rpc.candidate = null; f.provider.status = "failed"; f.provider.txHash = null;
+  assert.equal((await f.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+  return id;
+}
 const scope = (f: Fixture, id: string) => ({ lane: "metamask-revocation", profileHash: f.state.profileHash(f.profile), operationId: id }) as const;
 const binding = (f: Fixture, id: string, requestId: string): ProviderRequestReferenceBinding =>
   ({ ...scope(f, id), providerId: "metamask-agent-wallet", referenceHash: metaMaskRevocationRequestIdHash(requestId) });
 const directory = (f: Fixture, id: string) => join(f.state.root, "metamask-revocation-request-references", f.state.profileHash(f.profile), id);
+const listed = async (f: Fixture, id: string) => await listProviderRequestReferences(f.state, scope(f, id));
 /** Seals revoke requests as earlier revokes of the operation left them; returns their ids. */
 async function sealed(f: Fixture, id: string, count: number): Promise<string[]> {
   const ids = Array.from({ length: count }, () => randomUUID());
   for (const requestId of ids) await f.providerReferences.seal(binding(f, id, requestId), requestId);
   return ids;
 }
-const revoking = (f: Fixture, approval: Approval, wallet: MetaMaskRevocationWalletPort, references: ProviderRequestReferencePort) =>
+const revoking = (f: Fixture, approval: Approval, wallet: MetaMaskRevocationWalletPort, references: MetaMaskRevocationReferencesPort) =>
   new ApnCore({ state: f.state, clock: f.clock, wait: f.wait, metaMaskGasless: { ...f.dependencies, revocation: { approval, wallet, references } } });
 const revoke = { command: "gasless.transfer.revoke" } as const;
+const resume = { command: "operation.resume" } as const;
 
 test("the id is sealed after consent and the wallet's check and before the send; the output names its hash", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
@@ -85,16 +112,16 @@ test("the id is sealed after consent and the wallet's check and before the send;
   assert.deepEqual(log, ["ready", "consent", "check", "seal", "send"]);
   const requestId = wallet.sent[0]!.requestId, hash = metaMaskRevocationRequestIdHash(requestId);
   assert.deepEqual((result.data as Json).submission, { disposition: "pending", requestIdHash: hash });
-  assert.deepEqual(await listProviderRequestReferences(f.state, scope(f, id)), [hash]);
+  assert.deepEqual(await listed(f, id), [hash]);
   assert.equal(await f.providerReferences.open(binding(f, id, requestId)), requestId);
   // Each revoke is a new request with a new record; the first stays as it was.
   const again = await revoking(f, new Approval(log), new Wallet(log), references).execute({ ...revoke, operationId: id });
   assert.equal(again.ok, true, JSON.stringify(again.error));
-  assert.equal((await listProviderRequestReferences(f.state, scope(f, id))).length, 2);
+  assert.equal((await listed(f, id)).length, 2);
   assert.equal(await f.providerReferences.open(binding(f, id, requestId)), requestId);
 });
 
-test("with the real wallet the sealed record is on disk before the helper starts; the selected-wallet check runs first", async (t) => {
+test("with the real wallet the sealed record is on disk before the helper starts; a send that may have left keeps it", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = await mmFixture(temporary.root), id = await unresolved(f), log: string[] = [];
   let seenByHelper: readonly string[] | undefined, sentId: string | undefined;
@@ -102,18 +129,39 @@ test("with the real wallet the sealed record is on disk before the helper starts
     log.push(`mm ${argv.slice(0, 2).join(" ")}`);
     return { exitCode: 0, stdout: Buffer.from(JSON.stringify({ ok: true, data: { mode: "server", chainNamespace: "evm", address: f.binding.address } })) };
   }, async runForeground() { throw new Error("TEST no foreground mm"); } };
+  // A runner failure after the helper started: the POST may have left, so the answer is unknown and the seal stays.
   const client = new MetaMaskGaslessProviderClient({ environment: {}, clock: f.clock, runner: { async run(request) {
     log.push("helper");
     if (request.mode !== "submitTransaction") throw new Error(`TEST unexpected helper mode ${request.mode}`);
-    sentId = request.transaction.requestId; seenByHelper = await listProviderRequestReferences(f.state, scope(f, id));
+    sentId = request.transaction.requestId; seenByHelper = await listed(f, id);
     throw new Error("TEST helper stops here");
   } } });
   const result = await revoking(f, new Approval(log), new MetaMaskSdkRevocationWallet(mm, client), new LoggedReferences(f.providerReferences, log))
     .execute({ ...revoke, operationId: id });
   assert.equal(result.ok, true, JSON.stringify(result.error));
   assert.deepEqual(log, ["ready", "consent", "mm wallet address", "seal", "helper"]);
-  assert.deepEqual(seenByHelper, [metaMaskRevocationRequestIdHash(sentId!)], "the helper started only after this very request was sealed");
-  assert.equal((result.data as Json).submission.requestIdHash, metaMaskRevocationRequestIdHash(sentId!));
+  const hash = metaMaskRevocationRequestIdHash(sentId!);
+  assert.deepEqual(seenByHelper, [hash], "the helper started only after this very request was sealed");
+  assert.deepEqual((result.data as Json).submission.disposition, "unknown"); assert.equal((result.data as Json).submission.requestIdHash, hash);
+  assert.deepEqual(await listed(f, id), [hash], "a request that may have reached MetaMask keeps its seal");
+});
+
+test("a helper that provably stopped before any network call leaves no seal; one that may have sent keeps it", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await mmFixture(temporary.root), id = await unresolved(f), log: string[] = [];
+  const references = new LoggedReferences(f.providerReferences, log), stopped = new Wallet(log, undefined, UNSENT);
+  const result = await revoking(f, new Approval(log), stopped, references).execute({ ...revoke, operationId: id });
+  assert.equal(result.ok, true, JSON.stringify(result.error));
+  assert.deepEqual(log, ["ready", "consent", "check", "seal", "send", "discard"]);
+  assert.deepEqual(await listed(f, id), [], "nothing reached MetaMask, so there is nothing to read again");
+  assert.equal(result.next_actions.some(action => action.includes("revocation_requests")), false, "no read of it is offered");
+  assert.match(result.next_actions[0]!, /^The MetaMask helper stopped before any network call: /u);
+  const left = new Wallet([], undefined, MAY_HAVE_LEFT);
+  const unknown = await revoking(f, new Approval([]), left, f.providerReferences).execute({ ...revoke, operationId: id });
+  assert.equal(unknown.ok, true, JSON.stringify(unknown.error));
+  const hash = metaMaskRevocationRequestIdHash(left.sent[0]!.requestId);
+  assert.deepEqual(await listed(f, id), [hash]);
+  assert.equal(unknown.next_actions.some(action => action.includes(`request_id_hash ${hash}`)), true, "its read is offered");
 });
 
 test("a seal that fails, or a selected-wallet check that refuses, sends nothing; the check refusal seals nothing", async (t) => {
@@ -133,10 +181,10 @@ test("a seal that fails, or a selected-wallet check that refuses, sends nothing;
     .execute({ ...revoke, operationId: id });
   assert.equal(drifted.error?.details?.reason, "mm_revoke_wallet_mismatch");
   assert.deepEqual(checkLog, ["ready", "consent", "check"]); assert.equal(refusing.sent.length, 0);
-  assert.deepEqual(await listProviderRequestReferences(f.state, scope(f, id)), [], "no id is sealed without a send after it");
+  assert.deepEqual(await listed(f, id), [], "no id is sealed without a send after it");
 });
 
-test("a refusing Keychain or a full request list stops the revoke before the chain is priced and before consent", async (t) => {
+test("a refusing Keychain stops the revoke before consent; any number of sealed requests never does", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = await mmFixture(temporary.root), id = await unresolved(f), log: string[] = [];
   const locked = new LoggedReferences(f.providerReferences, log), approval = new Approval(log), wallet = new Wallet(log);
@@ -144,12 +192,11 @@ test("a refusing Keychain or a full request list stops the revoke before the cha
   const refused = await revoking(f, approval, wallet, locked).execute({ ...revoke, operationId: id });
   assert.equal(refused.error?.code, "APN_NATIVE_REJECTED"); assert.deepEqual(log, ["ready"]);
   assert.equal(f.rpc.calls.includes("revocation"), false); assert.equal(approval.seen.length, 0);
-  await sealed(f, id, MM_REVOCATION_REQUEST_LIMIT);
-  const full = await revoking(f, approval, wallet, new LoggedReferences(f.providerReferences, log)).execute({ ...revoke, operationId: id });
-  assert.equal(full.error?.code, "APN_OPERATION_BLOCKED"); assert.equal(full.error?.details?.reason, "mm_revoke_request_limit");
-  assert.deepEqual(full.next_actions, [`apn operation resume --operation ${id}`]);
-  assert.deepEqual(log, ["ready"], "nothing was read from the Keychain or the chain, and nothing was asked");
-  assert.equal(f.rpc.calls.includes("revocation"), false); assert.equal(wallet.sent.length, 0);
+  // Revoke has no count limit: the 17th disable proceeds as the first did.
+  await sealed(f, id, MM_REVOCATION_REQUEST_READ_LIMIT);
+  const seventeenth = await revoking(f, new Approval([]), new Wallet([]), f.providerReferences).execute({ ...revoke, operationId: id });
+  assert.equal(seventeenth.ok, true, JSON.stringify(seventeenth.error));
+  assert.equal((await listed(f, id)).length, MM_REVOCATION_REQUEST_READ_LIMIT + 1);
 });
 
 test("resume reports MetaMask's status of each sealed request beside its chain reads; one failed read is that entry's own reason", async (t) => {
@@ -161,7 +208,7 @@ test("resume reports MetaMask's status of each sealed request beside its chain r
   f.revocationReader.answers.set(lost, new ApnError("APN_PROVIDER_UNAVAILABLE", "synthetic helper failure", { reason: "mm_gasless_provider_unavailable" }));
   await rewrite(join(directory(f, id), `${metaMaskRevocationRequestIdHash(damaged)}.json`),
     v => ({ ...v, cipher: { ...v.cipher, ciphertext: flipped(v.cipher.ciphertext) } }));
-  const resumed = await f.core.execute({ command: "operation.resume", operationId: id });
+  const resumed = await f.core.execute({ ...resume, operationId: id });
   assert.equal(resumed.ok, true, JSON.stringify(resumed.error));
   const empty = { status: null, transaction_hash: null, mfa: null, response_hash: null, check: null };
   const expected = new Map([
@@ -178,30 +225,78 @@ test("resume reports MetaMask's status of each sealed request beside its chain r
   assert.equal(JSON.stringify(resumed).includes(read), false, "no sealed id is shown");
   const record = JSON.stringify(await f.record(id));
   assert.equal(record.includes("revocation") || [...expected.keys()].some(hash => record.includes(hash)), false, "nothing of the reads is written");
-  // Without a session project, every entry carries that reason and no id is opened or read.
+  // Without a session project, every entry carries that reason and no request is read.
   f.revocationReader.project = { reason: "metamask_session_required" };
-  const reads = f.revocationReader.reads.length, signedOut = await f.core.execute({ command: "operation.resume", operationId: id });
+  const reads = f.revocationReader.reads.length, signedOut = await f.core.execute({ ...resume, operationId: id });
   assert.equal(signedOut.ok, true, JSON.stringify(signedOut.error));
-  assert.deepEqual(((signedOut.operation as Json).revocation_requests as Json[]).map(entry => [entry.outcome, entry.reason]),
-    [["refused", "metamask_session_required"], ["refused", "metamask_session_required"], ["refused", "metamask_session_required"]]);
+  assert.deepEqual(((signedOut.operation as Json).revocation_requests as Json[]).map(entry => [entry.outcome, entry.reason]).sort(),
+    [["refused", "metamask_session_required"], ["refused", "metamask_session_required"], ["refused", "provider_request_reference_unmatched"]]);
   assert.equal(f.revocationReader.reads.length, reads);
 });
 
-test("a revoke lane APN never wrote refuses resume before any read; status still answers", async (t) => {
+test("resume reads at most 16 requests and reports the rest; nothing sealed means no field; a dot-file is no request", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = await mmFixture(temporary.root), id = await unresolved(f);
+  const plain = await f.core.execute({ ...resume, operationId: id });
+  assert.equal(plain.ok, true, JSON.stringify(plain.error));
+  assert.equal(Object.hasOwn(plain.operation as Json, "revocation_requests"), false, "nothing sealed: no field");
+  await sealed(f, id, MM_REVOCATION_REQUEST_READ_LIMIT + 2);
+  await writeFile(join(directory(f, id), ".DS_Store"), "", { mode: 0o600 });
+  const resumed = await f.core.execute({ ...resume, operationId: id });
+  assert.equal(resumed.ok, true, JSON.stringify(resumed.error));
+  const entries = (resumed.operation as Json).revocation_requests as Json[], hashes = await listed(f, id);
+  assert.deepEqual(entries.map(entry => entry.request_id_hash), hashes, "every sealed request, in hash order; the dot-file is none");
+  assert.deepEqual(entries.slice(0, MM_REVOCATION_REQUEST_READ_LIMIT).map(entry => entry.outcome),
+    Array(MM_REVOCATION_REQUEST_READ_LIMIT).fill("not_found"));
+  assert.deepEqual(entries.slice(MM_REVOCATION_REQUEST_READ_LIMIT), hashes.slice(MM_REVOCATION_REQUEST_READ_LIMIT).map(hash => ({
+    request_id_hash: hash, outcome: "refused", status: null, transaction_hash: null, mfa: null, response_hash: null,
+    reason: "revocation_request_read_limit", check: null })));
+  assert.equal(f.revocationReader.reads.length, MM_REVOCATION_REQUEST_READ_LIMIT, "the requests past the limit are not read");
+});
+
+test("a lane entry APN never wrote, or no reader, is one refused entry; the chain still proves revoked_unused", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await mmFixture(temporary.root, 1329), id = await providerFailed(f);
   await sealed(f, id, 1);
   await writeFile(join(directory(f, id), "note.json"), "{}", { mode: 0o600 });
-  const calls = f.rpc.calls.length;
-  const foreign = await f.core.execute({ command: "operation.resume", operationId: id });
-  assert.equal(foreign.error?.code, "APN_STATE_CORRUPT"); assert.equal(foreign.error?.details?.reason, "provider_request_reference_listing_invalid");
-  assert.equal(f.rpc.calls.length, calls, "listed before the chain was read"); assert.equal(f.revocationReader.sessionReads, 0);
-  assert.equal((await f.core.execute({ command: "operation.status", operationId: id })).ok, true);
-  await rm(join(directory(f, id), "note.json"));
-  await sealed(f, id, MM_REVOCATION_REQUEST_LIMIT);
-  const over = await f.core.execute({ command: "operation.resume", operationId: id });
-  assert.equal(over.error?.code, "APN_STATE_CORRUPT"); assert.equal(over.error?.details?.reason, "mm_revoke_request_limit_exceeded");
-  assert.equal(f.rpc.calls.length, calls); assert.equal((await f.core.execute({ command: "operation.status", operationId: id })).ok, true);
+  f.rpc.phase = "disabled";
+  const proved = await f.core.execute({ ...resume, operationId: id });
+  assert.equal(proved.ok, true, JSON.stringify(proved.error));
+  assert.equal((proved.operation as Json).state, "revoked_unused", "the listing never blocks the chain proof");
+  assert.deepEqual((proved.operation as Json).revocation_requests, [{ request_id_hash: null, outcome: "refused", status: null,
+    transaction_hash: null, mfa: null, response_hash: null, reason: "provider_request_reference_listing_invalid", check: null }]);
+  assert.equal(f.revocationReader.sessionReads, 0);
+  const other = await temporaryState(); t.after(other.cleanup);
+  const g = await mmFixture(other.root), unwired = await unresolved(g);
+  await sealed(g, unwired, 1);
+  const { revocationReads: _reads, ...dependencies } = g.dependencies;
+  const answered = await new ApnCore({ state: g.state, clock: g.clock, wait: g.wait, metaMaskGasless: dependencies })
+    .execute({ ...resume, operationId: unwired });
+  assert.equal(answered.ok, true, JSON.stringify(answered.error));
+  assert.deepEqual(((answered.operation as Json).revocation_requests as Json[]).map(entry => [entry.request_id_hash, entry.reason]),
+    [[null, "revocation_request_reader_unavailable"]]);
+});
+
+test("resume opens the sealed ids under the operation lock and reads MetaMask only after it is released", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await mmFixture(temporary.root), id = await unresolved(f);
+  await sealed(f, id, 2);
+  // Counts the locks the command holds on this state; the reads must see none.
+  let held = 0;
+  const state = f.state as unknown as { withLocks: (keys: readonly string[], action: () => Promise<unknown>, options?: { readonly waitMs?: number }) => Promise<unknown> };
+  const original = state.withLocks.bind(f.state);
+  state.withLocks = async (keys, action, options) => await original(keys, async () => {
+    held += 1; try { return await action(); } finally { held -= 1; }
+  }, options);
+  const seen: string[] = [];
+  const reader = { sessionProject: async () => { seen.push(`project ${held}`); return { projectHash: "c".repeat(64) }; },
+    read: async () => { seen.push(`read ${held}`); return { outcome: "not_found" } as const; } };
+  const references = { ready: async () => {}, seal: async () => assert.fail("resume seals nothing"), discard: async () => assert.fail("resume discards nothing"),
+    open: async (sealedBinding: ProviderRequestReferenceBinding) => { seen.push(`open ${held}`); return await f.providerReferences.open(sealedBinding); } };
+  const resumed = await new ApnCore({ state: f.state, clock: f.clock, wait: f.wait,
+    metaMaskGasless: { ...f.dependencies, revocationReads: { references, reader } } }).execute({ ...resume, operationId: id });
+  assert.equal(resumed.ok, true, JSON.stringify(resumed.error));
+  assert.deepEqual(seen, ["open 1", "open 1", "project 0", "read 0", "read 0"]);
 });
 
 test("status, receipts and abandonment never open a sealed revoke request id; resume does", async (t) => {
@@ -221,7 +316,7 @@ test("status, receipts and abandonment never open a sealed revoke request id; re
   assert.deepEqual(log, [], "neither status, a receipt nor the observation an abandonment runs first opens a sealed id");
   assert.equal(f.revocationReader.sessionReads, 0);
   // An abandoned dispatch is still observed by resume, which reads each sealed request again.
-  const resumed = await core().execute({ command: "operation.resume", operationId: id });
+  const resumed = await core().execute({ ...resume, operationId: id });
   assert.equal(resumed.ok, true, JSON.stringify(resumed.error));
   assert.equal(((resumed.operation as Json).revocation_requests as Json[]).length, 2); assert.deepEqual(log, ["open", "open"]);
   assert.equal(f.revocationReader.sessionReads, 1);

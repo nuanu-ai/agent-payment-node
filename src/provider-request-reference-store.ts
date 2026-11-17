@@ -12,8 +12,8 @@ const RECORD_VERSION = "apn.provider-request-reference.v1" as const;
  * Each lane's own directory. The MetaMask native transfers and the provider direct transfers (`apn pay transfer`) keep one
  * sealed record per operation, `<directory>/<profile hash>/<operation id>.json`. The MetaMask gasless delegation disable
  * (`apn gasless transfer revoke`) sends a new request on every run, so its lane keeps one sealed record per request,
- * `<directory>/<profile hash>/<operation id>/<reference hash>.json`, never replaced. Every lane counts for the
- * wrapping-secret guard (wrapping-secret-custody.ts).
+ * `<directory>/<profile hash>/<operation id>/<reference hash>.json`, never replaced, and removed (`discard`) only for a
+ * request that provably never left the machine. Every lane counts for the wrapping-secret guard (wrapping-secret-custody.ts).
  */
 export const PROVIDER_REQUEST_REFERENCE_DIRECTORIES = {
   "metamask-native": "metamask-native-request-references",
@@ -66,6 +66,14 @@ export interface ProviderRequestReferencePort {
   /** The sealed id, or a precise refusal: a missing, damaged or foreign record, another secret, or a refused Keychain. */
   open(binding: ProviderRequestReferenceBinding): Promise<string>;
 }
+/**
+ * A per-request lane only: removes the one record of a request that provably never left the machine, at the exact path
+ * its binding names. Never a directory and never another record; an absent record is left absent. The caller holds the
+ * operation lock under which it sealed that record.
+ */
+export interface ProviderRequestReferenceDiscardPort {
+  discard(binding: ProviderRequestReferenceBinding): Promise<void>;
+}
 
 interface ReferenceEnvelope {
   readonly schemaVersion: typeof ENVELOPE_VERSION;
@@ -95,7 +103,7 @@ function envelopeSpec(binding: ProviderRequestReferenceBinding): EnvelopeSpec<Re
  * before the request is sent, and its output names the hash. An id is opened only to read that request again (observe
  * and resume). Status, receipts and abandonment never open it.
  */
-export class EncryptedProviderRequestReferenceStore implements ProviderRequestReferencePort {
+export class EncryptedProviderRequestReferenceStore implements ProviderRequestReferencePort, ProviderRequestReferenceDiscardPort {
   private readonly files: ReferenceFiles;
   constructor(state: { readonly root: string }, private readonly wrappingSecret: WrappingSecretPort) {
     this.files = new ReferenceFiles(state.root);
@@ -133,6 +141,12 @@ export class EncryptedProviderRequestReferenceStore implements ProviderRequestRe
     try { return await openNested(wrapping, envelopeSpec(binding), envelope, plaintext => referenceOf(plaintext, binding)); }
     finally { wrapping.fill(0); }
   }
+
+  async discard(bindingInput: ProviderRequestReferenceBinding): Promise<void> {
+    const binding = referenceBinding(bindingInput);
+    if (!PER_REQUEST_LANES.has(binding.lane)) internal();
+    await this.files.remove(binding);
+  }
 }
 
 class ReferenceFiles extends SecureStateStore {
@@ -145,6 +159,11 @@ class ReferenceFiles extends SecureStateStore {
     const path = this.path(binding);
     await this.ensureDirectory(dirname(path));
     await this.writeJson(path, envelope, PER_REQUEST_LANES.has(binding.lane));
+  }
+
+  /** The protected delete of exactly this record's file (a regular, owner-only, single-link file); its directory stays. */
+  async remove(binding: ProviderRequestReferenceBinding): Promise<void> {
+    await this.removeFile(this.path(binding));
   }
 
   private path(binding: ProviderRequestReferenceBinding): string {
@@ -168,10 +187,11 @@ const SEALED_FILE = /^[a-f0-9]{64}\.json$/u;
 /**
  * The reference hashes sealed for one operation in a per-request lane, in hash order. A directory listing of the state
  * root the store writes to: no Keychain read, nothing opened. An absent directory holds none; a directory that is not
- * the owner's own refuses (`APN_STATE_SECURITY`), as every state read does. Atomic-write stages are never records. Every
- * other entry must be a regular file named `<64 hex>.json`, the only name the store writes; anything else (another
- * name, a dotfile, a link, a directory) refuses the whole listing with `APN_STATE_CORRUPT /
- * provider_request_reference_listing_invalid`, and is never skipped.
+ * the owner's own refuses (`APN_STATE_SECURITY`), as every state read does. Atomic-write stages and every other name
+ * that starts with a dot (Finder's .DS_Store) are not records, as the wrapping-secret guard reads them. Every other
+ * entry must be a regular file named `<64 hex>.json`, the only name the store writes; anything else (another name, a
+ * link, a directory) refuses the whole listing with `APN_STATE_CORRUPT / provider_request_reference_listing_invalid`,
+ * and is never skipped.
  */
 export async function listProviderRequestReferences(state: Pick<SecureStateStore, "recordEntries">,
   scopeInput: ProviderRequestReferenceScope): Promise<readonly string[]> {
@@ -179,6 +199,7 @@ export async function listProviderRequestReferences(state: Pick<SecureStateStore
   const directory = join(PROVIDER_REQUEST_REFERENCE_DIRECTORIES[scope.lane], scope.profileHash, scope.operationId);
   const hashes: string[] = [];
   for (const entry of await state.recordEntries(directory)) {
+    if (entry.name.startsWith(".")) continue;
     if (!entry.isFile() || !SEALED_FILE.test(entry.name)) {
       throw new ApnError("APN_STATE_CORRUPT", `The sealed provider request references of this operation (${directory}) hold an entry APN never writes.`,
         { reason: "provider_request_reference_listing_invalid", operationId: scope.operationId,

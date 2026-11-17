@@ -36,13 +36,16 @@ export interface MetaMaskRevocationSendInput {
 }
 /**
  * The owner's wallet in two steps around the seal of the request id: `check` before it (nothing is sealed when it
- * refuses), `send` after it.
+ * refuses), `send` after it, of exactly the request `check` built.
  */
 export interface MetaMaskRevocationWalletPort {
-  /** The selected-wallet check and the request built and checked as the send builds it; nothing is sent. */
-  check(input: MetaMaskRevocationSendInput): Promise<void>;
+  /**
+   * The selected-wallet check, then the helper's request for `input` built and checked, with its send bound; nothing is
+   * sent. The send takes exactly this object, so nothing is built again after the seal.
+   */
+  check(input: MetaMaskRevocationSendInput): Promise<MetaMaskServerTransactionInput>;
   /** Sends the checked request once under its sealed id; never sends it again. */
-  send(input: MetaMaskRevocationSendInput): Promise<MetaMaskRevocationSubmission>;
+  send(request: MetaMaskServerTransactionInput): Promise<MetaMaskRevocationSubmission>;
 }
 /** The revoke's send bound, as the gasless relay submit's: the helper is killed after it and the outcome stays unknown. */
 const SUBMIT_TIMEOUT_MS = 120_000;
@@ -60,7 +63,7 @@ const SUBMIT_TIMEOUT_MS = 120_000;
 export class MetaMaskSdkRevocationWallet implements MetaMaskRevocationWalletPort, MetaMaskRevocationReadPort {
   constructor(private readonly runner: MetaMaskProcessRunnerPort = new NodeMetaMaskProcessRunner(),
     private readonly client: MetaMaskServerTransactionPort & MetaMaskNativeServerRequestPort = new MetaMaskGaslessProviderClient()) {}
-  async check(input: MetaMaskRevocationSendInput): Promise<void> {
+  async check(input: MetaMaskRevocationSendInput): Promise<MetaMaskServerTransactionInput> {
     const selected = await this.runner.runJson(["wallet", "address", "--chain-namespace", "evm", "--json"]);
     try {
       const parsed = parseMetaMaskProcessOutput(selected.stdout), data = parsed?.envelope?.data;
@@ -70,12 +73,14 @@ export class MetaMaskSdkRevocationWallet implements MetaMaskRevocationWalletPort
           { reason: "mm_revoke_wallet_mismatch" });
       }
     } finally { selected.stdout.fill(0); }
-    // Built and checked before the id is sealed: a malformed request refuses with nothing sealed or sent.
-    revocationTransaction(input);
+    // Built and checked before the id is sealed: a malformed request refuses with nothing sealed or sent. The helper lets
+    // the POST leave only before `expiresAt`, its own kill bound from now.
+    return metaMaskServerTransaction({ requestId: input.requestId, projectHash: null, from: input.from, chainId: input.chainId,
+      payload: input.payload, intent: input.intent, expiresAt: new Date(Date.now() + SUBMIT_TIMEOUT_MS).toISOString() });
   }
-  async send(input: MetaMaskRevocationSendInput): Promise<MetaMaskRevocationSubmission> {
-    return revocationSubmission(await sendMetaMaskServerTransaction(revocationTransaction(input), SUBMIT_TIMEOUT_MS, this.client),
-      metaMaskRevocationRequestIdHash(input.requestId));
+  async send(request: MetaMaskServerTransactionInput): Promise<MetaMaskRevocationSubmission> {
+    return revocationSubmission(await sendMetaMaskServerTransaction(request, SUBMIT_TIMEOUT_MS, this.client),
+      metaMaskRevocationRequestIdHash(request.requestId));
   }
   async sessionProject(): Promise<MetaMaskRevocationSessionProject> {
     let status: MetaMaskProcessResult;
@@ -96,12 +101,6 @@ export class MetaMaskSdkRevocationWallet implements MetaMaskRevocationWalletPort
 }
 /** The project id form the native transfer accepts from `mm auth status`. */
 const PROJECT_ID = /^[A-Za-z0-9._:-]{1,256}$/u;
-
-/** The helper's request; the helper lets the POST leave only within its own kill bound. */
-function revocationTransaction(input: MetaMaskRevocationSendInput): MetaMaskServerTransactionInput {
-  return metaMaskServerTransaction({ requestId: input.requestId, projectHash: null, from: input.from, chainId: input.chainId,
-    payload: input.payload, intent: input.intent, expiresAt: new Date(Date.now() + SUBMIT_TIMEOUT_MS).toISOString() });
-}
 
 /**
  * Why the disable never reached the network, when the helper's own closed facts say so: its deadline or clock check right
