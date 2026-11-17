@@ -1013,7 +1013,8 @@ APN cannot read the requests they sent again.
 
 - `acknowledged`: with the transaction hash.
 - `pending`: MetaMask waits on your MFA, or is still evaluating, signing or broadcasting. The next actions also name
-  `operation resume` as the way to read this request's MetaMask status again, by its `request_id_hash`.
+  `operation resume` as the way to read this request's MetaMask status again, by its `request_id_hash`. Resume reads
+  the 16 newest disable requests of an operation and reports older ones as not read.
 - `unknown`: not a proof that nothing was sent; `operation resume` reads the chain. Its `reason` says what APN saw:
   `provider_request_closed` (MetaMask answered `FAILED`, `BROADCAST_FAILED`, `DENIED` or `EXPIRED`, in
   `providerStatus`, with `transactionHash` when it named one), `provider_request_outcome_unknown` (another status, in
@@ -1071,10 +1072,12 @@ Eligible operations list `apn gasless transfer revoke` among their next actions.
 
 `apn operation resume --operation <operation-id>` makes its chain reads first, exactly as before. The chain stays the
 record, and the operation's state comes only from those reads. Then, still under the operation lock, resume lists the
-operation's sealed disable requests and opens the ID of each, in hash order, up to 16. After the lock is released, it
-reads `mm auth status` once for the signed-in session's project, and reads MetaMask's job status of each opened ID
-through the helper's `readRequest` mode, bound to the server wallet and the chain. These reads write nothing. The output
-adds `revocation_requests`. It is absent when the operation holds no sealed disable request.
+operation's sealed disable requests newest first: by when each seal was written (its file's modification time), then
+by hash. It opens the IDs of the 16 newest. After the operation lock is released, it takes the MetaMask session lock
+alone, as the gasless observation does for its own MetaMask read. It reads `mm auth status` once for the signed-in
+session's project, and reads MetaMask's job status of each opened ID through the helper's `readRequest` mode, bound to
+the server wallet and the chain. These reads write nothing. The output adds `revocation_requests`, newest first. It is
+absent when the operation holds no sealed disable request.
 
 | Field | Meaning |
 | --- | --- |
@@ -1090,7 +1093,7 @@ adds `revocation_requests`. It is absent when the operation holds no sealed disa
 Each entry is MetaMask's word, never chain evidence, and nothing of it is written to the operation. No failure here
 fails the resume. A failure of one request is that entry's own `reason`:
 
-- More than 16 sealed requests: each request past the 16th in hash order has `revocation_request_read_limit`. It is
+- More than 16 sealed requests: each request older than the 16 newest has `revocation_request_read_limit`. It is
   listed with its hash and is not opened or read.
 - A sealed ID that cannot be opened: for example `provider_request_reference_unmatched` (missing, damaged or foreign),
   `wrapping_secret_missing`, or `apn_native_rejected` (a refusing Keychain).
@@ -1098,11 +1101,14 @@ fails the resume. A failure of one request is that entry's own `reason`:
   request is read.
 - A read that refused: for example `metamask_session_project_changed` (the session changed project between the two
   reads) or the helper's own `mm_gasless_*` reason, with `check` when an answer check refused.
+- The MetaMask session lock cannot be taken (another APN command uses the MetaMask session): every opened request has
+  that lock's reason (`apn_state_busy`), and no request is read. Run resume again.
 
 When the requests cannot be listed, `revocation_requests` holds one entry with `request_id_hash: null` and its reason:
 `provider_request_reference_listing_invalid` when the operation's directory holds an entry that APN never writes
-(another name, a link or a directory), or the state read's own reason. A name that starts with a dot (such as
-`.DS_Store`) is not a request and is ignored, as the wrapping-secret guard ignores it.
+(another name, a link or a directory, also a dot-named link or directory), or the state read's own reason. A regular
+file whose name starts with a dot (such as `.DS_Store`) is not a request and is ignored, as the wrapping-secret guard
+ignores it.
 `revocation_request_reader_unavailable` in the same form says that this APN command had no reader for them.
 
 `not_found` proves nothing. The request can be in another project: sign in to MetaMask as when it was sent, then resume
