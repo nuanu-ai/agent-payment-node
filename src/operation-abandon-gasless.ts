@@ -50,7 +50,8 @@ export async function abandonMetaMaskGasless(d: Base & { readonly metaMaskGasles
   const initial = await metaMaskRecord(d, operationId);
   if (initial.state === "abandoned_unknown" && initial.terminal) return liveMetaMaskGaslessOperation(initial);
   assertEligible(d, initial.terminal, initial.state, initial.settlement !== null, initial.intent.expiresAt);
-  await d.metaMaskGasless.resume(operationId).catch(() => undefined);
+  // The chain reads only: an abandonment never opens a sealed disable request id.
+  await d.metaMaskGasless.observeChain(operationId).catch(() => undefined);
   return await d.context.state.withLocks([`profile:${initial.profileHash}`, `operation:${operationId}`], async () => {
     const op = await metaMaskRecord(d, operationId);
     if (op.terminal) return liveMetaMaskGaslessOperation(op);

@@ -835,6 +835,9 @@ transfer APN sent itself (0.5.108 and later), and for an older one when `mm`'s l
 makes the same job status GET with the same answer checks. Its network policy admits only that one GET, and only for a
 signed-in project that hashes to the transfer's stored project hash.
 See [metamask-native-cli-sourceprep.md](metamask-native-cli-sourceprep.md#observing-a-pending-metamask-request).
+From 0.5.109 `operation resume` uses the same read for each delegation disable request APN sealed (see
+[Reading a disable request again](#reading-a-disable-request-again)). The project hash is then the signed-in session's
+own, from `mm auth status`.
 
 From 0.5.108 the same helper also sends the MetaMask native transfer and the delegation disable below (a
 `submitTransaction` helper mode), with a request ID APN names itself. It makes the SDK's server-wallet call
@@ -984,8 +987,9 @@ exact amount to send when the wallet's native balance is below that maximum.
 
 The foreground screen shows the call, the nonce, the gas fields and the maximum native cost. After the six-character
 code, APN checks with `mm wallet address` that the wallet's selected server wallet is the delegator; another one refuses
-with `APN_PROFILE_DRIFT / mm_revoke_wallet_mismatch` before anything is sent. Then APN names the request ID itself and
-sends the request once through the sandboxed helper above (`submitTransaction`): the request `mm wallet send-transaction`
+with `APN_PROFILE_DRIFT / mm_revoke_wallet_mismatch` before anything is sent. Then APN names the request ID itself,
+seals it (see [Reading a disable request again](#reading-a-disable-request-again)) and sends the request once through
+the sandboxed helper above (`submitTransaction`): the request `mm wallet send-transaction`
 (6.1.5) sent for the same payload and intent, from `mm`'s signed-in session in whichever project holds the server
 wallet. Right before the send, inside the same lock, APN reads the server wallet's native balance again (`mm` read it
 before its own POST; the helper does not) and refuses with `APN_INSUFFICIENT_GAS / mm_revoke_native_gas`, with nothing
@@ -997,13 +1001,20 @@ Each disable pins the pending nonce it was priced at, so two disables at one non
 after another one landed fails its gas estimate and is not sent; gas is lost only when a disable is priced before
 another one lands and is sent after it (it reverts `AlreadyDisabled`). Nothing is written to the
 operation: the chain is the record. `operation resume` then proves the outcome: `revoked_unused` when the delegation is
-disabled with no redemption, or `completed` when the redemption landed first. MCP returns the CLI handoff.
+disabled with no redemption, or `completed` when the redemption landed first. From 0.5.109 APN also keeps the ID of each
+disable request that may have reached MetaMask, sealed beside the operation, and `operation resume` reads that request's
+MetaMask status again. That read changes nothing in the operation. MCP returns the CLI handoff.
 
-The `revoke` output reports `submission`. Every answer carries `requestIdHash`, the SHA-256 of
-`apn.metamask-revocation.request-id.v1`, a NUL byte and APN's request ID; the ID itself is never shown.
+The `revoke` output reports `submission`. Every answer carries `requestIdHash`: from 0.5.109 the SHA-256 of
+`provider-effect-reference`, a NUL byte, `metamask-agent-wallet`, a NUL byte and APN's request ID. It is the hash that
+the sealed ID is filed under, as for MetaMask native and direct transfers. The ID itself is never shown. Releases
+0.5.105 to 0.5.108 hashed `apn.metamask-revocation.request-id.v1`, a NUL byte and the ID. They kept the ID nowhere, so
+APN cannot read the requests they sent again.
 
 - `acknowledged`: with the transaction hash.
-- `pending`: MetaMask waits on your MFA, or is still evaluating, signing or broadcasting.
+- `pending`: MetaMask waits on your MFA, or is still evaluating, signing or broadcasting. The next actions also name
+  `operation resume` as the way to read this request's MetaMask status again, by its `request_id_hash`. Resume reads
+  the 16 newest disable requests of an operation and reports older ones as not read.
 - `unknown`: not a proof that nothing was sent; `operation resume` reads the chain. Its `reason` says what APN saw:
   `provider_request_closed` (MetaMask answered `FAILED`, `BROADCAST_FAILED`, `DENIED` or `EXPIRED`, in
   `providerStatus`, with `transactionHash` when it named one), `provider_request_outcome_unknown` (another status, in
@@ -1028,8 +1039,83 @@ The `revoke` output reports `submission`. Every answer carries `requestIdHash`, 
   `nonce_atomic`, so no transaction of the wallet used that nonce or waits for it in the RPC's pool. Remove the cause
   the code names, then run `revoke` again: it takes the same nonce, so only one of the two disables can land, and it
   moves no USDC. A request MetaMask still holds for your MFA is the only one no RPC shows; it carries the same nonce.
+  When the request may have reached MetaMask, the next actions also name `operation resume` as the way to read this
+  request's MetaMask status again, by its `request_id_hash`. A request that provably never left the machine is not
+  named, and its seal is removed.
 
 Eligible operations list `apn gasless transfer revoke` among their next actions.
+
+#### Reading a disable request again
+
+`revoke` keeps the ID of every disable request that may have reached MetaMask:
+
+- `revoke` now needs the login Keychain, as the MetaMask native send does. Before any chain read and before the consent
+  screen, it reads the login-Keychain wrapping secret, or creates the first one for a state that holds nothing sealed.
+  A missing secret over sealed state (`APN_STATE_CORRUPT / wrapping_secret_missing`) or a refusing Keychain
+  (`APN_NATIVE_REJECTED`) refuses there.
+- After the six-character code, inside the send lock, APN reads the native balance again and checks the selected
+  server wallet with `mm wallet address`. The same check builds the helper's request, with its 120-second send bound.
+  A refusal there seals nothing and sends nothing.
+- APN then seals the request ID (a v4 UUID it created) with the same custody envelope as the MetaMask native and
+  direct request references, in
+  `metamask-revocation-request-references/<profile-hash>/<operation-id>/<request-id-hash>.json`. The HKDF info and the
+  AAD bind the lane, the provider, the profile, the operation and the hash.
+- The helper starts only after the seal, and it sends exactly the request that the check built. A seal that fails
+  refuses with its own code, reason and steps, and its message says that the disable was not sent.
+- When the helper's own facts prove that it stopped before any network call (the `unknown` answers whose next action
+  says so), MetaMask never received the request. APN then removes that one seal again, under the same locks, by its
+  exact path. If the removal fails, the next actions say so; resume then lists the request, and MetaMask answers 404
+  for it.
+- Each other `revoke` keeps its own file. A file is never replaced and never deleted, also after the operation ends.
+  Each file counts as sealed custody for the wrapping secret (see the README section on the wrapping secret).
+- There is no limit on the number of disables of one operation.
+
+`apn operation resume --operation <operation-id>` makes its chain reads first, exactly as before. The chain stays the
+record, and the operation's state comes only from those reads. Then, still under the operation lock, resume lists the
+operation's sealed disable requests newest first: by when each seal was written (its file's modification time), then
+by hash. It opens the IDs of the 16 newest. After the operation lock is released, it takes the MetaMask session lock
+alone, as the gasless observation does for its own MetaMask read. It reads `mm auth status` once for the signed-in
+session's project, and reads MetaMask's job status of each opened ID through the helper's `readRequest` mode, bound to
+the server wallet and the chain. These reads write nothing. The output adds `revocation_requests`, newest first. It is
+absent when the operation holds no sealed disable request.
+
+| Field | Meaning |
+| --- | --- |
+| `request_id_hash` | The request's hash, as `requestIdHash` in the `revoke` output. `null` only on the one entry that says the requests could not be listed or read at all. |
+| `outcome` | `verified`: MetaMask's server named this request, the server wallet and the chain. `not_found`: the server answered 404 for this ID in the signed-in session's project. `refused`: APN read nothing it could use. |
+| `status` | MetaMask's job status token (for example `AWAITING_MFA`, `BROADCASTED`, `CONFIRMED`, `FAILED`), for `verified` only. |
+| `transaction_hash` | The transaction hash MetaMask named, or `null`. |
+| `mfa` | For `AWAITING_MFA`: `{ "expires_at", "auth_method" }` of the owner's approval window, each `null` when MetaMask gave none in a closed form. |
+| `response_hash` | The SHA-256 of MetaMask's answer, for `verified` only. |
+| `reason` | For `refused` only: a closed reason, never provider text. |
+| `check` | For `refused` only: the answer check that refused, or `null`. |
+
+Each entry is MetaMask's word, never chain evidence, and nothing of it is written to the operation. No failure here
+fails the resume. A failure of one request is that entry's own `reason`:
+
+- More than 16 sealed requests: each request older than the 16 newest has `revocation_request_read_limit`. It is
+  listed with its hash and is not opened or read.
+- A sealed ID that cannot be opened: for example `provider_request_reference_unmatched` (missing, damaged or foreign),
+  `wrapping_secret_missing`, or `apn_native_rejected` (a refusing Keychain).
+- No session project: every opened request has `metamask_session_required` or `metamask_session_read_failed`, and no
+  request is read.
+- A read that refused: for example `metamask_session_project_changed` (the session changed project between the two
+  reads) or the helper's own `mm_gasless_*` reason, with `check` when an answer check refused.
+- The MetaMask session lock cannot be taken (another APN command uses the MetaMask session): every opened request has
+  that lock's reason (`apn_state_busy`), and no request is read. Run resume again.
+
+When the requests cannot be listed, `revocation_requests` holds one entry with `request_id_hash: null` and its reason:
+`provider_request_reference_listing_invalid` when the operation's directory holds an entry that APN never writes
+(another name, a link or a directory, also a dot-named link or directory), or the state read's own reason. A regular
+file whose name starts with a dot (such as `.DS_Store`) is not a request and is ignored, as the wrapping-secret guard
+ignores it.
+`revocation_request_reader_unavailable` in the same form says that this APN command had no reader for them.
+
+`not_found` proves nothing. The request can be in another project: sign in to MetaMask as when it was sent, then resume
+again. A request that never left the machine is also not found.
+
+`operation status`, receipts and `operation abandon` never open a sealed disable request ID. Abandon observes the chain
+first, as resume does, without the request reads.
 
 ## MetaMask Smart Account
 

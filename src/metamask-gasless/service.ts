@@ -23,6 +23,7 @@ import { MetaMaskGaslessPreparation } from "./prepare.js";
 import { mmRegistry } from "./registry.js";
 import { mmFail } from "./reasons.js";
 import { mmChain } from "./validation.js";
+import { openMetaMaskRevocationRequests, readMetaMaskRevocationRequests, type MetaMaskRevocationReadDependencies } from "./revocation/requests.js";
 import { revokeMetaMaskGasless, type MetaMaskRevocationDependencies } from "./revocation/service.js";
 import { mmSiblingsOutput, mmTransfersBeside } from "./siblings.js";
 import { canonicalProfile } from "../wallet-policy.js";
@@ -42,6 +43,12 @@ export interface MetaMaskGaslessDependencies {
   readonly records?: MetaMaskGaslessRepositoryPort;
   /** Foreground consent and the owner's wallet CLI, present only for `gasless transfer revoke`. */
   readonly revocation?: MetaMaskRevocationDependencies;
+  /**
+   * The sealed disable request ids and MetaMask's server read of each, for `operation resume` (revocation/requests.ts).
+   * Used only when the operation holds a sealed disable request; when it is absent then, resume reports so in
+   * `revocation_requests`.
+   */
+  readonly revocationReads?: MetaMaskRevocationReadDependencies;
 }
 /**
  * Next actions follow only what the refusal proves: the native gas shortfall
@@ -146,22 +153,42 @@ export class MetaMaskGaslessService {
       return { ...await this.project(await this.execution().approve(op, approval, siblings)), ...shown };
     });
   }
+  /**
+   * `operation resume`: the chain reads below, exactly as they are, then MetaMask's status of each disable request sealed
+   * for the operation (`revocation_requests`, present only when one is sealed or the lane cannot be listed). Under the
+   * operation lock, after the chain reads, the sealed requests are listed newest first and the ids of the newest 16
+   * opened; MetaMask is read after that lock is released, under the provider-session lock alone, as the gasless
+   * observation reads it (those reads write nothing, and the seals are create-only). Nothing of them is written to the
+   * operation, and no failure of theirs fails the resume.
+   */
   async resume(operationId: string, observationRpcEnv?: string) {
     const environmentName = observationRpcEnv === undefined ? undefined : mmObservationRpcEnv(observationRpcEnv);
-    return await this.locked(operationId, async op => {
-      // An abandoned dispatch is still observed: a later chain proof replaces the owner's acknowledgement.
-      const provable = op.state === "abandoned_unknown" && op.submissionAttempts === 1;
-      if ((op.terminal && !provable) || op.state === "awaiting_approval") return liveMetaMaskGaslessOperation(op);
-      if (provable && environmentName === undefined) return await this.project(await this.observation().run(op));
-      if (environmentName === undefined) {
-        // Only an approved transfer not yet dispatched can still dispatch here; a dispatched one only observes.
-        const siblings = op.submissionAttempts === 0 ? await this.siblings(op) : [];
-        return await this.project(await this.execution().run(op, siblings));
-      }
-      const factory = this.dependencies().observationRpcFor;
-      if (factory === undefined) return mmFail("mm_gasless_rpc_binding");
-      return await this.project(await this.observation({ rpc: factory(op.intent.request.chainId, environmentName), environmentName }).run(op));
+    const { result, opened } = await this.locked(operationId, async op => {
+      const observed = await this.observeLocked(op, environmentName);
+      return { result: observed, opened: await openMetaMaskRevocationRequests(this.context.state, this.context.metaMaskGasless?.revocationReads, op) };
     });
+    if (opened === undefined) return result;
+    const reads = await readMetaMaskRevocationRequests(opened, async work =>
+      await this.context.state.withLocks(["provider-session:metamask-agent-wallet"], work));
+    return { ...result, revocation_requests: reads };
+  }
+  /** The chain reads alone, as resume makes them; the observation an abandonment runs first. It opens no sealed id. */
+  async observeChain(operationId: string) {
+    return await this.locked(operationId, async op => await this.observeLocked(op, undefined));
+  }
+  private async observeLocked(op: MetaMaskGaslessOperationRecord, environmentName: string | undefined) {
+    // An abandoned dispatch is still observed: a later chain proof replaces the owner's acknowledgement.
+    const provable = op.state === "abandoned_unknown" && op.submissionAttempts === 1;
+    if ((op.terminal && !provable) || op.state === "awaiting_approval") return liveMetaMaskGaslessOperation(op);
+    if (provable && environmentName === undefined) return await this.project(await this.observation().run(op));
+    if (environmentName === undefined) {
+      // Only an approved transfer not yet dispatched can still dispatch here; a dispatched one only observes.
+      const siblings = op.submissionAttempts === 0 ? await this.siblings(op) : [];
+      return await this.project(await this.execution().run(op, siblings));
+    }
+    const factory = this.dependencies().observationRpcFor;
+    if (factory === undefined) return mmFail("mm_gasless_rpc_binding");
+    return await this.project(await this.observation({ rpc: factory(op.intent.request.chainId, environmentName), environmentName }).run(op));
   }
   /** The owner's on-chain disable of a disclosed delegation whose outcome is still unproved (no journal write). */
   async revoke(operationId: string) {

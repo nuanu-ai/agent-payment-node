@@ -548,29 +548,32 @@ profile's locks, so another command for the same profile waits its five seconds 
 
 APN creates a wrapping secret only for a state root that holds nothing encrypted. While the secret is missing and any
 record sealed under it exists (a wallet envelope, a Solana or TRON key, a smart-account permission, a profile policy,
-saved signed material or a MetaMask gasless, native or direct request reference), a command that would create one
-(`wallet ensure` or `wallet import` for any profile, `wallet ensure-solana`, `wallet ensure-tron`, a first
-`wallet policy set`, or the first sealed record of a provider payment, such as a MetaMask gasless prepare, a MetaMask
-native transfer or a MetaMask direct transfer approve) fails with the same reason and restore step instead of minting a
-secret that would orphan those records and collide with the restored item.
+saved signed material, or a MetaMask gasless, native, direct or delegation disable request reference), a command that
+would create one (`wallet ensure` or `wallet import` for any profile, `wallet ensure-solana`, `wallet ensure-tron`, a
+first `wallet policy set`, or the first sealed record of a provider payment, such as a MetaMask gasless prepare, a
+MetaMask native transfer or a MetaMask direct transfer approve) fails with the same reason and restore step instead of
+minting a secret that would orphan those records and collide with the restored item.
 
 APN never deletes a sealed MetaMask request reference (`metamask-gasless-request-references/`,
-`metamask-native-request-references/`, `provider-direct-request-references/`), not even after its operation ends. A
-gasless prepare interrupted between its seal and its journal also leaves one that belongs to no operation. Each counts
-as sealed custody. So after the first MetaMask gasless, native or direct transfer that sealed a request ID, a lost
-wrapping secret makes every command listed above refuse with `APN_STATE_CORRUPT` / `wrapping_secret_missing`, also in a
-state root that holds no local wallet, where APN used to create a new secret. This fails closed. The owner has two
-options:
+`metamask-native-request-references/`, `provider-direct-request-references/`, and from 0.5.109
+`metamask-revocation-request-references/` for `apn gasless transfer revoke`), not even after its operation ends. The one
+exception is the seal of a disable request whose helper provably stopped before any network call: `revoke` removes it
+again at once. A gasless prepare interrupted between its seal and its journal also leaves one that belongs to no
+operation. Each counts as sealed custody. So after the first MetaMask gasless, native or direct transfer or delegation
+disable that sealed a request ID, a lost wrapping secret makes every command listed above refuse with
+`APN_STATE_CORRUPT` / `wrapping_secret_missing`, also in a state root that holds no local wallet, where APN used to
+create a new secret. This fails closed. The owner has two options:
 
 1. Restore the login Keychain item from a backup of the login Keychain (the restore step). Every sealed record opens
    again and nothing else changes.
 2. When the item is lost for good and the state holds nothing else sealed (no local wallet, chain key, policy,
-   permission or saved signed material), move the three request-reference directories out of the APN state root and keep
+   permission or saved signed material), move the four request-reference directories out of the APN state root and keep
    them. The next command creates a new wrapping secret. The moved references open only under the old item, which can no
    longer be restored beside the new one: both share the Keychain name. A resolved operation never opens its reference
    again and is not affected. An unresolved one keeps its state and status: a MetaMask native observe or direct resume
    refuses with `provider_request_reference_unmatched`, a gasless approve refuses until its deadline ends it, and a
-   gasless resume reports a failed provider read and still observes the chain. Its exit is
+   gasless resume reports a failed provider read and still observes the chain. A gasless resume no longer lists the
+   moved disable requests. Its exit is
    `apn operation abandon --operation <operation-id>` once its window has passed. When other sealed records exist,
    moving the references does not help: only option 1 does.
 

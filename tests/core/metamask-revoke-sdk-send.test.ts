@@ -2,19 +2,24 @@
  * 0.5.108: the gasless revoke's `disableDelegation` no longer goes through `mm wallet send-transaction`, which named the
  * server request itself. APN names the request id, checks with an `mm` read that the selected wallet is the delegator,
  * and sends the very request mm built for 0.5.107's payload and intent through the sandboxed helper, from mm's session
- * in whichever project holds the server wallet. Every answer names the request by the hash of APN's id. The `mm` read is
- * a double; the helper and the vendored SDK run in process against a synthetic `~/.metamask` and exchange.
+ * in whichever project holds the server wallet. Every answer names the request by the hash of APN's id. 0.5.109: the
+ * check and the send are two steps (the revoke seals the id between them), the hash is the provider request reference
+ * hash the seal is filed under, and the wallet reads a sealed request again for resume. The `mm` reads are a double; the
+ * helper and the vendored SDK run in process against a synthetic `~/.metamask` and exchange.
  */
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { sha256 } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
 import { executeHelperRequest, MetaMaskGaslessProviderClient, type MetaMaskGaslessHelperRunner } from "../../src/metamask-gasless/client/index.js";
 import type { FetchExchange, FetchExchangeRequest, FetchExchangeResponse } from "../../src/metamask-gasless/client/network.js";
 import { runnerDiagnostic, submitFailureError } from "../../src/metamask-gasless/client/submit-diagnostic.js";
-import { MetaMaskSdkRevocationWallet, metaMaskRevocationUnsentCause } from "../../src/metamask-gasless/revocation/wallet.js";
+import { metaMaskRevocationRequestIdHash } from "../../src/metamask-gasless/revocation/requests.js";
+import { MetaMaskSdkRevocationWallet, metaMaskRevocationUnsentCause, type MetaMaskRevocationSendInput } from "../../src/metamask-gasless/revocation/wallet.js";
 import type { MetaMaskProcessRunnerPort } from "../../src/metamask-process-runner.js";
-import { OWNER, PROJECT, syntheticHome } from "./metamask-gasless-client-fixtures/sdk.js";
+import { providerRequestReferenceHash } from "../../src/provider-request-reference-store.js";
+import { OWNER, PROJECT, SdkExchange, syntheticHome } from "./metamask-gasless-client-fixtures/sdk.js";
 
 const MANAGER = "0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3", DATA = `0x3ed01015${"00".repeat(64)}`, TX = `0x${"cd".repeat(32)}`;
 const INTENT = `APN ${"a".repeat(64)}: disable delegation 0x${"ef".repeat(32)}`;
@@ -34,11 +39,18 @@ class Server implements FetchExchange {
   /** The request id APN named, as the one POST carried it. */
   requestId(): string { return (JSON.parse(this.requests[0]!.body!) as { requestId: string }).requestId; }
 }
-/** `mm wallet address --chain-namespace evm --json`: the selected server wallet, the only `mm` child the revoke runs. */
-function mm(address: string = OWNER): MetaMaskProcessRunnerPort & { readonly calls: (readonly string[])[] } {
+const SESSION = { authenticated: true, summary: { mode: "session", projectId: PROJECT } };
+/**
+ * `mm wallet address --chain-namespace evm --json`, the selected server wallet and the only `mm` child the revoke runs,
+ * and `mm auth status --json`, the session's project, the only one resume runs. A thrown `auth` answer is a failed read.
+ */
+function mm(address: string = OWNER, auth: unknown = SESSION): MetaMaskProcessRunnerPort & { readonly calls: (readonly string[])[] } {
   const calls: (readonly string[])[] = [];
   return { calls, async runJson(argv: readonly string[]) {
-    calls.push(argv); return { exitCode: 0, stdout: Buffer.from(JSON.stringify({ ok: true, data: { mode: "server", chainNamespace: "evm", address } })) };
+    calls.push(argv);
+    if (argv[0] === "auth" && auth instanceof Error) throw auth;
+    const data = argv[0] === "auth" ? auth : { mode: "server", chainNamespace: "evm", address };
+    return { exitCode: 0, stdout: Buffer.from(JSON.stringify({ ok: true, data })) };
   }, async runForeground() { throw new Error("TEST no foreground mm"); } };
 }
 async function wallet(t: test.TestContext, server: Server, failure?: unknown, selected?: string,
@@ -57,17 +69,38 @@ async function wallet(t: test.TestContext, server: Server, failure?: unknown, se
   return { home, vendor, runs: () => runs, wallet: new MetaMaskSdkRevocationWallet(vendor,
     new MetaMaskGaslessProviderClient({ environment: {}, clock: { now: () => new Date() }, runner })) };
 }
-const send = (w: MetaMaskSdkRevocationWallet, payload: Record<string, string> = PAYLOAD) =>
-  w.send({ chainId: 8453, from: OWNER, payload: payload as unknown as typeof PAYLOAD, intent: INTENT });
-const hashOf = (requestId: string) => sha256(`apn.metamask-revocation.request-id.v1\0${requestId}`);
+const input = (payload: Record<string, string> = PAYLOAD, requestId: string = randomUUID()): MetaMaskRevocationSendInput =>
+  ({ requestId, chainId: 8453, from: OWNER, payload: payload as unknown as typeof PAYLOAD, intent: INTENT });
+/** The revoke's two steps around its seal: the check builds the request, the send takes exactly that request. */
+async function send(w: MetaMaskSdkRevocationWallet, payload: Record<string, string> = PAYLOAD) {
+  return await w.send(await w.check(input(payload)));
+}
+/** 0.5.109: the provider request reference hash, written out independently; the id's seal is filed under it. */
+const hashOf = (requestId: string) => sha256(`provider-effect-reference\0metamask-agent-wallet\0${requestId}`);
+
+test("the hash that names a disable request is the provider request reference hash of its id", () => {
+  const requestId = randomUUID();
+  assert.equal(metaMaskRevocationRequestIdHash(requestId), hashOf(requestId));
+  assert.equal(metaMaskRevocationRequestIdHash(requestId), providerRequestReferenceHash("metamask-agent-wallet", requestId));
+  // The 0.5.105 to 0.5.108 formula is gone: those ids were never kept, so their hashes name nothing APN can read.
+  assert.notEqual(metaMaskRevocationRequestIdHash(requestId), sha256(`apn.metamask-revocation.request-id.v1\0${requestId}`));
+});
 
 test("the disable is the request mm 6.1.5 sent for 0.5.107's payload, with APN's own id, in the session's own project", async (t) => {
-  const server = new Server(), { home, vendor, wallet: w } = await wallet(t, server);
-  const submitted = await send(w);
-  assert.deepEqual(vendor.calls, [["wallet", "address", "--chain-namespace", "evm", "--json"]], "mm only reads the selected wallet");
+  const server = new Server(), { home, vendor, runs, wallet: w } = await wallet(t, server);
+  const named = input();
+  const checked = await w.check(named);
+  assert.deepEqual(vendor.calls, [["wallet", "address", "--chain-namespace", "evm", "--json"]], "the check only reads the selected wallet");
+  assert.equal(runs(), 0, "the check starts no helper"); assert.equal(server.requests.length, 0, "the check sends nothing");
+  // The built request, with the send bound it was checked with; the send takes exactly this object.
+  assert.equal(checked.requestId, named.requestId); assert.equal(checked.projectHash, null); assert.equal(checked.intent, INTENT);
+  const bound = Date.parse(checked.expiresAt) - Date.now();
+  assert.ok(bound > 0 && bound <= 120_000, "the check names the send bound");
+  const submitted = await w.send(checked);
+  assert.equal(vendor.calls.length, 1, "the send runs no mm child");
   assert.equal(server.requests.length, 1);
   const [request] = server.requests, requestId = server.requestId();
-  assert.match(requestId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
+  assert.equal(requestId, named.requestId, "the request carries the id APN named (and the revoke sealed) before the send");
   assert.deepEqual([request!.url, request!.method, request!.headers.authorization], [COLLECTION, "POST", `Bearer ${home.token}`]);
   assert.equal(request!.body, JSON.stringify({ requestId, namespace: "evm", chainId: 8453, tx: { from: OWNER, to: MANAGER.toLowerCase(), chainId: 8453,
     data: DATA, value: "0x0", nonce: 0, gasLimit: "0xea60", maxFeePerGas: "0x77359400", maxPriorityFeePerGas: "0xf4240" }, txIntent: INTENT }));
@@ -75,12 +108,12 @@ test("the disable is the request mm 6.1.5 sent for 0.5.107's payload, with APN's
   assert.equal(JSON.stringify(submitted).includes(requestId), false, "the request id stays private; its hash names it");
 });
 
-test("a selected wallet that is not the delegator, or a payload APN never writes, refuses before the helper starts", async (t) => {
+test("a selected wallet that is not the delegator, or a payload APN never writes, refuses at the check, before the helper starts", async (t) => {
   const server = new Server(), refused = await wallet(t, server, undefined, "0x2222222222222222222222222222222222222222");
-  await assert.rejects(send(refused.wallet), (error: unknown) => error instanceof ApnError && error.code === "APN_PROFILE_DRIFT" &&
+  await assert.rejects(refused.wallet.check(input()), (error: unknown) => error instanceof ApnError && error.code === "APN_PROFILE_DRIFT" &&
     error.details?.reason === "mm_revoke_wallet_mismatch");
   const malformed = await wallet(t, server);
-  await assert.rejects(send(malformed.wallet, { ...PAYLOAD, value: "0x1" }), (error: unknown) => error instanceof ApnError && error.code === "APN_INTERNAL");
+  await assert.rejects(malformed.wallet.check(input({ ...PAYLOAD, value: "0x1" })), (error: unknown) => error instanceof ApnError && error.code === "APN_INTERNAL");
   assert.equal(refused.runs() + malformed.runs(), 0); assert.equal(server.requests.length, 0);
 });
 
@@ -124,4 +157,37 @@ test("a helper that stopped before any network call stays unknown, names its rea
   assert.equal(answered.disposition, "unknown"); assert.equal(metaMaskRevocationUnsentCause(answered), undefined, "this one left the machine");
   const lost = await wallet(t, new Server(), submitFailureError("mm_gasless_submit_unknown", runnerDiagnostic("runner_timeout", true)));
   assert.equal(metaMaskRevocationUnsentCause(await send(lost.wallet)), undefined, "a helper killed after its start may have sent");
+});
+
+test("resume reads a sealed request again: the session's project from mm auth status, then the request by its id through the helper", async (t) => {
+  const home = await syntheticHome(); t.after(home.cleanup);
+  const exchange = new SdkExchange(8453), modes: string[] = [];
+  const runner: MetaMaskGaslessHelperRunner = { async run(request) {
+    modes.push(request.mode); return await executeHelperRequest(request, { homeDirectory: home.home, exchange });
+  } };
+  const vendor = mm(), reader = new MetaMaskSdkRevocationWallet(vendor, new MetaMaskGaslessProviderClient({ environment: {}, clock: { now: () => new Date() }, runner }));
+  const project = await reader.sessionProject();
+  assert.deepEqual(project, { projectHash: sha256(PROJECT) }); assert.deepEqual(vendor.calls, [["auth", "status", "--json"]]);
+  const requestId = randomUUID(), binding = { sender: OWNER, chainId: 8453 } as const;
+  const answer = await reader.read(requestId, sha256(PROJECT), binding);
+  assert.equal(answer.outcome, "verified");
+  assert.deepEqual(answer.outcome === "verified" && [answer.status, answer.transactionHash], ["CONFIRMED", `0x${"44".repeat(32)}`]);
+  assert.deepEqual(modes, ["readRequest"]); assert.equal(exchange.requests.length, 1);
+  assert.deepEqual([exchange.requests[0]!.method, exchange.requests[0]!.url], ["GET", `${COLLECTION}/${requestId}`]);
+  // Another project than the session's refuses in the helper before anything is read.
+  const other = await reader.read(randomUUID(), sha256("another-project"), binding);
+  assert.deepEqual(other, { outcome: "refused", reason: "metamask_session_project_changed", check: null }); assert.equal(exchange.requests.length, 1);
+});
+
+test("a session with no project, or an mm read that fails, gives the closed reason and reads nothing", async () => {
+  const client = new MetaMaskGaslessProviderClient({ environment: {}, clock: { now: () => new Date() },
+    runner: { async run() { throw new Error("TEST no helper read without a session project"); } } });
+  for (const [auth, reason] of [
+    [{ authenticated: false }, "metamask_session_required"],
+    [{ authenticated: true, summary: { mode: "api-key", projectId: PROJECT } }, "metamask_session_required"],
+    [{ authenticated: true, summary: { mode: "session", projectId: "not a project id" } }, "metamask_session_required"],
+    [new ApnError("APN_PROVIDER_UNAVAILABLE", "synthetic mm failure"), "metamask_session_read_failed"],
+  ] as const) {
+    assert.deepEqual(await new MetaMaskSdkRevocationWallet(mm(OWNER, auth), client).sessionProject(), { reason }, JSON.stringify(auth));
+  }
 });
