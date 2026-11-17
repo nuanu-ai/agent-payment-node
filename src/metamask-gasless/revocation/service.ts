@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { ApnError } from "../../errors.js";
 import { evmAddressLock } from "../../evm-address-ownership.js";
+import type { ProviderRequestReferencePort } from "../../provider-request-reference-store.js";
 import type { StateStore } from "../../state.js";
 import { mmDispatchIntent } from "../dispatch.js";
 import type { MetaMaskGaslessOperationRecord } from "../operation-model.js";
@@ -8,6 +10,7 @@ import type { MetaMaskGaslessRpcFactory } from "../ports.js";
 import { mmDisableCall } from "./call.js";
 import { mmRevocationPayload } from "./chain.js";
 import { metaMaskRevocationSummary, type MetaMaskRevocationApprovalPort } from "./consent.js";
+import { assertMetaMaskRevocationRequestRoom, sealMetaMaskRevocationRequest } from "./requests.js";
 import { metaMaskRevocationUnsentCause, type MetaMaskRevocationUnsentCause, type MetaMaskRevocationWalletPort } from "./wallet.js";
 
 /** The states in which a dispatched delegation may still be redeemable and nothing proves its outcome. */
@@ -16,14 +19,19 @@ const REVOCABLE = ["submitted_pending", "unknown_finality", "failed_effects_pend
 export interface MetaMaskRevocationDependencies {
   readonly approval?: MetaMaskRevocationApprovalPort;
   readonly wallet?: MetaMaskRevocationWalletPort;
+  /** Seals each disable's request id before it is sent (provider-request-reference-store.ts, lane `metamask-revocation`). */
+  readonly references?: ProviderRequestReferencePort;
 }
 
 /**
  * The owner's exit for a disclosed delegation whose outcome no proof decides: one `disableDelegation` of exactly that
  * delegation, signed and paid by its own server wallet after foreground consent. It records nothing in the operation:
  * the chain is the record, and `operation resume` closes the operation only from the manager's disabled flag with the
- * redemption count 0 at one finality block. Repeating it can never move USDC. Each call pins the pending nonce it was
- * priced at, so two calls at one nonce land at most once; a call priced after another landed fails its gas estimate and
+ * redemption count 0 at one finality block. APN names the MetaMask request id and seals it (revocation/requests.ts)
+ * under the operation lock, after the wallet's own check and right before the send, so `operation resume` can read that
+ * request's MetaMask status again; a seal that fails sends nothing. The wrapping secret is read before consent, so a
+ * refusing Keychain stops before the owner's screen. Repeating it can never move USDC. Each call pins the pending nonce
+ * it was priced at, so two calls at one nonce land at most once; a call priced after another landed fails its gas estimate and
  * is not sent. Gas is lost only when a call is priced before another lands and is sent after it (`AlreadyDisabled`).
  * `assertAvailable` refuses while an operation that may use the server wallet's own account is unresolved; it runs under
  * the account's evm-owner lock, before pricing and again with the send.
@@ -39,14 +47,19 @@ export async function revokeMetaMaskGasless(state: StateStore, op: MetaMaskGasle
     { reason: "mm_revoke_not_revocable", operationId: id, state: op.state,
       nextActions: [op.state === "dispatch_pending" ? resume : `apn operation status --operation ${id}`] });
   }
-  const { approval, wallet } = dependencies;
+  const { approval, wallet, references } = dependencies;
   if (approval === undefined || wallet === undefined) {
     throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Confirm the delegation disable in a foreground terminal.",
       { reason: "mm_revoke_approval", nextActions: [`apn gasless transfer revoke --operation ${id}`] });
   }
+  if (references === undefined) throw new ApnError("APN_INTERNAL", "The sealed provider request reference store is unavailable.");
   await metaMaskGaslessOwner(state, op.intent.profile, op.intent.binding);
   const owner = evmAddressLock(op.intent.binding.address);
   await state.withLocks([owner], assertAvailable);
+  // Before any chain read or consent: room for one more sealed request (the caller holds the operation lock until the
+  // send, so no other revoke of this operation seals in between) and the wrapping secret the seal needs.
+  await assertMetaMaskRevocationRequestRoom(state, op);
+  await references.ready();
   const dispatched = mmDispatchIntent(op), chainId = dispatched.request.chainId, call = mmDisableCall(dispatched);
   const rpc = rpcFor(chainId), revocationBalance = rpc.revocationBalance;
   if (rpc.chainId !== chainId || rpc.revocation === undefined || revocationBalance === undefined) {
@@ -58,24 +71,38 @@ export async function revokeMetaMaskGasless(state: StateStore, op: MetaMaskGasle
   if (!await approval.confirm(summary)) {
     throw new ApnError("APN_OPERATION_BLOCKED", "The delegation disable was not confirmed; nothing was sent.", { reason: "mm_revoke_refused" });
   }
-  const submitted = await state.withLocks([owner, "provider-session:metamask-agent-wallet"], async () => {
+  const { submitted, requestIdHash } = await state.withLocks([owner, "provider-session:metamask-agent-wallet"], async () => {
     await assertAvailable();
     // `mm wallet send-transaction` read the wallet's native balance right before its POST; the helper does not. The same
     // refusal as at pricing, with nothing sent, when the balance no longer covers the priced maximum.
     assertNativeGas(await revocationBalance.call(rpc, dispatched, call), chain.maximumNativeCostWei, chainId, call.from, id);
-    return await wallet.send({ chainId, from: call.from, payload: mmRevocationPayload(call, chain),
-      intent: `APN ${id}: disable delegation ${call.delegationHash}` });
+    const request = { requestId: randomUUID(), chainId, from: call.from, payload: mmRevocationPayload(call, chain),
+      intent: `APN ${id}: disable delegation ${call.delegationHash}` };
+    // The wallet's check refuses before anything is sealed; the id is sealed before the helper can start.
+    await wallet.check(request);
+    const sealed = await sealMetaMaskRevocationRequest(references, op, request.requestId);
+    return { submitted: await wallet.send(request), requestIdHash: sealed };
   });
   const unsent = metaMaskRevocationUnsentCause(submitted);
   return { operation_id: id, chain_id: chainId, kind: "metamask_delegation_disable", delegator: call.from, delegation_manager: call.to,
     delegation_hash: call.delegationHash, call_hash: call.callHash, fingerprint: summary.fingerprint,
     nonce_atomic: chain.nonceAtomic, gas_limit_atomic: chain.gasLimitAtomic, max_fee_per_gas_atomic: chain.maxFeePerGasAtomic,
     maximum_native_cost_wei: chain.maximumNativeCostWei, submission: submitted, proof_class: "owner_wallet_handoff_unproven",
-    next_actions: [...submitted.disposition === "pending" ? ["Confirm this disable request in MetaMask Mobile or the email registered to your MetaMask dashboard."] : [],
-      ...submitted.disposition === "unknown" ? [unsent === undefined
-        ? unconfirmedDisable(submitted.providerErrorCode, call.from, chain.nonceAtomic, id)
-        : unsentDisable(unsent, submitted.helperFailure, call.from, chain.nonceAtomic, id)] : [],
+    next_actions: [...submitted.disposition === "pending" ? ["Confirm this disable request in MetaMask Mobile or the email registered to your MetaMask dashboard.",
+      readAgain(requestIdHash, id)] : [],
+      ...submitted.disposition === "unknown" ? unsent === undefined
+        ? [unconfirmedDisable(submitted.providerErrorCode, call.from, chain.nonceAtomic, id), readAgain(requestIdHash, id)]
+        : [unsentDisable(unsent, submitted.helperFailure, call.from, chain.nonceAtomic, id)] : [],
       resume] };
+}
+
+/**
+ * After a pending or an unknown answer that may have reached MetaMask: the resume reads this very request's MetaMask
+ * status again by its sealed id, beside its chain reads. A request that provably never left the machine is not named.
+ */
+function readAgain(requestIdHash: string, id: string): string {
+  return `Run apn operation resume --operation ${id} to read MetaMask's status of this disable request again: it lists it under ` +
+    `revocation_requests as request_id_hash ${requestIdHash}. That status is MetaMask's word; the chain read stays the record.`;
 }
 
 /** The server wallet's native balance must cover the disable's priced maximum cost; otherwise nothing is sent. */

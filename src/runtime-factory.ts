@@ -124,6 +124,8 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   } : { maxGasLimitAtomic: "100000", maxFeePerGasWei: "2000000000",
     maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "200000000000000", ttlMs: 60_000 };
   const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
+  // Constructing it reads nothing; only a sealed MetaMask request reference reaches the Keychain through it.
+  const providerRequestReferences = new EncryptedProviderRequestReferenceStore(state, wrappingSecret);
   // A fresh cap belongs to this command invocation; pacing persists by provider across processes.
   const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? (process.env.APN_SOLANA_RPC_URL || SOLANA_PUBLIC_RPC_URL), options.solanaRpcFetch,
     new SolanaRpcBudget({ maxPhysicalRequests: solanaSwapCommandRequests(runtimeCommand) ?? 24, minimumIntervalMs: 750, ...(options.solanaRpcNow === undefined ? {} : { now: options.solanaRpcNow }),
@@ -319,7 +321,10 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       references: new EncryptedMetaMaskGaslessRequestReferenceStore(state, wrappingSecret),
       ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyMetaMaskGaslessApproval() } : {}),
       ...(bound.request.command === "gasless.transfer.revoke" ? { revocation: { approval: new TtyMetaMaskRevocationApproval(),
-        wallet: new MetaMaskSdkRevocationWallet() } } : {}),
+        wallet: new MetaMaskSdkRevocationWallet(), references: providerRequestReferences } } : {}),
+      // A resume reads MetaMask's status of each disable request sealed for the operation; constructing it reads nothing.
+      ...(bound.request.command === "operation.resume" ? { revocationReads: { references: providerRequestReferences,
+        reader: new MetaMaskSdkRevocationWallet() } } : {}),
     },
     gasless: options.gasless ?? { rpcFor: gaslessRpcFactory(process.env),
       observationRpcFor: gaslessObservationRpcFactory(process.env),
@@ -364,8 +369,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(options.wait === undefined ? {} : { wait: options.wait }),
     ...(options.providerTransactionEvidence === undefined ? {} : { providerTransactionEvidence: options.providerTransactionEvidence }),
     ...(providerAuthorizationStore === undefined ? {} : { providerAuthorizationStore }),
-    // Constructing it reads nothing; only a sealed MetaMask request reference reaches the Keychain through it.
-    providerRequestReferences: new EncryptedProviderRequestReferenceStore(state, wrappingSecret),
+    providerRequestReferences,
     ...(bound.request.command === "operation.abandon" || options.operationAbandonApproval !== undefined
       ? { operationAbandonApproval: options.operationAbandonApproval ?? new TtyOperationAbandonApproval() }
       : {}),

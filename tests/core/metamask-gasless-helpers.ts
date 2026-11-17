@@ -24,6 +24,9 @@ import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMask
 import { mmRegistry } from "../../src/metamask-gasless/registry.js";
 import type { MetaMaskDisableCall } from "../../src/metamask-gasless/revocation/call.js";
 import type { MetaMaskRevocationChain } from "../../src/metamask-gasless/revocation/chain.js";
+import type { MetaMaskRevocationReadPort, MetaMaskRevocationSessionProject } from "../../src/metamask-gasless/revocation/requests.js";
+import type { MetaMaskNativeRequestBinding, MetaMaskNativeServerRequestAnswer } from "../../src/metamask-native-request-server-read.js";
+import { EncryptedProviderRequestReferenceStore } from "../../src/provider-request-reference-store.js";
 import { MM_ANY_BENEFICIARY, MM_BATCH_MODE, MM_ROOT_AUTHORITY } from "../../src/metamask-gasless/unsigned.js";
 
 export const MM_TEST_OWNER = "0x1111111111111111111111111111111111111111" as Address;
@@ -56,6 +59,23 @@ export class MmTestWrappingSecret implements WrappingSecretPort {
     return this.secret === null ? null : Buffer.from(this.secret);
   }
   async create() { const secret = this.secret ?? Buffer.alloc(32, 7); this.secret = secret; return Buffer.from(secret); }
+}
+/**
+ * `operation resume`'s read of a sealed disable request, without `mm` or the helper: the session's project, then one
+ * answer per request id (a request id with no answer reads as a 404). Records every read.
+ */
+export class MmTestRevocationReader implements MetaMaskRevocationReadPort {
+  project: MetaMaskRevocationSessionProject = { projectHash: "c".repeat(64) };
+  readonly answers = new Map<string, MetaMaskNativeServerRequestAnswer | Error>();
+  readonly reads: { readonly requestId: string; readonly projectHash: string; readonly binding: MetaMaskNativeRequestBinding }[] = [];
+  sessionReads = 0;
+  async sessionProject() { this.sessionReads += 1; return this.project; }
+  async read(requestId: string, projectHash: string, binding: MetaMaskNativeRequestBinding): Promise<MetaMaskNativeServerRequestAnswer> {
+    this.reads.push({ requestId, projectHash, binding });
+    const answer: MetaMaskNativeServerRequestAnswer | Error = this.answers.get(requestId) ?? { outcome: "not_found" };
+    if (answer instanceof Error) throw answer;
+    return answer;
+  }
 }
 export class MmTestApproval implements MetaMaskGaslessApprovalPort {
   calls: Parameters<MetaMaskGaslessApprovalPort["confirm"]>[0][] = [];
@@ -217,8 +237,10 @@ export async function mmFixture(root: string, chainId: MetaMaskGaslessChainId = 
     walletIdHash: mmWalletIdentityHash(MM_TEST_OWNER), namespace: "eip155", mode: "server", environment: "prod" };
   const provider = new MmTestProvider(binding, now), rpc = new MmTestRpc(chainId, now, designation), approval = new MmTestApproval();
   const wrapping = new MmTestWrappingSecret(), references = new EncryptedMetaMaskGaslessRequestReferenceStore(state, wrapping);
+  // The sealed disable request ids (lane `metamask-revocation`) and resume's read of each, as production wires them.
+  const providerReferences = new EncryptedProviderRequestReferenceStore(state, wrapping), revocationReader = new MmTestRevocationReader();
   const dependencies = { rpcFor: (selected: MetaMaskGaslessChainId) => { assert.equal(selected, chainId); return rpc; }, provider,
-    references, approval };
+    references, approval, revocationReads: { references: providerReferences, reader: revocationReader } };
   const abandon = options.abandonApproval ? { operationAbandonApproval: options.abandonApproval } : {};
   const clock = { now: () => new Date(now) }, wait = new MmTestWait();
   const makeCore = (records?: MetaMaskGaslessRepositoryPort) => new ApnCore({ state, clock, wait,
@@ -236,8 +258,8 @@ export async function mmFixture(root: string, chainId: MetaMaskGaslessChainId = 
     return { id, input, operation: await record(id) };
   };
   const restart = () => new ApnCore({ state: new StateStore(root), metaMaskGasless: dependencies, clock, wait, ...abandon });
-  return { state, now, profile, publicProfile, binding, provider, rpc, approval, wrapping, references, dependencies, clock, wait,
-    advance, makeCore, core, request, prepare, record, restart };
+  return { state, now, profile, publicProfile, binding, provider, rpc, approval, wrapping, references, providerReferences, revocationReader,
+    dependencies, clock, wait, advance, makeCore, core, request, prepare, record, restart };
 }
 
 /** Replaces the saved journal file as an earlier release could have left it; the reader must still accept it. */
