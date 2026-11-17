@@ -256,6 +256,8 @@ test("resume reports MetaMask's status of each sealed request beside its chain r
   f.revocationReader.answers.set(lost, new ApnError("APN_PROVIDER_UNAVAILABLE", "synthetic helper failure", { reason: "mm_gasless_provider_unavailable" }));
   await rewrite(join(directory(f, id), `${metaMaskRevocationRequestIdHash(damaged)}.json`),
     v => ({ ...v, cipher: { ...v.cipher, ciphertext: flipped(v.cipher.ciphertext) } }));
+  // The rewrite moved one record's mtime; fix all three seal times so the newest-first order is known.
+  await sealedAt(f, id, [read, lost, damaged]);
   const resumed = await f.core.execute({ ...resume, operationId: id });
   assert.equal(resumed.ok, true, JSON.stringify(resumed.error));
   const empty = { status: null, transaction_hash: null, mfa: null, response_hash: null, check: null };
@@ -265,7 +267,8 @@ test("resume reports MetaMask's status of each sealed request beside its chain r
     [metaMaskRevocationRequestIdHash(lost), { outcome: "refused", ...empty, reason: "mm_gasless_provider_unavailable" }],
     [metaMaskRevocationRequestIdHash(damaged), { outcome: "refused", ...empty, reason: "provider_request_reference_unmatched" }],
   ]);
-  assert.deepEqual((resumed.operation as Json).revocation_requests, [...expected.keys()].sort().map(hash => ({ request_id_hash: hash, ...expected.get(hash) })));
+  const newestFirst = [damaged, lost, read].map(metaMaskRevocationRequestIdHash);
+  assert.deepEqual((resumed.operation as Json).revocation_requests, newestFirst.map(hash => ({ request_id_hash: hash, ...expected.get(hash) })));
   // One session project read; a request whose seal could not be opened is never read.
   assert.equal(f.revocationReader.sessionReads, 1);
   assert.deepEqual(f.revocationReader.reads.map(entry => entry.requestId).sort(), [read, lost].sort());
