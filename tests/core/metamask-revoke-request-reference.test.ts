@@ -3,19 +3,21 @@
  * it once and kept it nowhere, so after a `pending` or `unknown` answer nobody could read that request again. Now the id
  * is sealed (provider-request-reference-store.ts, lane `metamask-revocation`, one record per request) after the wallet's
  * own check and before the helper starts; a request whose helper provably stopped before any network call has its seal
- * removed again. `operation resume` keeps its chain reads, then lists and opens the sealed ids under the operation lock
- * and reads MetaMask's status of each by its id after the lock is released. Status, receipts and abandonment never open
- * a sealed id. The `mm` reads and the helper are doubles; the store is the real one under a synthetic wrapping secret.
+ * removed again. `operation resume` keeps its chain reads, then lists the sealed requests newest first and opens the ids
+ * of the newest 16 under the operation lock, and reads MetaMask's status of each by its id after that lock is released,
+ * under the provider-session lock. Status, receipts and abandonment never open a sealed id. The `mm` reads and the
+ * helper are doubles; the store is the real one under a synthetic wrapping secret.
  */
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { ApnCore } from "../../src/core.js";
 import { ApnError } from "../../src/errors.js";
 import { MetaMaskGaslessProviderClient } from "../../src/metamask-gasless/client/index.js";
 import type { MetaMaskServerTransactionInput } from "../../src/metamask-gasless/client/server-transaction.js";
+import { runnerDiagnostic, submitFailureError } from "../../src/metamask-gasless/client/submit-diagnostic.js";
 import type { MetaMaskRevocationApprovalPort, MetaMaskRevocationSummary } from "../../src/metamask-gasless/revocation/consent.js";
 import { metaMaskRevocationRequestIdHash, MM_REVOCATION_REQUEST_READ_LIMIT,
   type MetaMaskRevocationReferencesPort } from "../../src/metamask-gasless/revocation/requests.js";
@@ -31,17 +33,20 @@ import { flipped, rewrite } from "./provider-request-reference-helpers.js";
 
 type Fixture = Awaited<ReturnType<typeof mmFixture>>;
 
-/** The real store, with every call written to `log` and a refusal at `ready` or `seal` when set. */
+/** The real store, with every call written to `log` and a refusal at `ready`, `seal` or `discard` when set. */
 class LoggedReferences implements MetaMaskRevocationReferencesPort {
   failReady: Error | undefined;
   failSeal: Error | undefined;
+  failDiscard: Error | undefined;
   constructor(readonly inner: MetaMaskRevocationReferencesPort, readonly log: string[]) {}
   async ready() { this.log.push("ready"); if (this.failReady !== undefined) throw this.failReady; await this.inner.ready(); }
   async seal(binding: ProviderRequestReferenceBinding, reference: string) {
     this.log.push("seal"); if (this.failSeal !== undefined) throw this.failSeal; await this.inner.seal(binding, reference);
   }
   async open(binding: ProviderRequestReferenceBinding) { this.log.push("open"); return await this.inner.open(binding); }
-  async discard(binding: ProviderRequestReferenceBinding) { this.log.push("discard"); await this.inner.discard(binding); }
+  async discard(binding: ProviderRequestReferenceBinding) {
+    this.log.push("discard"); if (this.failDiscard !== undefined) throw this.failDiscard; await this.inner.discard(binding);
+  }
 }
 class Approval implements MetaMaskRevocationApprovalPort {
   readonly seen: MetaMaskRevocationSummary[] = [];
@@ -91,7 +96,15 @@ const scope = (f: Fixture, id: string) => ({ lane: "metamask-revocation", profil
 const binding = (f: Fixture, id: string, requestId: string): ProviderRequestReferenceBinding =>
   ({ ...scope(f, id), providerId: "metamask-agent-wallet", referenceHash: metaMaskRevocationRequestIdHash(requestId) });
 const directory = (f: Fixture, id: string) => join(f.state.root, "metamask-revocation-request-references", f.state.profileHash(f.profile), id);
-const listed = async (f: Fixture, id: string) => await listProviderRequestReferences(f.state, scope(f, id));
+/** The sealed request hashes, in the listing's own order: newest first. */
+const listed = async (f: Fixture, id: string) => (await listProviderRequestReferences(f.state, scope(f, id))).map(record => record.referenceHash);
+/** Gives each sealed request of `ids` its own seal time, one second apart in the order given (the last is the newest). */
+async function sealedAt(f: Fixture, id: string, ids: readonly string[]): Promise<void> {
+  for (const [index, requestId] of ids.entries()) {
+    const seconds = 1_900_000_000 + index;
+    await utimes(join(directory(f, id), `${metaMaskRevocationRequestIdHash(requestId)}.json`), seconds, seconds);
+  }
+}
 /** Seals revoke requests as earlier revokes of the operation left them; returns their ids. */
 async function sealed(f: Fixture, id: string, count: number): Promise<string[]> {
   const ids = Array.from({ length: count }, () => randomUUID());
@@ -164,6 +177,41 @@ test("a helper that provably stopped before any network call leaves no seal; one
   assert.equal(unknown.next_actions.some(action => action.includes(`request_id_hash ${hash}`)), true, "its read is offered");
 });
 
+test("with the real wallet a helper that never started leaves no seal", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await mmFixture(temporary.root), id = await unresolved(f), log: string[] = [];
+  const mm: MetaMaskProcessRunnerPort = { async runJson() {
+    return { exitCode: 0, stdout: Buffer.from(JSON.stringify({ ok: true, data: { mode: "server", chainNamespace: "evm", address: f.binding.address } })) };
+  }, async runForeground() { throw new Error("TEST no foreground mm"); } };
+  // The runner's own refusal before launch: its closed facts say the POST was never reached.
+  const client = new MetaMaskGaslessProviderClient({ environment: {}, clock: f.clock, runner: { async run() {
+    log.push("helper"); throw submitFailureError("mm_gasless_submit_unknown", runnerDiagnostic("runner_launch", false));
+  } } });
+  const result = await revoking(f, new Approval(log), new MetaMaskSdkRevocationWallet(mm, client), new LoggedReferences(f.providerReferences, log))
+    .execute({ ...revoke, operationId: id });
+  assert.equal(result.ok, true, JSON.stringify(result.error));
+  assert.equal((result.data as Json).submission.disposition, "unknown");
+  assert.deepEqual((result.data as Json).submission.submitDiagnostic?.post, "not_reached");
+  assert.deepEqual(log, ["ready", "consent", "seal", "helper", "discard"]);
+  assert.deepEqual(await listed(f, id), [], "the request never left the machine, so its seal is gone");
+  assert.match(result.next_actions[0]!, /^The MetaMask helper stopped before any network call: the helper process did not start/u);
+});
+
+test("an unsent request whose seal cannot be removed keeps it, and the next actions name it", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await mmFixture(temporary.root), id = await unresolved(f), log: string[] = [];
+  const references = new LoggedReferences(f.providerReferences, log), wallet = new Wallet(log, undefined, UNSENT);
+  references.failDiscard = new ApnError("APN_STATE_SECURITY", "State file must have mode 0600.");
+  const result = await revoking(f, new Approval(log), wallet, references).execute({ ...revoke, operationId: id });
+  assert.equal(result.ok, true, JSON.stringify(result.error));
+  assert.equal((result.data as Json).submission.disposition, "unknown", "the answer is kept");
+  const hash = metaMaskRevocationRequestIdHash(wallet.sent[0]!.requestId);
+  assert.deepEqual(await listed(f, id), [hash]);
+  assert.deepEqual(result.next_actions.slice(1), [`The sealed ID of this disable request (request_id_hash ${hash}) could not be removed ` +
+    "(apn_state_security). Resume lists it under revocation_requests; MetaMask never received it, so its read proves nothing.",
+  `apn operation resume --operation ${id}`]);
+});
+
 test("a seal that fails, or a selected-wallet check that refuses, sends nothing; the check refusal seals nothing", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = await mmFixture(temporary.root), id = await unresolved(f);
@@ -234,7 +282,7 @@ test("resume reports MetaMask's status of each sealed request beside its chain r
   assert.equal(f.revocationReader.reads.length, reads);
 });
 
-test("resume reads at most 16 requests and reports the rest; nothing sealed means no field; a dot-file is no request", async (t) => {
+test("resume reads the 16 newest requests and reports the older ones; nothing sealed means no field; a dot-file is no request", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = await mmFixture(temporary.root), id = await unresolved(f);
   const plain = await f.core.execute({ ...resume, operationId: id });
@@ -245,13 +293,33 @@ test("resume reads at most 16 requests and reports the rest; nothing sealed mean
   const resumed = await f.core.execute({ ...resume, operationId: id });
   assert.equal(resumed.ok, true, JSON.stringify(resumed.error));
   const entries = (resumed.operation as Json).revocation_requests as Json[], hashes = await listed(f, id);
-  assert.deepEqual(entries.map(entry => entry.request_id_hash), hashes, "every sealed request, in hash order; the dot-file is none");
+  assert.deepEqual(entries.map(entry => entry.request_id_hash), hashes, "every sealed request, newest first; the dot-file is none");
   assert.deepEqual(entries.slice(0, MM_REVOCATION_REQUEST_READ_LIMIT).map(entry => entry.outcome),
     Array(MM_REVOCATION_REQUEST_READ_LIMIT).fill("not_found"));
   assert.deepEqual(entries.slice(MM_REVOCATION_REQUEST_READ_LIMIT), hashes.slice(MM_REVOCATION_REQUEST_READ_LIMIT).map(hash => ({
     request_id_hash: hash, outcome: "refused", status: null, transaction_hash: null, mfa: null, response_hash: null,
     reason: "revocation_request_read_limit", check: null })));
   assert.equal(f.revocationReader.reads.length, MM_REVOCATION_REQUEST_READ_LIMIT, "the requests past the limit are not read");
+});
+
+test("the newest request is read even when its hash sorts last; the oldest past the limit is reported, not read", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await mmFixture(temporary.root), id = await unresolved(f);
+  const ids = await sealed(f, id, MM_REVOCATION_REQUEST_READ_LIMIT + 1);
+  // Seal times rise with the hash: the newest request has the largest hash, which a hash-ordered read would have skipped.
+  const byHash = [...ids].sort((left, right) => metaMaskRevocationRequestIdHash(left) < metaMaskRevocationRequestIdHash(right) ? -1 : 1);
+  await sealedAt(f, id, byHash);
+  const newest = byHash.at(-1)!, oldest = byHash[0]!;
+  const resumed = await f.core.execute({ ...resume, operationId: id });
+  assert.equal(resumed.ok, true, JSON.stringify(resumed.error));
+  const entries = (resumed.operation as Json).revocation_requests as Json[];
+  assert.deepEqual(entries.map(entry => entry.request_id_hash), [...byHash].reverse().map(metaMaskRevocationRequestIdHash), "newest first");
+  assert.deepEqual([entries[0]!.outcome, entries[0]!.reason], ["not_found", null], "the newest request was read");
+  assert.deepEqual([entries.at(-1)!.request_id_hash, entries.at(-1)!.outcome, entries.at(-1)!.reason],
+    [metaMaskRevocationRequestIdHash(oldest), "refused", "revocation_request_read_limit"]);
+  const readIds = f.revocationReader.reads.map(entry => entry.requestId);
+  assert.equal(readIds.includes(newest), true); assert.equal(readIds.includes(oldest), false);
+  assert.equal(readIds.length, MM_REVOCATION_REQUEST_READ_LIMIT);
 });
 
 test("a lane entry APN never wrote, or no reader, is one refused entry; the chain still proves revoked_unused", async (t) => {
@@ -277,26 +345,29 @@ test("a lane entry APN never wrote, or no reader, is one refused entry; the chai
     [[null, "revocation_request_reader_unavailable"]]);
 });
 
-test("resume opens the sealed ids under the operation lock and reads MetaMask only after it is released", async (t) => {
+test("resume opens the sealed ids under the operation lock and reads MetaMask under the provider-session lock alone", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = await mmFixture(temporary.root), id = await unresolved(f);
   await sealed(f, id, 2);
-  // Counts the locks the command holds on this state; the reads must see none.
-  let held = 0;
+  // Records the lock keys the command holds on this state at each step.
+  const held: string[] = [];
   const state = f.state as unknown as { withLocks: (keys: readonly string[], action: () => Promise<unknown>, options?: { readonly waitMs?: number }) => Promise<unknown> };
   const original = state.withLocks.bind(f.state);
   state.withLocks = async (keys, action, options) => await original(keys, async () => {
-    held += 1; try { return await action(); } finally { held -= 1; }
+    held.push(...keys);
+    try { return await action(); } finally { for (const key of keys) held.splice(held.indexOf(key), 1); }
   }, options);
+  const holding = () => [held.some(key => key.startsWith("operation:")) ? "operation" : null,
+    held.includes("provider-session:metamask-agent-wallet") ? "session" : null].filter(item => item !== null).join("+") || "none";
   const seen: string[] = [];
-  const reader = { sessionProject: async () => { seen.push(`project ${held}`); return { projectHash: "c".repeat(64) }; },
-    read: async () => { seen.push(`read ${held}`); return { outcome: "not_found" } as const; } };
+  const reader = { sessionProject: async () => { seen.push(`project ${holding()}`); return { projectHash: "c".repeat(64) }; },
+    read: async () => { seen.push(`read ${holding()}`); return { outcome: "not_found" } as const; } };
   const references = { ready: async () => {}, seal: async () => assert.fail("resume seals nothing"), discard: async () => assert.fail("resume discards nothing"),
-    open: async (sealedBinding: ProviderRequestReferenceBinding) => { seen.push(`open ${held}`); return await f.providerReferences.open(sealedBinding); } };
+    open: async (sealedBinding: ProviderRequestReferenceBinding) => { seen.push(`open ${holding()}`); return await f.providerReferences.open(sealedBinding); } };
   const resumed = await new ApnCore({ state: f.state, clock: f.clock, wait: f.wait,
     metaMaskGasless: { ...f.dependencies, revocationReads: { references, reader } } }).execute({ ...resume, operationId: id });
   assert.equal(resumed.ok, true, JSON.stringify(resumed.error));
-  assert.deepEqual(seen, ["open 1", "open 1", "project 0", "read 0", "read 0"]);
+  assert.deepEqual(seen, ["open operation", "open operation", "project session", "read session", "read session"]);
 });
 
 test("status, receipts and abandonment never open a sealed revoke request id; resume does", async (t) => {

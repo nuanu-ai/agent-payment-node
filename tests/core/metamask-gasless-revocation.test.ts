@@ -55,7 +55,8 @@ class Wallet implements MetaMaskRevocationWalletPort {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 /** The step a pending or possibly sent disable names: read this request's MetaMask status again by its hash. */
 const readAgain = (hash: string, id: string) => `Run apn operation resume --operation ${id} to read MetaMask's status of this disable ` +
-  `request again: it lists it under revocation_requests as request_id_hash ${hash}. That status is MetaMask's word; the chain read stays the record.`;
+  `request again: it lists it under revocation_requests as request_id_hash ${hash}. Resume reads the 16 newest disable requests of an ` +
+  "operation and reports older ones as not read. That status is MetaMask's word; the chain read stays the record.";
 
 test("the disable call carries exactly the dispatched delegation, whose official hash is the operation's", () => {
   const value = intent(block(8453, 100n)), call = mmDisableCall(value);

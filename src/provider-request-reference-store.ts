@@ -1,3 +1,4 @@
+import { lstat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { canonicalJson, exactKeys, isPlainRecord, sha256 } from "./canonical.js";
 import { openNested, sealNested, type EnvelopeSpec, type NestedHeader } from "./custody-envelope.js";
@@ -176,38 +177,51 @@ class ReferenceFiles extends SecureStateStore {
   }
 }
 
-/** One operation of a per-request lane, whose sealed request hashes `listProviderRequestReferences` reads. */
+/** One operation of a per-request lane, whose sealed requests `listProviderRequestReferences` reads. */
 export interface ProviderRequestReferenceScope {
   readonly lane: ProviderRequestReferenceLane;
   readonly profileHash: string;
   readonly operationId: string;
 }
+/**
+ * One sealed request of a per-request lane: its reference hash and its record file's modification time, which is when
+ * its seal was written (a record is created once and never rewritten).
+ */
+export interface ProviderRequestReferenceRecord {
+  readonly referenceHash: string;
+  readonly writtenAtMs: number;
+}
 const SEALED_FILE = /^[a-f0-9]{64}\.json$/u;
 
 /**
- * The reference hashes sealed for one operation in a per-request lane, in hash order. A directory listing of the state
- * root the store writes to: no Keychain read, nothing opened. An absent directory holds none; a directory that is not
- * the owner's own refuses (`APN_STATE_SECURITY`), as every state read does. Atomic-write stages and every other name
- * that starts with a dot (Finder's .DS_Store) are not records, as the wrapping-secret guard reads them. Every other
- * entry must be a regular file named `<64 hex>.json`, the only name the store writes; anything else (another name, a
- * link, a directory) refuses the whole listing with `APN_STATE_CORRUPT / provider_request_reference_listing_invalid`,
- * and is never skipped.
+ * The requests sealed for one operation in a per-request lane, newest first (by the record file's modification time,
+ * then by hash). A directory listing of the state root the store writes to, with one `lstat` per record: no Keychain
+ * read, nothing opened. An absent directory holds none; a directory that is not the owner's own refuses
+ * (`APN_STATE_SECURITY`), as every state read does. Atomic-write stages and regular files whose name starts with a dot
+ * (Finder's .DS_Store) are not records, as the wrapping-secret guard reads them. Every other entry must be a regular
+ * file named `<64 hex>.json`, the only name the store writes; anything else (another name, a link, a directory, a
+ * dot-named link or directory) refuses the whole listing with `APN_STATE_CORRUPT /
+ * provider_request_reference_listing_invalid`, and is never skipped.
  */
-export async function listProviderRequestReferences(state: Pick<SecureStateStore, "recordEntries">,
-  scopeInput: ProviderRequestReferenceScope): Promise<readonly string[]> {
+export async function listProviderRequestReferences(state: Pick<SecureStateStore, "recordEntries" | "root">,
+  scopeInput: ProviderRequestReferenceScope): Promise<readonly ProviderRequestReferenceRecord[]> {
   const scope = referenceScope(scopeInput);
   const directory = join(PROVIDER_REQUEST_REFERENCE_DIRECTORIES[scope.lane], scope.profileHash, scope.operationId);
-  const hashes: string[] = [];
+  const unlisted = (): never => {
+    throw new ApnError("APN_STATE_CORRUPT", `The sealed provider request references of this operation (${directory}) hold an entry APN never writes.`,
+      { reason: "provider_request_reference_listing_invalid", operationId: scope.operationId,
+        nextActions: [`apn operation status --operation ${scope.operationId}`] });
+  };
+  const records: ProviderRequestReferenceRecord[] = [];
   for (const entry of await state.recordEntries(directory)) {
-    if (entry.name.startsWith(".")) continue;
-    if (!entry.isFile() || !SEALED_FILE.test(entry.name)) {
-      throw new ApnError("APN_STATE_CORRUPT", `The sealed provider request references of this operation (${directory}) hold an entry APN never writes.`,
-        { reason: "provider_request_reference_listing_invalid", operationId: scope.operationId,
-          nextActions: [`apn operation status --operation ${scope.operationId}`] });
-    }
-    hashes.push(entry.name.slice(0, -".json".length));
+    if (entry.isFile() && entry.name.startsWith(".")) continue;
+    if (!entry.isFile() || !SEALED_FILE.test(entry.name)) unlisted();
+    const info = await lstat(join(state.root, directory, entry.name));
+    if (!info.isFile()) unlisted();
+    records.push({ referenceHash: entry.name.slice(0, -".json".length), writtenAtMs: info.mtimeMs });
   }
-  return hashes.sort();
+  return records.sort((left, right) => right.writtenAtMs - left.writtenAtMs ||
+    (left.referenceHash < right.referenceHash ? -1 : left.referenceHash > right.referenceHash ? 1 : 0));
 }
 
 function referenceScope(value: ProviderRequestReferenceScope): ProviderRequestReferenceScope {

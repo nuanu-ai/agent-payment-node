@@ -156,8 +156,9 @@ export class MetaMaskGaslessService {
   /**
    * `operation resume`: the chain reads below, exactly as they are, then MetaMask's status of each disable request sealed
    * for the operation (`revocation_requests`, present only when one is sealed or the lane cannot be listed). Under the
-   * operation lock, after the chain reads, the sealed requests are listed and their ids opened; MetaMask is read after the
-   * lock is released (those reads write nothing, and the seals are create-only). Nothing of them is written to the
+   * operation lock, after the chain reads, the sealed requests are listed newest first and the ids of the newest 16
+   * opened; MetaMask is read after that lock is released, under the provider-session lock alone, as the gasless
+   * observation reads it (those reads write nothing, and the seals are create-only). Nothing of them is written to the
    * operation, and no failure of theirs fails the resume.
    */
   async resume(operationId: string, observationRpcEnv?: string) {
@@ -166,7 +167,10 @@ export class MetaMaskGaslessService {
       const observed = await this.observeLocked(op, environmentName);
       return { result: observed, opened: await openMetaMaskRevocationRequests(this.context.state, this.context.metaMaskGasless?.revocationReads, op) };
     });
-    return opened === undefined ? result : { ...result, revocation_requests: await readMetaMaskRevocationRequests(opened) };
+    if (opened === undefined) return result;
+    const reads = await readMetaMaskRevocationRequests(opened, async work =>
+      await this.context.state.withLocks(["provider-session:metamask-agent-wallet"], work));
+    return { ...result, revocation_requests: reads };
   }
   /** The chain reads alone, as resume makes them; the observation an abandonment runs first. It opens no sealed id. */
   async observeChain(operationId: string) {

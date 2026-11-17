@@ -9,7 +9,8 @@ import type { MetaMaskGaslessRpcFactory } from "../ports.js";
 import { mmDisableCall } from "./call.js";
 import { mmRevocationPayload } from "./chain.js";
 import { metaMaskRevocationSummary, type MetaMaskRevocationApprovalPort } from "./consent.js";
-import { discardMetaMaskRevocationRequest, sealMetaMaskRevocationRequest, type MetaMaskRevocationReferencesPort } from "./requests.js";
+import { discardMetaMaskRevocationRequest, MM_REVOCATION_REQUEST_READ_LIMIT, sealMetaMaskRevocationRequest,
+  type MetaMaskRevocationReferencesPort } from "./requests.js";
 import { metaMaskRevocationUnsentCause, type MetaMaskRevocationUnsentCause, type MetaMaskRevocationWalletPort } from "./wallet.js";
 
 /** The states in which a dispatched delegation may still be redeemable and nothing proves its outcome. */
@@ -112,11 +113,13 @@ function sealKept(requestIdHash: string, reason: string): string {
 
 /**
  * After a pending or an unknown answer that may have reached MetaMask: the resume reads this very request's MetaMask
- * status again by its sealed id, beside its chain reads. A request that provably never left the machine is not named.
+ * status again by its sealed id, beside its chain reads, while it is among the operation's newest requests. A request
+ * that provably never left the machine is not named.
  */
 function readAgain(requestIdHash: string, id: string): string {
   return `Run apn operation resume --operation ${id} to read MetaMask's status of this disable request again: it lists it under ` +
-    `revocation_requests as request_id_hash ${requestIdHash}. That status is MetaMask's word; the chain read stays the record.`;
+    `revocation_requests as request_id_hash ${requestIdHash}. Resume reads the ${MM_REVOCATION_REQUEST_READ_LIMIT} newest disable ` +
+    "requests of an operation and reports older ones as not read. That status is MetaMask's word; the chain read stays the record.";
 }
 
 /** The server wallet's native balance must cover the disable's priced maximum cost; otherwise nothing is sent. */

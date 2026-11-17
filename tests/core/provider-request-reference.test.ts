@@ -6,7 +6,7 @@
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { test } from "node:test";
@@ -123,6 +123,8 @@ test("readiness mints the first secret for a state that holds nothing sealed and
 const REVOKE_REQUEST = "0b6e2f3a-5c1d-4e8f-9a7b-1c2d3e4f5a6b";
 const revokeScope = { lane: "metamask-revocation", profileHash: "a".repeat(64), operationId: "b".repeat(64) } as const;
 const revokeDirectory = (state: StateStore) => join(state.root, "metamask-revocation-request-references", "a".repeat(64), "b".repeat(64));
+/** The listed reference hashes, in the listing's own order (newest first). */
+const listedHashes = async (state: StateStore) => (await listProviderRequestReferences(state, revokeScope)).map(record => record.referenceHash);
 
 test("the revoke lane keeps one record per request under its operation, never replaced, and lists their hashes; the other lanes keep their paths", async () => {
   const root = await sandbox();
@@ -132,7 +134,7 @@ test("the revoke lane keeps one record per request under its operation, never re
     const ids = [REQUEST, REVOKE_REQUEST], bindings = ids.map(id => bindingFor("metamask-revocation", "b".repeat(64), id));
     assert.deepEqual(await listProviderRequestReferences(state, revokeScope), [], "an operation with no request lists none");
     for (const [index, binding] of bindings.entries()) await store.seal(binding, ids[index]!);
-    assert.deepEqual(await listProviderRequestReferences(state, revokeScope), bindings.map(binding => binding.referenceHash).sort());
+    assert.deepEqual([...await listedHashes(state)].sort(), bindings.map(binding => binding.referenceHash).sort());
     for (const [index, binding] of bindings.entries()) assert.equal(await store.open(binding), ids[index]);
     const path = join(revokeDirectory(state), `${bindings[0]!.referenceHash}.json`), text = await readFile(path, "utf8");
     assert.equal(text.includes(REQUEST), false);
@@ -166,13 +168,16 @@ test("a revoke lane listing holds only the names the store writes; dot-files are
       const binding = bindingFor("metamask-revocation", "b".repeat(64), REVOKE_REQUEST);
       await new EncryptedProviderRequestReferenceStore(state, new ReferenceTestSecret()).seal(binding, REVOKE_REQUEST);
       await writeFile(join(revokeDirectory(state), ".DS_Store"), "", { mode: 0o600 });
-      assert.deepEqual(await listProviderRequestReferences(state, revokeScope), [binding.referenceHash]);
+      assert.deepEqual(await listedHashes(state), [binding.referenceHash]);
     });
     const cases: ReadonlyArray<readonly [string, (directory: string, sealed: string) => Promise<unknown>]> = [
       ["another name", async directory => await writeFile(join(directory, "note.json"), "{}", { mode: 0o600 })],
       ["an upper-case hash", async directory => await writeFile(join(directory, `${"A".repeat(64)}.json`), "{}", { mode: 0o600 })],
       ["a directory", async directory => await mkdir(join(directory, `${"c".repeat(64)}.json`), { mode: 0o700 })],
       ["a link", async (directory, sealed) => await symlink(sealed, join(directory, `${"d".repeat(64)}.json`))],
+      // Only a regular file named with a dot is skipped; the wrapping-secret guard counts a dot-named directory or link.
+      ["a dot-named directory", async directory => await mkdir(join(directory, ".hidden"), { mode: 0o700 })],
+      ["a dot-named link", async (directory, sealed) => await symlink(sealed, join(directory, ".linked"))],
     ];
     for (const [name, damage] of cases) await t.test(name, async () => {
       const state = new StateStore(join(root, name.replaceAll(" ", "-"))); await state.initialize();
@@ -219,14 +224,32 @@ test("a revoke lane record is discarded by its exact path only; the other lanes 
     assert.deepEqual([...before.keys()].filter(file => !after.has(file)), [join(revokeDirectory(state), `${gone.referenceHash}.json`)],
       "exactly that one file went");
     for (const [file, text] of after) assert.equal(before.get(file), text, "every other record is as it was");
-    assert.deepEqual(await listProviderRequestReferences(state, revokeScope), [kept.referenceHash]);
+    assert.deepEqual(await listedHashes(state), [kept.referenceHash]);
     await assert.rejects(store.open(gone), refused("APN_STATE_CORRUPT", "provider_request_reference_unmatched"));
     assert.equal(await store.open(kept), REVOKE_REQUEST);
     await store.discard(gone);
-    assert.deepEqual(await listProviderRequestReferences(state, revokeScope), [kept.referenceHash], "an absent record stays absent");
+    assert.deepEqual(await listedHashes(state), [kept.referenceHash], "an absent record stays absent");
     for (const lane of LANES) {
       await assert.rejects(store.discard(bindingFor(lane)), refused("APN_INTERNAL"), `${lane} records are never discarded`);
       assert.equal(await store.open(bindingFor(lane)), REQUEST);
     }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("the revoke lane lists newest first: by the record file's modification time, then by hash", async () => {
+  const root = await sandbox();
+  try {
+    const state = new StateStore(join(root, "state")); await state.initialize();
+    const store = new EncryptedProviderRequestReferenceStore(state, new ReferenceTestSecret());
+    const ids = [REQUEST, REVOKE_REQUEST, "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b"];
+    const bindings = ids.map(id => bindingFor("metamask-revocation", "b".repeat(64), id));
+    for (const [index, binding] of bindings.entries()) await store.seal(binding, ids[index]!);
+    const [low, middle, high] = bindings.map(binding => binding.referenceHash).sort() as [string, string, string];
+    // The smallest hash is the newest; the other two were sealed at one and the same earlier instant.
+    const at = (hash: string, seconds: number) => utimes(join(revokeDirectory(state), `${hash}.json`), seconds, seconds);
+    await at(low, 2_000_000_000); await at(middle, 1_900_000_000); await at(high, 1_900_000_000);
+    assert.deepEqual(await listProviderRequestReferences(state, revokeScope), [
+      { referenceHash: low, writtenAtMs: 2_000_000_000_000 }, { referenceHash: middle, writtenAtMs: 1_900_000_000_000 },
+      { referenceHash: high, writtenAtMs: 1_900_000_000_000 }]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

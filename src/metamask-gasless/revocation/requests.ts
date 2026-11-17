@@ -2,7 +2,7 @@ import { ApnError } from "../../errors.js";
 import type { Hex } from "../../model.js";
 import type { MetaMaskNativeRequestBinding, MetaMaskNativeServerRequestAnswer } from "../../metamask-native-request-server-read.js";
 import { listProviderRequestReferences, providerRequestReferenceHash, type ProviderRequestReferenceBinding,
-  type ProviderRequestReferenceDiscardPort, type ProviderRequestReferencePort,
+  type ProviderRequestReferenceDiscardPort, type ProviderRequestReferencePort, type ProviderRequestReferenceRecord,
   type ProviderRequestReferenceScope } from "../../provider-request-reference-store.js";
 import type { SecureStateStore } from "../../secure-state-store.js";
 import { mmDispatchIntent } from "../dispatch.js";
@@ -18,8 +18,9 @@ import type { MetaMaskGaslessOperationRecord } from "../operation-model.js";
  */
 const PROVIDER = "metamask-agent-wallet";
 /**
- * The most sealed disable requests one resume reads, in hash order: each read is its own helper run. Every request past
- * it is still reported, with `revocation_request_read_limit`, and is not opened. Revoke itself has no limit.
+ * The most sealed disable requests one resume reads: the newest ones, by when each was sealed. Each read is its own
+ * helper run. Every older request is still reported, with `revocation_request_read_limit`, and is not opened. Revoke
+ * itself has no limit.
  */
 export const MM_REVOCATION_REQUEST_READ_LIMIT = 16;
 
@@ -106,21 +107,21 @@ export interface MetaMaskRevocationRequestsOpened {
 }
 
 /**
- * Under the operation lock, after resume's chain reads: lists the operation's sealed disable requests and opens the id of
- * each, up to the read limit, in hash order. Nothing is sealed: `undefined`, and resume adds no field. A listing that
- * fails, or a reader that is not wired while requests are sealed, is one `refused` entry with no hash; it never fails
- * the resume. An id that cannot be opened is its own `refused` entry; a request past the read limit is reported and not
- * opened. Nothing here reads MetaMask.
+ * Under the operation lock, after resume's chain reads: lists the operation's sealed disable requests, newest first (the
+ * listing's order, which output keeps), and opens the id of each up to the read limit. Nothing is sealed: `undefined`,
+ * and resume adds no field. A listing that fails, or a reader that is not wired while requests are sealed, is one
+ * `refused` entry with no hash; it never fails the resume. An id that cannot be opened is its own `refused` entry; an
+ * older request past the read limit is reported and not opened. Nothing here reads MetaMask.
  */
-export async function openMetaMaskRevocationRequests(state: Pick<SecureStateStore, "recordEntries">,
+export async function openMetaMaskRevocationRequests(state: Pick<SecureStateStore, "recordEntries" | "root">,
   dependencies: MetaMaskRevocationReadDependencies | undefined, op: MetaMaskGaslessOperationRecord): Promise<MetaMaskRevocationRequestsOpened | undefined> {
-  let hashes: readonly string[];
-  try { hashes = await listProviderRequestReferences(state, scope(op)); }
+  let records: readonly ProviderRequestReferenceRecord[];
+  try { records = await listProviderRequestReferences(state, scope(op)); }
   catch (error) { return { requests: [{ kind: "reported", read: refused(null, closedReason(error, "provider_request_reference_listing_unreadable"), null) }] }; }
-  if (hashes.length === 0) return undefined;
+  if (records.length === 0) return undefined;
   if (dependencies === undefined) return { requests: [{ kind: "reported", read: refused(null, "revocation_request_reader_unavailable", null) }] };
   const requests: OpenedRequest[] = [];
-  for (const [index, hash] of hashes.entries()) {
+  for (const [index, { referenceHash: hash }] of records.entries()) {
     if (index >= MM_REVOCATION_REQUEST_READ_LIMIT) { requests.push({ kind: "reported", read: refused(hash, "revocation_request_read_limit", null) }); continue; }
     try { requests.push({ kind: "opened", hash, requestId: await dependencies.references.open(reference(op, hash)) }); }
     catch (error) { requests.push({ kind: "reported", read: refused(hash, closedReason(error, "provider_request_reference_unreadable"), null) }); }
@@ -130,20 +131,36 @@ export async function openMetaMaskRevocationRequests(state: Pick<SecureStateStor
   return { requests, reading: { reader: dependencies.reader, binding: { sender: dispatched.binding.address, chainId: dispatched.request.chainId } } };
 }
 
+/** Runs MetaMask's reads under the provider-session lock, as every other read of the MetaMask session does. */
+export type MetaMaskRevocationProviderSession = (work: () => Promise<readonly MetaMaskRevocationRequestRead[]>) =>
+  Promise<readonly MetaMaskRevocationRequestRead[]>;
+
 /**
- * After the operation lock is released: the session's project once, then MetaMask's answer for each opened id through
- * the sandboxed helper, in the listing's order. They write nothing, and the seals they read are create-only. A failure
- * of one request is that entry's own `refused` reason; without a session project every opened request carries that
- * reason and none is read.
+ * After the operation lock is released, under the provider-session lock: the session's project once, then MetaMask's
+ * answer for each opened id through the sandboxed helper, in the listing's order. They write nothing, and the seals they
+ * read are create-only. A failure of one request is that entry's own `refused` reason; without a session project every
+ * opened request carries that reason and none is read. A provider-session lock that cannot be taken (another command
+ * holds the MetaMask session) gives every opened request that lock's reason, and none is read.
  */
-export async function readMetaMaskRevocationRequests(opened: MetaMaskRevocationRequestsOpened): Promise<readonly MetaMaskRevocationRequestRead[]> {
+export async function readMetaMaskRevocationRequests(opened: MetaMaskRevocationRequestsOpened,
+  providerSession: MetaMaskRevocationProviderSession): Promise<readonly MetaMaskRevocationRequestRead[]> {
   const reading = opened.reading;
   if (reading === undefined) return opened.requests.map(request => request.kind === "reported" ? request.read : internal());
+  try { return await providerSession(async () => await readOpened(opened.requests, reading)); }
+  catch (error) {
+    const reason = closedReason(error, "metamask_provider_session_unavailable");
+    return opened.requests.map(request => request.kind === "reported" ? request.read : refused(request.hash, reason, null));
+  }
+}
+
+/** Never throws: the project read and each request read keep their own failure. */
+async function readOpened(requests: readonly OpenedRequest[], reading: NonNullable<MetaMaskRevocationRequestsOpened["reading"]>):
+  Promise<readonly MetaMaskRevocationRequestRead[]> {
   let project: MetaMaskRevocationSessionProject;
   try { project = await reading.reader.sessionProject(); }
   catch (error) { project = { reason: closedReason(error, "metamask_session_read_failed") }; }
   const reads: MetaMaskRevocationRequestRead[] = [];
-  for (const request of opened.requests) {
+  for (const request of requests) {
     reads.push(request.kind === "reported" ? request.read : await readOne(reading, request.hash, request.requestId, project));
   }
   return reads;
