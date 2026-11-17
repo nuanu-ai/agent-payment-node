@@ -121,8 +121,9 @@ test("Sei 7ca4e73c shape: the owner's wallet disables the delegation once, then 
     referenceHash: hash } as const;
   assert.equal(await f.providerReferences.open(sealed), requestId);
   f.rpc.phase = "disabled";
-  const status = await f.core.execute({ command: "operation.status", operationId: id });
-  assert.equal(status.ok, true); assert.equal((status.operation as Json).revocation_requests, undefined, "status lists no revoke request");
+  const disabledStatus = await f.core.execute({ command: "operation.status", operationId: id });
+  assert.equal(disabledStatus.ok, true);
+  assert.equal((disabledStatus.operation as Json).revocation_requests, undefined, "status lists no revoke request");
   f.revocationReader.answers.set(requestId, { outcome: "verified", status: "AWAITING_MFA", transactionHash: null,
     mfa: { expiresAt: "2030-01-01T00:10:00.000Z", authMethod: "qr" }, responseHash: "f".repeat(64) });
   const proved = await f.core.execute({ command: "operation.resume", operationId: id });
