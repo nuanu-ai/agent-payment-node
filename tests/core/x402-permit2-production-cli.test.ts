@@ -133,7 +133,8 @@ test("strict CLI flags, legacy status and MCP projection preserve CLI-only paid/
 test("observe CLI uses explicit readonly candidate despite bad hint and genuine proof alone finalizes without keys/UI/resource", async t => {
   const f = await permit2CliFixture(t, false, false); await f.journal.markSignatureRisk(f.record.operationId); await f.journal.storeSigned(f.record.operationId, f.signed); await f.journal.markRequestPending(f.record.operationId);
   const response = Buffer.from(canonicalJson({ success: true, transaction: `0x${"f".repeat(64)}`, network: "eip155:43114", payer: f.record.material.wallet.account.toLowerCase(), amount: "10000" })).toString("base64");
-  await new Permit2ProductionResults(f.state, f.journal).recordHttp(f.record.operationId, { status: 200, rawHeaderPairs: [["payment-response", response]] });
+  assert.equal((await new Permit2ProductionResults(f.state, f.journal).recordHttp(f.record.operationId,
+    { status: 200, rawHeaderPairs: [["payment-response", response]], bodyBytes: Buffer.alloc(0) })).code, "hint_saved");
   t.mock.method(TtyPermit2ForegroundApproval.prototype, "approve", async () => { throw new Error("No UI observation"); });
   const result = await runCli(observe(f, "--transaction", f.input.locator!), {}, options(f));
   assert.equal(result.ok, true); safe(result); assert.equal((await f.journal.findOperation(f.record.operationId))!.state, "settled");

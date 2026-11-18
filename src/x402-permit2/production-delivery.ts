@@ -3,7 +3,7 @@ import { publicPermit2Production, type Permit2ProductionRecord } from "./product
 
 /** Why a sent paid request has no confirmed seller answer. */
 export type Permit2DeliveryReason =
-  /** No answer is recorded: the request timed out, the transport refused it, or it is still running. */
+  /** No answer is recorded: the request timed out, the transport refused it, it is still running, or saving it failed. */
   | "no_answer"
   /** The saved answer record exists but cannot be read or does not match the operation. */
   | "answer_unreadable"
@@ -11,7 +11,7 @@ export type Permit2DeliveryReason =
   | "answer_before_0_5_110"
   /** The seller answered outside 2xx. */
   | "answer_not_2xx"
-  /** The answer's PAYMENT-RESPONSE was a failure or did not match this payer, amount and network. */
+  /** The answer's PAYMENT-RESPONSE was a failure, malformed, or named another network, payer or amount. */
   | "payment_response_refused"
   /** The answer named a transaction other than the settled one. */
   | "answer_names_other_transaction";
@@ -19,7 +19,8 @@ export type Permit2DeliveryReason =
 /**
  * The seller's answer to the one paid request, apart from payment. `state` of the operation says whether it is paid
  * (`settled`); this says whether the seller delivered. `received`: a 2xx answer whose PAYMENT-RESPONSE, if present, is a
- * matching success or pending one and, once settled with a known transaction, names that transaction. `resultHash` is
+ * success or pending one for this network (and this payer and amount where it names them) and, once a settlement with a
+ * known transaction is recorded, names that transaction. `resultHash` is
  * the body's hash by the x402 result rule (`apn.x402.result-body.v1`); APN keeps no body. `unconfirmed`: a request was
  * sent but no such answer is recorded, and `reason` says why. `not_requested`: no paid request was sent.
  */
@@ -44,7 +45,9 @@ export function permit2Delivery(record: Permit2ProductionRecord, hint: Permit2Ht
   if (hint.classification === "failure_hint" || hint.classification === "invalid_response") {
     return { state: "unconfirmed", reason: "payment_response_refused", ...answer };
   }
-  const settled = record.state === "settled" ? record.exposureJournal?.terminalIntent?.transactionHash ?? null : null;
+  // The settled intent decides, not the record state: `terminal_pending` with it reads the same as `settled`.
+  const intent = record.exposureJournal?.terminalIntent ?? null;
+  const settled = intent?.outcome === "settled" ? intent.transactionHash : null;
   if (settled !== null && hint.locator !== null && settled.toLowerCase() !== hint.locator.toLowerCase()) {
     return { state: "unconfirmed", reason: "answer_names_other_transaction", ...answer };
   }
