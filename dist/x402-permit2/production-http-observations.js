@@ -5,8 +5,11 @@ import { evmAddressLock } from "../evm-address-ownership.js";
 import { decodeAndNormalizePaymentResponseHeader } from "../x402-codec.js";
 import { reconstructPermit2ProductionMaterial } from "./production-material.js";
 import { Permit2ProductionRepository } from "./production-repository.js";
-const SCHEMA = "apn.permit2-production-http-observation.v1", DIRECTORY = "permit2-production-http-observations";
-const HASH = /^[a-f0-9]{64}$/u, TRANSACTION = /^0x[a-f0-9]{64}$/u;
+/** Since 0.5.110 a hint also keeps the answer body's hash and length; v1 hints (0.5.107–0.5.109) never did. */
+export const PERMIT2_HTTP_OBSERVATION_SCHEMA = "apn.permit2-production-http-observation.v2";
+const SCHEMA = PERMIT2_HTTP_OBSERVATION_SCHEMA, SCHEMA_V1 = "apn.permit2-production-http-observation.v1";
+const DIRECTORY = "permit2-production-http-observations";
+const HASH = /^[a-f0-9]{64}$/u, TRANSACTION = /^0x[a-f0-9]{64}$/u, MAX_BODY_BYTES = 256 * 1024;
 const CLASSIFICATIONS = ["no_header", "invalid_response", "success_hint", "pending_hint", "failure_hint"];
 export function normalizePermit2Locator(value) {
     if (typeof value !== "string" || !/^0x[a-fA-F0-9]{64}$/u.test(value) || /^0x0{64}$/u.test(value))
@@ -21,11 +24,17 @@ function binding(record) {
         challengeHash: record.material.checked.challengeHash, signedHash: signed.signedHash };
 }
 export function validatePermit2HttpLocatorHint(value, record) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "materialHash", "requestHash", "challengeHash",
-        "signedHash", "httpStatus", "paymentResponseHeaderHash", "classification", "locator"]))
+    const keys = ["schemaVersion", "operationId", "materialHash", "requestHash", "challengeHash",
+        "signedHash", "httpStatus", "paymentResponseHeaderHash", "classification", "locator"];
+    if (!isPlainRecord(value) || (value.schemaVersion !== SCHEMA && value.schemaVersion !== SCHEMA_V1) ||
+        !exactKeys(value, value.schemaVersion === SCHEMA ? [...keys, "bodyHash", "bodyByteLength"] : keys))
+        invalid();
+    if (value.schemaVersion === SCHEMA && (typeof value.bodyHash !== "string" || !HASH.test(value.bodyHash) ||
+        typeof value.bodyByteLength !== "string" || !/^(?:0|[1-9][0-9]{0,6})$/u.test(value.bodyByteLength) ||
+        Number(value.bodyByteLength) > MAX_BODY_BYTES))
         invalid();
     const b = binding(record);
-    if (value.schemaVersion !== SCHEMA || !Number.isInteger(value.httpStatus) || Number(value.httpStatus) < 100 || Number(value.httpStatus) > 599 ||
+    if (!Number.isInteger(value.httpStatus) || Number(value.httpStatus) < 100 || Number(value.httpStatus) > 599 ||
         !CLASSIFICATIONS.includes(value.classification) ||
         value.paymentResponseHeaderHash !== null && (typeof value.paymentResponseHeaderHash !== "string" || !HASH.test(value.paymentResponseHeaderHash)) ||
         value.locator !== null && (typeof value.locator !== "string" || !TRANSACTION.test(value.locator) || /^0x0{64}$/u.test(value.locator)))
@@ -43,6 +52,10 @@ export function permit2HttpLocatorHint(record, observation) {
     const b = binding(record);
     if (!isPlainRecord(observation) || !Number.isInteger(observation.status) || Number(observation.status) < 100 || Number(observation.status) > 599)
         invalid();
+    const bytes = observation.bodyBytes;
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength > MAX_BODY_BYTES)
+        invalid();
+    const body = { bodyHash: domainHash("apn.x402.result-body.v1", bytes), bodyByteLength: bytes.byteLength.toString() };
     let classification = "no_header", locator = null, headerHash = null;
     try {
         const pairs = observation.rawHeaderPairs;
@@ -83,7 +96,8 @@ export function permit2HttpLocatorHint(record, observation) {
         classification = "invalid_response";
         locator = null;
     }
-    return validatePermit2HttpLocatorHint({ schemaVersion: SCHEMA, ...b, httpStatus: observation.status, paymentResponseHeaderHash: headerHash, classification, locator }, record);
+    return validatePermit2HttpLocatorHint({ schemaVersion: SCHEMA, ...b, httpStatus: observation.status, paymentResponseHeaderHash: headerHash,
+        classification, locator, ...body }, record);
 }
 /** First observation is immutable under the established profile/operation/EVM group. */
 export class Permit2HttpObservationStore extends SecureStateStore {
