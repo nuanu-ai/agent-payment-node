@@ -1,9 +1,10 @@
-/** Read-only status of one real Permit2 operation from the production journal: no initialization, locks, repair or network. */
+/** Read-only status of one real Permit2 operation from the production journal and its saved seller answer: no initialization, locks, repair or network. */
 export declare function readPermit2ProductionStatus(root: string, requestedProfile: string, operationId: string): Promise<{
     operationId: string;
     profile: string;
     state: "not_found";
 } | {
+    delivery: import("./production-delivery.js").Permit2Delivery;
     lifecycle: string;
     observeOnly: boolean;
     operationId: string;

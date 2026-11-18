@@ -164,8 +164,9 @@ apn x402 permit2 status --profile <profile> --operation <operation-id>
 ```
 
 `status` and MCP `apn_x402_permit2_status` read the operation from the Permit2 journal (`permit2-production/`), the same
-record `approve` and `observe` write. They return a redacted view: state, lifecycle, terminal flag, chain, payer,
-recipient, token, amount, deadline and resource origin.
+record `approve` and `observe` write, and the saved seller answer (`permit2-production-http-observations/`). They return a
+redacted view: state, lifecycle, terminal flag, chain, payer, recipient, token, amount, deadline, resource origin and
+[delivery](#delivery).
 
 `capability` and `blockerCodes` say what can still run for the operation, the same in `approve`, `observe`, `status`,
 MCP `apn_x402_permit2_status` and the generic `operation status`:
@@ -179,6 +180,43 @@ MCP `apn_x402_permit2_status` and the generic `operation status`:
 Only the foreground CLI `x402 permit2 approve` executes an unsigned operation; no MCP tool and no generic approve does.
 Through 0.5.106 every operation read `execution_blocked` with `permit2_production_execution_not_wired`, a settled
 payment too. The view is computed when it is read and is never stored, so earlier records read the new values.
+
+### Delivery
+
+`state` says whether the operation is paid: only `settled` is. `capability: completed` means only that nothing more
+runs. Since 0.5.110 the same views add `delivery`, the seller's answer to the one paid request, kept apart from payment:
+
+| `delivery.state` | Meaning |
+| --- | --- |
+| `not_requested` | No paid request was sent. |
+| `received` | The answer was 2xx (any 2xx status, shown in `httpStatus`). Its `PAYMENT-RESPONSE`, if present, was a success or pending one for this network, and for this payer and amount where it names them. Once a settlement with a known transaction is recorded, it named that transaction. A settlement proven by the nonce alone names no transaction, so this check does not apply to it. |
+| `unconfirmed` | A paid request was sent, but no such answer is recorded. `reason` says why. |
+
+`delivery` also has `reason`, `httpStatus`, `resultHash` and `byteLength`. `resultHash` is the hash of the answer body by
+the x402 result rule (`apn.x402.result-body.v1`, the rule of the standard x402 `resultHash`). This lane keeps the hash
+and the length, never the body.
+
+| `reason` | Meaning |
+| --- | --- |
+| `no_answer` | No answer is recorded: the request timed out, the transport refused it, it is still running, or saving the answer failed. |
+| `answer_not_2xx` | The seller answered outside 2xx. |
+| `payment_response_refused` | The answer's `PAYMENT-RESPONSE` was a failure, was malformed, or named another network, payer or amount. |
+| `answer_names_other_transaction` | The answer named a transaction other than the settled one. |
+| `answer_unreadable` | The saved answer exists but cannot be read or does not match the operation. Status still answers. |
+| `answer_before_0_5_110` | The answer was recorded by 0.5.107–0.5.109, which kept no body hash. |
+
+The two fields together:
+
+| `state` | `delivery.state` | Reads as |
+| --- | --- | --- |
+| `settled` | `received` | Paid and delivered. |
+| `settled` | `unconfirmed` | Paid, delivery not confirmed. |
+| `request_pending`, `terminal_pending` | `received` | Answer received, payment not proven. Only the chain proof of `observe` makes it paid. |
+| `request_pending`, `terminal_pending` | `unconfirmed` | Payment and delivery both unknown. |
+| `expired_no_effect` | `received` | Answer received, proven unpaid: the authorization expired unused. |
+| `expired_no_effect` | `unconfirmed` | Proven unpaid, no confirmed answer. |
+
+`delivery` never changes payment, holds or `capability`. A seller's claim alone never makes an operation `settled`.
 
 - A missing record returns `not_found` without creating anything.
 - A wrong profile, malformed records, invalid operation ids, unsafe permissions and symbolic links fail closed.

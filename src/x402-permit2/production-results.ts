@@ -5,9 +5,10 @@ import { permit2WalletBinding } from "./owner-binding.js";
 import { Permit2HttpObservationStore, normalizePermit2Locator } from "./production-http-observations.js";
 import { Permit2ProductionJournal } from "./production-journal.js";
 import { observePermit2Production, type Permit2ObservationMode, type Permit2ObservationProjection } from "./production-observer.js";
-import { Permit2ProductionRepository, publicPermit2Production, type Permit2ProductionRecord } from "./production-repository.js";
+import { Permit2ProductionRepository, type Permit2ProductionRecord } from "./production-repository.js";
+import { projectPermit2Production, type Permit2PublicStatus } from "./production-delivery.js";
 
-type Status = ReturnType<typeof publicPermit2Production> | null;
+type Status = Permit2PublicStatus | null;
 type Code = "not_found" | "state_unavailable" | "hint_saved" | "hint_unavailable" | "not_exposed" | "terminal" | "held" |
   "invalid_candidate" | "invalid_mode" | "owner_mismatch" | "observed_hold" | "finalized" | "reconciled";
 export interface Permit2ProductionResult { readonly status: Status; readonly code: Code; readonly observation?: Permit2ObservationProjection }
@@ -22,64 +23,65 @@ export class Permit2ProductionResults {
     this.#state = state; this.#journal = journal; this.#records = new Permit2ProductionRepository(state.root);
     this.#hints = new Permit2HttpObservationStore(state.root);
   }
-  #result(record: Permit2ProductionRecord | null, code: Code, observation?: Permit2ObservationProjection): Permit2ProductionResult {
-    return Object.freeze({ status: record === null ? null : publicPermit2Production(record), code, ...(observation === undefined ? {} : { observation }) });
+  async #result(record: Permit2ProductionRecord | null, code: Code, observation?: Permit2ObservationProjection): Promise<Permit2ProductionResult> {
+    const status = record === null ? null : await projectPermit2Production(this.#state.root, record);
+    return Object.freeze({ status, code, ...(observation === undefined ? {} : { observation }) });
   }
   async recordHttp(id: string, observation: unknown): Promise<Permit2ProductionResult> {
     let record: Permit2ProductionRecord | null = null;
     try {
-      record = await Permit2ProductionRepository.findOwnedOperation(this.#records, id); if (record === null) return this.#result(null, "not_found");
-      await this.#hints.write(id, observation); return this.#result(record, "hint_saved");
-    } catch { return this.#result(record, record === null ? "state_unavailable" : "hint_unavailable"); }
+      record = await Permit2ProductionRepository.findOwnedOperation(this.#records, id); if (record === null) return await this.#result(null, "not_found");
+      await this.#hints.write(id, observation); return await this.#result(record, "hint_saved");
+    } catch { return await this.#result(record, record === null ? "state_unavailable" : "hint_unavailable"); }
   }
   async observe(id: string, rpcUrl: string, mode: Permit2ObservationMode = "settlement", candidate?: string): Promise<Permit2ProductionResult> {
     let record: Permit2ProductionRecord | null = null;
     try { record = await Permit2ProductionRepository.findOwnedOperation(this.#records, id); }
-    catch { return this.#result(null, "state_unavailable"); }
-    if (record === null) return this.#result(null, "not_found");
-    if (record.terminal) return this.#result(record, "terminal");
-    if (mode !== "settlement" && mode !== "expired_unused") return this.#result(record, "invalid_mode");
+    catch { return await this.#result(null, "state_unavailable"); }
+    if (record === null) return await this.#result(null, "not_found");
+    if (record.terminal) return await this.#result(record, "terminal");
+    if (mode !== "settlement" && mode !== "expired_unused") return await this.#result(record, "invalid_mode");
     // Never exposed: past its deadline the family's expiry release ends it (R4); before that it is only not exposed.
     if (record.exposureAt === null) {
-      try { return this.#result(await Permit2ProductionJournal.prototype.releaseUnexposedExpired.call(this.#journal, id), "terminal"); }
+      try { return await this.#result(await Permit2ProductionJournal.prototype.releaseUnexposedExpired.call(this.#journal, id), "terminal"); }
       catch {
         try { record = await Permit2ProductionRepository.findOwnedOperation(this.#records, id) ?? record; } catch { /* Keep the last validated safe status. */ }
-        return this.#result(record, "not_exposed");
+        return await this.#result(record, "not_exposed");
       }
     }
     const j = record.exposureJournal;
-    if (j === undefined || !j.holdConfirmed) return this.#result(record, "not_exposed");
+    if (j === undefined || !j.holdConfirmed) return await this.#result(record, "not_exposed");
     let locator: string | null = null;
     if (candidate !== undefined) {
-      if (mode !== "settlement") return this.#result(record, "invalid_candidate");
-      try { locator = normalizePermit2Locator(candidate); } catch { return this.#result(record, "invalid_candidate"); }
+      if (mode !== "settlement") return await this.#result(record, "invalid_candidate");
+      try { locator = normalizePermit2Locator(candidate); } catch { return await this.#result(record, "invalid_candidate"); }
     }
     if (j.terminalIntent !== null) {
       try {
         record = await Permit2ProductionJournal.prototype.reconcileTerminal.call(this.#journal, id);
-        if (record.terminal) return this.#result(record, "reconciled");
-      } catch { return this.#result(record, "held"); }
+        if (record.terminal) return await this.#result(record, "reconciled");
+      } catch { return await this.#result(record, "held"); }
       const intent = record.exposureJournal!.terminalIntent!;
-      if ((intent.outcome === "settled" ? "settlement" : "expired_unused") !== mode || locator !== null && locator !== intent.transactionHash) return this.#result(record, "held");
+      if ((intent.outcome === "settled" ? "settlement" : "expired_unused") !== mode || locator !== null && locator !== intent.transactionHash) return await this.#result(record, "held");
       locator = intent.transactionHash;
     } else if (mode === "settlement" && locator === null) {
-      try { locator = (await this.#hints.read(id, record))?.locator ?? null; } catch { return this.#result(record, "hint_unavailable"); }
+      try { locator = (await this.#hints.read(id, record))?.locator ?? null; } catch { return await this.#result(record, "hint_unavailable"); }
     }
-    if (record.exposureJournal?.signed == null) return this.#result(record, "not_exposed");
+    if (record.exposureJournal?.signed == null) return await this.#result(record, "not_exposed");
     try {
-      if (canonicalJson(await permit2WalletBinding(this.#state, record.material.wallet.profile)) !== canonicalJson(record.material.wallet)) return this.#result(record, "owner_mismatch");
-    } catch { return this.#result(record, "owner_mismatch"); }
+      if (canonicalJson(await permit2WalletBinding(this.#state, record.material.wallet.profile)) !== canonicalJson(record.material.wallet)) return await this.#result(record, "owner_mismatch");
+    } catch { return await this.#result(record, "owner_mismatch"); }
     try {
       const checked = await observePermit2Production({ profile: record.material.wallet.profile, stateRoot: this.#state.root, rpcUrl,
         record, signed: record.exposureJournal?.signed ?? null, mode, locator });
-      if (checked.proof === null) return this.#result(record, "observed_hold", checked.projection);
+      if (checked.proof === null) return await this.#result(record, "observed_hold", checked.projection);
       try {
         record = await Permit2ProductionJournal.prototype.finalize.call(this.#journal, id, checked.proof, mode);
-        return this.#result(record, record.terminal ? "finalized" : "held", checked.projection);
+        return await this.#result(record, record.terminal ? "finalized" : "held", checked.projection);
       } catch {
         try { record = await Permit2ProductionRepository.findOwnedOperation(this.#records, id) ?? record; } catch { /* Keep the last validated safe status. */ }
-        return this.#result(record, "held", checked.projection);
+        return await this.#result(record, "held", checked.projection);
       }
-    } catch { return this.#result(record, "held"); }
+    } catch { return await this.#result(record, "held"); }
   }
 }

@@ -19,7 +19,8 @@ import { permit2PublicRpc } from "./preflight.js";
 import { Permit2ApprovalRiskCoordinator } from "./production-approval-risk.js";
 import { Permit2ProductionJournal } from "./production-journal.js";
 import { Permit2ProductionPreparation } from "./production-prepare.js";
-import { Permit2ProductionRepository, permit2ProductionId, publicPermit2Production } from "./production-repository.js";
+import { Permit2ProductionRepository, permit2ProductionId } from "./production-repository.js";
+import { projectPermit2Production } from "./production-delivery.js";
 import { Permit2ProductionResults, type Permit2ProductionResult } from "./production-results.js";
 
 /** CLI-only same-process wiring. Generic Core and MCP cannot reach this paid path. */
@@ -45,7 +46,7 @@ export async function executePermit2ProductionCli(bound: BoundCommand, options: 
     const id = permit2ProductionId(profile, key), saved = await records.findOperation(id); operationId = id;
     if (saved !== null) {
       if (canonicalJson(saved.material.checked.request) !== canonicalJson(exact)) throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Permit2 key names a different frozen request.");
-      if (saved.exposureAt !== null || saved.exposureJournal !== undefined || saved.terminal || !["prepared", "reserving", "reserved"].includes(saved.state)) return output({ status: publicPermit2Production(saved), code: saved.terminal ? "terminal" : "held" });
+      if (saved.exposureAt !== null || saved.exposureJournal !== undefined || saved.terminal || !["prepared", "reserving", "reserved"].includes(saved.state)) return output({ status: await projectPermit2Production(root, saved), code: saved.terminal ? "terminal" : "held" });
     }
     // These constructors are inert. The exact local signer and metadata are checked before unsigned HTTP.
     const native = options.native ?? new LocalWalletNative(state, options.wrappingSecret ?? new MacOSLoginKeychainSecret(), options.approval);
@@ -65,7 +66,7 @@ export async function executePermit2ProductionCli(bound: BoundCommand, options: 
     if (operationId !== undefined && !(error instanceof ApnError && error.code === "APN_IDEMPOTENCY_CONFLICT")) {
       try {
         const saved = await new Permit2ProductionRepository(root).findOperation(operationId);
-        if (saved !== null) return output({ status: publicPermit2Production(saved), code: "held" });
+        if (saved !== null) return output({ status: await projectPermit2Production(root, saved), code: "held" });
       } catch { /* No error payload or inferred terminal verdict. */ }
     }
     // No private request, network error details, signed material or response bytes are projected.

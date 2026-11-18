@@ -6,16 +6,24 @@ import { decodeAndNormalizePaymentResponseHeader } from "../x402-codec.js";
 import { reconstructPermit2ProductionMaterial } from "./production-material.js";
 import { Permit2ProductionRepository, type Permit2ProductionRecord } from "./production-repository.js";
 
-const SCHEMA = "apn.permit2-production-http-observation.v1", DIRECTORY = "permit2-production-http-observations";
-const HASH = /^[a-f0-9]{64}$/u, TRANSACTION = /^0x[a-f0-9]{64}$/u;
+/** Since 0.5.110 a hint also keeps the answer body's hash and length; v1 hints (0.5.107–0.5.109) never did. */
+export const PERMIT2_HTTP_OBSERVATION_SCHEMA = "apn.permit2-production-http-observation.v2";
+const SCHEMA = PERMIT2_HTTP_OBSERVATION_SCHEMA, SCHEMA_V1 = "apn.permit2-production-http-observation.v1";
+const DIRECTORY = "permit2-production-http-observations";
+const HASH = /^[a-f0-9]{64}$/u, TRANSACTION = /^0x[a-f0-9]{64}$/u, MAX_BODY_BYTES = 256 * 1024;
 const CLASSIFICATIONS = ["no_header", "invalid_response", "success_hint", "pending_hint", "failure_hint"] as const;
 /** An untrusted locator only. No value in this codec is financial or transport authority. */
-export interface Permit2HttpLocatorHint {
-  readonly schemaVersion: typeof SCHEMA; readonly operationId: string; readonly materialHash: string;
+interface Permit2HttpLocatorHintV1 {
+  readonly schemaVersion: typeof SCHEMA_V1; readonly operationId: string; readonly materialHash: string;
   readonly requestHash: string; readonly challengeHash: string; readonly signedHash: string;
   readonly httpStatus: number; readonly paymentResponseHeaderHash: string | null;
   readonly classification: typeof CLASSIFICATIONS[number]; readonly locator: string | null;
 }
+/** v2 adds the seller body's hash (the x402 result rule, `apn.x402.result-body.v1`) and byte length; never the body. */
+interface Permit2HttpLocatorHintV2 extends Omit<Permit2HttpLocatorHintV1, "schemaVersion"> {
+  readonly schemaVersion: typeof SCHEMA; readonly bodyHash: string; readonly bodyByteLength: string;
+}
+export type Permit2HttpLocatorHint = Permit2HttpLocatorHintV1 | Permit2HttpLocatorHintV2;
 export function normalizePermit2Locator(value: unknown): string {
   if (typeof value !== "string" || !/^0x[a-fA-F0-9]{64}$/u.test(value) || /^0x0{64}$/u.test(value)) invalid();
   return value.toLowerCase();
@@ -26,10 +34,15 @@ function binding(record: Permit2ProductionRecord) {
     challengeHash: record.material.checked.challengeHash, signedHash: signed.signedHash };
 }
 export function validatePermit2HttpLocatorHint(value: unknown, record: Permit2ProductionRecord): Permit2HttpLocatorHint {
-  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "materialHash", "requestHash", "challengeHash",
-    "signedHash", "httpStatus", "paymentResponseHeaderHash", "classification", "locator"])) invalid();
+  const keys = ["schemaVersion", "operationId", "materialHash", "requestHash", "challengeHash",
+    "signedHash", "httpStatus", "paymentResponseHeaderHash", "classification", "locator"];
+  if (!isPlainRecord(value) || (value.schemaVersion !== SCHEMA && value.schemaVersion !== SCHEMA_V1) ||
+      !exactKeys(value, value.schemaVersion === SCHEMA ? [...keys, "bodyHash", "bodyByteLength"] : keys)) invalid();
+  if (value.schemaVersion === SCHEMA && (typeof value.bodyHash !== "string" || !HASH.test(value.bodyHash) ||
+      typeof value.bodyByteLength !== "string" || !/^(?:0|[1-9][0-9]{0,6})$/u.test(value.bodyByteLength) ||
+      Number(value.bodyByteLength) > MAX_BODY_BYTES)) invalid();
   const b = binding(record);
-  if (value.schemaVersion !== SCHEMA || !Number.isInteger(value.httpStatus) || Number(value.httpStatus) < 100 || Number(value.httpStatus) > 599 ||
+  if (!Number.isInteger(value.httpStatus) || Number(value.httpStatus) < 100 || Number(value.httpStatus) > 599 ||
       !CLASSIFICATIONS.includes(value.classification as typeof CLASSIFICATIONS[number]) ||
       value.paymentResponseHeaderHash !== null && (typeof value.paymentResponseHeaderHash !== "string" || !HASH.test(value.paymentResponseHeaderHash)) ||
       value.locator !== null && (typeof value.locator !== "string" || !TRANSACTION.test(value.locator) || /^0x0{64}$/u.test(value.locator))) invalid();
@@ -42,6 +55,9 @@ export function validatePermit2HttpLocatorHint(value: unknown, record: Permit2Pr
 export function permit2HttpLocatorHint(record: Permit2ProductionRecord, observation: unknown): Permit2HttpLocatorHint {
   const b = binding(record);
   if (!isPlainRecord(observation) || !Number.isInteger(observation.status) || Number(observation.status) < 100 || Number(observation.status) > 599) invalid();
+  const bytes: unknown = observation.bodyBytes;
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength > MAX_BODY_BYTES) invalid();
+  const body = { bodyHash: domainHash("apn.x402.result-body.v1", bytes), bodyByteLength: bytes.byteLength.toString() };
   let classification: Permit2HttpLocatorHint["classification"] = "no_header", locator: string | null = null, headerHash: string | null = null;
   try {
     const pairs = observation.rawHeaderPairs; if (!Array.isArray(pairs) || pairs.length > 64) invalid();
@@ -67,7 +83,8 @@ export function permit2HttpLocatorHint(record: Permit2ProductionRecord, observat
       classification = decoded.classification === "success" ? "success_hint" : decoded.classification === "settlement_pending" ? "pending_hint" : "failure_hint";
     }
   } catch { classification = "invalid_response"; locator = null; }
-  return validatePermit2HttpLocatorHint({ schemaVersion: SCHEMA, ...b, httpStatus: observation.status, paymentResponseHeaderHash: headerHash, classification, locator }, record);
+  return validatePermit2HttpLocatorHint({ schemaVersion: SCHEMA, ...b, httpStatus: observation.status, paymentResponseHeaderHash: headerHash,
+    classification, locator, ...body }, record);
 }
 /** First observation is immutable under the established profile/operation/EVM group. */
 export class Permit2HttpObservationStore extends SecureStateStore {

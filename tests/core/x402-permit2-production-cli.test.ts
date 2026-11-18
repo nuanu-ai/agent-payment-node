@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { runCli, parseArgv } from "../../src/cli.js";
-import { canonicalJson } from "../../src/canonical.js";
+import { canonicalJson, domainHash } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
 import { COMMANDS } from "../../src/command-catalog.js";
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
@@ -68,6 +68,11 @@ for (const settlement of [false, true]) test(`actual runCli unpaid GET through e
   const saved = (await f.records.findOperation(f.id))!;
   assert.equal(saved.exposureJournal!.request!.attempt, 1); assert.equal(saved.material.checked.request.method, "GET"); assert.deepEqual(saved.material.checked.request.headers, {}); assert.equal(saved.material.checked.request.bodyBase64, null);
   assert.equal(saved.state, settlement ? "settled" : "request_pending");
+  // The seller's 200 answer is recorded by its hash either way; only the observer's proof makes it paid.
+  const status = (result.data as { readonly status?: { readonly state?: unknown; readonly delivery?: unknown } }).status;
+  assert.equal(status?.state, saved.state);
+  assert.deepEqual(status?.delivery, { state: "received", reason: null, httpStatus: 200,
+    resultHash: domainHash("apn.x402.result-body.v1", Buffer.from("private-paid-body")), byteLength: "17" });
   const before = [f.keys(), f.signatures(), wire.calls.length, wire.paid.length], bytes = await readFile(`${f.root}/permit2-production/${f.id}.json`, "utf8");
   const replay = await runCli(argv(f), {}, { ...options(f), native: { request: async () => { throw new Error("No native replay"); } } });
   assert.equal(replay.ok, true); safe(replay); assert.deepEqual([f.keys(), f.signatures(), wire.calls.length, wire.paid.length], before);
@@ -128,7 +133,8 @@ test("strict CLI flags, legacy status and MCP projection preserve CLI-only paid/
 test("observe CLI uses explicit readonly candidate despite bad hint and genuine proof alone finalizes without keys/UI/resource", async t => {
   const f = await permit2CliFixture(t, false, false); await f.journal.markSignatureRisk(f.record.operationId); await f.journal.storeSigned(f.record.operationId, f.signed); await f.journal.markRequestPending(f.record.operationId);
   const response = Buffer.from(canonicalJson({ success: true, transaction: `0x${"f".repeat(64)}`, network: "eip155:43114", payer: f.record.material.wallet.account.toLowerCase(), amount: "10000" })).toString("base64");
-  await new Permit2ProductionResults(f.state, f.journal).recordHttp(f.record.operationId, { status: 200, rawHeaderPairs: [["payment-response", response]] });
+  assert.equal((await new Permit2ProductionResults(f.state, f.journal).recordHttp(f.record.operationId,
+    { status: 200, rawHeaderPairs: [["payment-response", response]], bodyBytes: Buffer.alloc(0) })).code, "hint_saved");
   t.mock.method(TtyPermit2ForegroundApproval.prototype, "approve", async () => { throw new Error("No UI observation"); });
   const result = await runCli(observe(f, "--transaction", f.input.locator!), {}, options(f));
   assert.equal(result.ok, true); safe(result); assert.equal((await f.journal.findOperation(f.record.operationId))!.state, "settled");

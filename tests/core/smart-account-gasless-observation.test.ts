@@ -18,7 +18,7 @@ import { SA_INCREASED_SPENT_TOPIC, SA_TRANSFER_TOPIC } from
   "../../src/smart-account-gasless/chain/abi.js";
 
 type HarnessFault = "none" | "malformed_input" | "extra_outflow" | "wrong_child_event" |
-  "wrong_safe_spend" | "multiple_candidates" | "unordered_logs" | "range_rejected" | "start_reorg";
+  "wrong_safe_spend" | "multiple_candidates" | "unordered_logs" | "range_rejected" | "start_reorg" | "foreign_sender";
 
 interface Harness {
   readonly context: SmartAccountObservationContext;
@@ -34,8 +34,9 @@ interface HarnessGeometry {
   readonly finalizedOffset: bigint;
 }
 
-function syntheticIntent(intent: SmartAccountGaslessIntent): SmartAccountGaslessIntent {
-  const facilitator = SA_OUTER.address.toLowerCase() as Address;
+/** The pinned facilitator set names the outer sender, unless a test pins another address in its place. */
+function syntheticIntent(intent: SmartAccountGaslessIntent,
+  facilitator: Address = SA_OUTER.address.toLowerCase() as Address): SmartAccountGaslessIntent {
   return { ...intent, provider: { ...intent.provider, facilitatorAddresses: [facilitator] },
     requirements: { ...intent.requirements, extra: { ...intent.requirements.extra,
       facilitatorAddresses: [facilitator] } } };
@@ -44,7 +45,8 @@ function syntheticIntent(intent: SmartAccountGaslessIntent): SmartAccountGasless
 async function successHarness(fault: HarnessFault = "none", hint: Hex | null = null,
   geometry: HarnessGeometry = { cursorOffset: 0n, includedOffset: 3n, safeOffset: 10n,
     finalizedOffset: 9n }): Promise<Harness> {
-  const fixture = saRedemptionFixture(), intent = syntheticIntent(fixture.intent), start = intent.initialSnapshot.preparationBlock;
+  const fixture = saRedemptionFixture(), start = fixture.intent.initialSnapshot.preparationBlock;
+  const intent = fault === "foreign_sender" ? syntheticIntent(fixture.intent, `0x${"ab".repeat(20)}` as Address) : syntheticIntent(fixture.intent);
   const safe = saTestBlock(BigInt(start.numberAtomic) + geometry.safeOffset,
     BigInt(start.timestampAtomic) + geometry.safeOffset * 2n);
   const finalized = saTestBlock(BigInt(start.numberAtomic) + geometry.finalizedOffset,
@@ -194,6 +196,14 @@ test("altered calldata, receipt events, outflow or final spent state cannot comp
     const harness = await successHarness(fault), result = await observeSmartAccountGasless(harness.context, harness.input);
     assert.equal(result.observation.phase, "invalid", fault); assert.equal(result.settlement, null, fault);
   }
+});
+
+test("a redemption sent from outside the pinned facilitator set never completes", async () => {
+  // The sender signed a valid redemption of this child delegation; only the sender is not a pinned facilitator.
+  const harness = await successHarness("foreign_sender"), result = await observeSmartAccountGasless(harness.context, harness.input);
+  assert.equal(result.observation.phase, "invalid"); assert.equal(result.settlement, null);
+  const pinned = await successHarness(), accepted = await observeSmartAccountGasless(pinned.context, pinned.input);
+  assert.notEqual(accepted.settlement, null, "the same redemption from a pinned facilitator completes");
 });
 
 test("multiple candidates, range rejection and cursor reorg remain guarded", async () => {

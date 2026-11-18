@@ -6,6 +6,7 @@ import { Permit2ProductionResults, type Permit2ProductionResult } from "./produc
 import { Permit2ProductionJournal, type Permit2SigningContinuation } from "./production-journal.js";
 import { Permit2ProductionPreparation } from "./production-prepare.js";
 import { publicPermit2Production } from "./production-repository.js";
+import { projectPermit2Production } from "./production-delivery.js";
 import { Permit2ProductionSigningFence } from "./production-signing-fence.js";
 import { sendPermit2Production } from "./production-send.js";
 import { Permit2ForegroundApprovalAuthority, assertPermit2ApprovalCurrent, permit2Now } from "./production-approval-provenance.js";
@@ -34,13 +35,14 @@ export class Permit2ApprovalRiskCoordinator {
   /** Same-process paid enclosure. No continuation, signer material or HTTP observation escapes. */
   async signAndSubmitOnce(id: string): Promise<Permit2ProductionResult> {
     let current = await this.#journal.findOperation(id); if (current === null) return Object.freeze({ status: null, code: "not_found" });
-    const status = () => Object.freeze({ status: publicPermit2Production(current!), code: current!.terminal ? "terminal" as const : "held" as const });
+    const status = async () => Object.freeze({ status: await projectPermit2Production(this.#journal.root, current!),
+      code: current!.terminal ? "terminal" as const : "held" as const });
     if (current.exposureAt !== null || current.exposureJournal !== undefined || current.terminal ||
-        !["prepared", "reserving", "reserved"].includes(current.state)) return status();
+        !["prepared", "reserving", "reserved"].includes(current.state)) return await status();
     try {
       await this.#preparation.reserve(id);
       const approved = await this.#runWithAuthority(id, "sign-and-submit-once", this.#paidAuthority);
-      if (approved.continuation === null) { current = await this.#journal.findOperation(id) ?? current; return status(); }
+      if (approved.continuation === null) { current = await this.#journal.findOperation(id) ?? current; return await status(); }
       const signed = await LocalWalletNative.signPermit2Production(this.#native, this.#fence, this.#journal, approved.continuation, this.#clock);
       const sent = await sendPermit2Production(this.#journal, this.#fence, signed.origin, this.#clock);
       const results = new Permit2ProductionResults(new StateStore(this.#journal.root), this.#journal);
@@ -50,7 +52,7 @@ export class Permit2ApprovalRiskCoordinator {
       }
     } catch { /* Existing durable risk remains held; no retry or caller error payload. */ }
     try { current = await this.#journal.findOperation(id) ?? current; } catch { /* Last validated safe status. */ }
-    return status();
+    return await status();
   }
   async run(operationId: string, purpose: Permit2ApprovalPurpose = "sign-only"): Promise<{ readonly status: ReturnType<typeof publicPermit2Production>; readonly continuation: Permit2SigningContinuation | null }> {
     return this.#runWithAuthority(operationId, purpose, this.#authority);

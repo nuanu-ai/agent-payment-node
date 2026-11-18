@@ -1,6 +1,7 @@
 import { evmConflictDomain, type MoneyConflictDomain } from "../../operation-conflict-domain.js";
-import { PERMIT2_PRODUCTION_TERMINAL_STATES, Permit2ProductionRepository, publicPermit2Production,
+import { PERMIT2_PRODUCTION_TERMINAL_STATES, Permit2ProductionRepository,
   type Permit2ProductionRecord } from "../../x402-permit2/production-repository.js";
+import { projectPermit2Production } from "../../x402-permit2/production-delivery.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, standardIdentity,
   type OperationFamilyAdapter, type OperationStore } from "../adapter.js";
 
@@ -32,7 +33,7 @@ export const permit2Adapter: OperationFamilyAdapter<Permit2ProductionRecord> = {
   terminal: record => PERMIT2_PRODUCTION_TERMINAL_STATES.includes(record.state),
   state: record => record.state,
   salvage: raw => salvageRecord(raw, value => [salvageEvm(permit2ChainId(field(value, "material", "owner", "chain")), field(value, "material", "wallet", "account"))]),
-  view: async record => publicPermit2Production(record),
+  view: async (record, root) => await projectPermit2Production(root, record),
   // Observation, including the proof that an expired authorization was never used, runs on Permit2's own CLI path.
   commands: { status: "apn x402 permit2 status --profile <profile> --operation <operation-id>",
     resume: "apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc>",
