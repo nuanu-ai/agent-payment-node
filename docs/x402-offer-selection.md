@@ -90,8 +90,8 @@ Accepted transaction fields are described in [settlement fields](x402-settlement
 ## Lanes with their own rules
 
 - **Foreground `x402 permit2 approve`.** Its own transport holds an attempt whose `PAYMENT-RESPONSE` copies are
-  duplicated or malformed until `observe` proves the outcome on chain. That lane never stores a seller body, so nothing
-  is lost; identical copies are not taken as a hint there.
+  duplicated or malformed until `observe` proves the outcome on chain. That lane never stores a seller body, only its
+  hash and length since 0.5.110 ([delivery](x402-non-usdc.md#delivery)); identical copies are not taken as a hint there.
 - **ERC-7710 (MetaMask Smart Account, Base USDC).** Settlement is proven only through the seller's transaction, so a body
   kept without a usable `PAYMENT-RESPONSE` ends through the delegated transfer-scan expiry proof or the owner's abandon,
   never as settled. The scan proves "unused" only when the authorization window holds no `Transfer` of the token from

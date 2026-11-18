@@ -103,7 +103,8 @@ export class GaslessUsdtCommandPrepare {
     const profileHash = allowlistProfileHash(input.profile);
     const saved = await this.operations.forProfile(profileHash).replayBound(input.idempotencyKey, input);
     if (saved !== null) return saved;
-    // Every money family shares one idempotency key space; the lock is the one their prepares hold for the same key.
+    // Not one key space for every family (docs/gasless.md): gasless USDT keeps its own key journal and only refuses a
+    // key the operation index holds. The lock is the one the operation-index families hold for the same key.
     await this.state.initialize();
     return await this.state.withLocks([`operation:idempotency:${this.state.idempotencyHash(input.idempotencyKey)}`],
       async () => await this.prepareNew(input, profileHash));

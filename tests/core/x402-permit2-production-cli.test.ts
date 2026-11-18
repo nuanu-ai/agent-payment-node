@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { runCli, parseArgv } from "../../src/cli.js";
-import { canonicalJson } from "../../src/canonical.js";
+import { canonicalJson, domainHash } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
 import { COMMANDS } from "../../src/command-catalog.js";
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
@@ -68,6 +68,11 @@ for (const settlement of [false, true]) test(`actual runCli unpaid GET through e
   const saved = (await f.records.findOperation(f.id))!;
   assert.equal(saved.exposureJournal!.request!.attempt, 1); assert.equal(saved.material.checked.request.method, "GET"); assert.deepEqual(saved.material.checked.request.headers, {}); assert.equal(saved.material.checked.request.bodyBase64, null);
   assert.equal(saved.state, settlement ? "settled" : "request_pending");
+  // The seller's 200 answer is recorded by its hash either way; only the observer's proof makes it paid.
+  const status = (result.data as { readonly status?: { readonly state?: unknown; readonly delivery?: unknown } }).status;
+  assert.equal(status?.state, saved.state);
+  assert.deepEqual(status?.delivery, { state: "received", reason: null, httpStatus: 200,
+    resultHash: domainHash("apn.x402.result-body.v1", Buffer.from("private-paid-body")), byteLength: "17" });
   const before = [f.keys(), f.signatures(), wire.calls.length, wire.paid.length], bytes = await readFile(`${f.root}/permit2-production/${f.id}.json`, "utf8");
   const replay = await runCli(argv(f), {}, { ...options(f), native: { request: async () => { throw new Error("No native replay"); } } });
   assert.equal(replay.ok, true); safe(replay); assert.deepEqual([f.keys(), f.signatures(), wire.calls.length, wire.paid.length], before);
