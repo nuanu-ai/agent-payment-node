@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+<title id="title">APN - Local-first payments for AI agents</title>
+<desc id="desc">Agent Payment Node. CLI and local stdio MCP, on macOS Apple Silicon. Purple conceptual node illustration; not a payment result.</desc>
+<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#161020"/><stop offset="1" stop-color="#39225a"/></linearGradient></defs>
+<rect width="1200" height="360" rx="18" fill="#241637"/>
+<g font-family="Arial,Helvetica,sans-serif"><text x="48" y="55" fill="#d2bdf2" font-size="18" letter-spacing="2">APN / AGENT PAYMENT NODE</text>
+<text x="48" y="135" fill="#fff" font-size="60" font-weight="700">Local-first payments</text>
+<text x="48" y="206" fill="#fff" font-size="60" font-weight="700">for AI agents.</text>
+<text x="48" y="253" fill="#e1d5f3" font-size="25">Prepare. Approve. Recover.</text>
+<text x="48" y="313" fill="#d2bdf2" font-size="20">CLI + stdio MCP  /  macOS Apple Silicon  /  MIT</text></g>
+<g stroke="#8761bb" stroke-width="3" fill="none"><path d="M943 91L1030 169 943 257M1030 169L1111 91M1030 169L1111 257"/></g>
+<g fill="#28183f" stroke="#ba91ef" stroke-width="2"><rect x="915" y="63" width="56" height="56" rx="14"/><rect x="1083" y="63" width="56" height="56" rx="14"/><rect x="915" y="229" width="56" height="56" rx="14"/><rect x="1083" y="229" width="56" height="56" rx="14"/></g>
+<rect x="986" y="125" width="88" height="88" rx="22" fill="#e4d1ff"/>
+<text x="1030" y="179" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="25" font-weight="700" fill="#291440">APN</text>
+<g fill="#e4d1ff"><circle cx="943" cy="91" r="6"/><circle cx="1111" cy="91" r="6"/><circle cx="943" cy="257" r="6"/><circle cx="1111" cy="257" r="6"/></g>
+</svg>

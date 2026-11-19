@@ -584,7 +584,7 @@ test("manifest validator and compatibility gate reject every declared structural
 });
 
 test("README command block and package/build identity are mechanically identical to the catalog", async () => {
-  const readme = await readFile(resolve("README.md"), "utf8");
+  const readme = await readFile(resolve("docs/command-reference.md"), "utf8");
   const match = /<!-- BEGIN APN COMMAND CATALOG -->\n```text\n([\s\S]*?)\n```\n<!-- END APN COMMAND CATALOG -->/u.exec(readme);
   assert.ok(match);
   assert.equal(match[1], renderReadmeCommandReference());

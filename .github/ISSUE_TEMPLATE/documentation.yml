@@ -1,0 +1,18 @@
+name: Documentation or product suggestion
+description: Suggest clearer setup, examples, documentation or bounded capabilities.
+title: "[Docs / idea]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Link the page or section and describe the missing or confusing step.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested improvement
+      description: Describe the outcome. Include the version/provider/route if relevant; omit secrets.
+    validations:
+      required: true

@@ -5,9 +5,10 @@ import test from "node:test";
 import { AwalProcessAdapter, type AwalProcessRunnerPort } from "../../src/awal-process-adapter.js";
 import type { ForegroundAuthenticationPort } from "../../src/provider-ports.js";
 
-/** README prose with its line wrapping folded, so a sentence is matched wherever the column limit breaks it. */
+/** README prose and the pages its detailed sections moved to, with line wrapping folded, so a sentence is matched wherever the column limit breaks it. */
 async function readme(): Promise<string> {
-  return (await readFile(resolve("README.md"), "utf8")).replace(/\s+/gu, " ");
+  const pages = ["README.md", "docs/custody-and-recovery.md", "docs/provider-wallets.md"];
+  return (await Promise.all(pages.map((page) => readFile(resolve(page), "utf8")))).join("\n").replace(/\s+/gu, " ");
 }
 
 // Regression: README said the new wrapping secret reached /usr/bin/security as an argument, while the code (proved in

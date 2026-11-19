@@ -69,7 +69,7 @@ test("an ambiguous dispatch the RPC never saw is re-sent as the identical bytes 
 // the test above proves it passes the identical signed bytes again. Both now state that behaviour and its conditions.
 test("README and the EVM guide state the same-transaction re-send and no longer promise that resume never repeats a send", async () => {
   const folded = async (path: string) => (await readFile(resolve(path), "utf8")).replace(/\s+/gu, " ");
-  const readme = await folded("README.md"), guide = await folded("docs/evm-assets.md");
+  const readme = await folded("docs/first-journey-reference.md"), guide = await folded("docs/evm-assets.md");
   assert.doesNotMatch(readme, /an ambiguous send is only observed afterwards, never repeated/u);
   assert.doesNotMatch(guide, /From that state resume does not send the transaction again/u);
   assert.match(readme, /only when the RPC holds neither a receipt nor the transaction for the saved hash and the sender's finalized nonce is not past the frozen nonce/u);
