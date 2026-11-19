@@ -251,7 +251,7 @@ jobs:
           gh release create "$RELEASE_TAG" \
             --draft \
             --verify-tag \
-            --title "$RELEASE_TAG" \
+            --title "Agent Payment Node $RELEASE_TAG" \
             --generate-notes \
             "$artifact" "$sbom" "$manifest"
           gh release edit "$RELEASE_TAG" --draft=false
