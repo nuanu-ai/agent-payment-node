@@ -19,6 +19,7 @@ import {
 } from "./metamask-smart-account-record.js";
 import { allocateConsentPort, type SmartAccountConsentPort } from "./metamask-smart-account-consent.js";
 import { pendingPermissionNextActions } from "./provider-permission-output.js";
+import { assertNewPermissionLifetime, assertPendingPermissionLifetime } from "./smart-account-permission-lifetime.js";
 import type { SmartAccountPermissionStorePort } from "./encrypted-smart-account-permission-store.js";
 import type {
   DirectExecutionPort,
@@ -129,6 +130,7 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
     const retry = record !== null;
     if (record === null) {
       if (instant.unix >= intent.expiresAtUnix) invalidInput("Permission expiry must be in the future.");
+      assertNewPermissionLifetime(intent.expiresAtUnix, instant.unix);
       const consentPort = await allocateConsentPort();
       const session = this.sessionKeys.create();
       record = {
@@ -164,6 +166,7 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
       throw new ApnError("APN_INVALID_INPUT", "The pending permission intent expired before consent.", { reason: "permission_intent_expired",
         nextActions: pendingPermissionNextActions(intent.profile, projectPendingPermissionBinding(record), instant.unix) });
     }
+    assertPendingPermissionLifetime(intent.profile, record);
     let port = record.consent_port;
     if (port === undefined) {
       // A pending intent from before 0.5.91 gets its origin now, saved before MetaMask sees it.

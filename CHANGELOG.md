@@ -2,6 +2,15 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.111 — 2026-11-23
+
+QA case `APN-SMART-PERM-CONNECT-INVALID`: `--permission-expires-at` must be future Unix seconds, and a value in another unit must be refused. APN checked only that the value was a positive integer in the future, so a value in Unix milliseconds reached MetaMask consent as a date thousands of years ahead. The owner set the limit on 2026-11-23: a Smart Account permission expires at most 24 hours after the connect that asks for it.
+
+- **Smart Account connect refuses an expiry more than 24 hours ahead.** `wallet connect --provider metamask-smart-account` takes `--permission-expires-at` up to now + 86400 seconds, inclusive. A later value, a value in milliseconds included, is refused with `APN_INVALID_INPUT`, reason `permission_expiry_beyond_cap` and `latest_expires_at_unix`; nothing is saved and MetaMask is not asked, so the same idempotency key can start a valid intent. The help line and its example name `<unix-seconds-within-24-hours>`.
+- **A pending intent with a longer window is not sent to MetaMask.** A pending intent that 0.5.110 or earlier saved with more than 24 hours between its start and its expiry is refused on retry with the same reason. Its next actions say to check MetaMask for a permission granted to the session and revoke it there if it is not wanted, then cancel the local intent with `wallet permission forget`, then start a new connect within 24 hours. The intent itself is not changed.
+- **Granted permissions are unchanged.** A permission that MetaMask granted before 0.5.111 keeps its expiry; the limit applies to what APN asks the owner to approve from this release on. `wallet permission list` shows each expiry; `wallet permission disable` stops APN from using one (a local disable, not a MetaMask revoke).
+- **Downgrade.** No record format changes.
+
 ## 0.5.110 — 2026-11-19
 
 QA confirmed on 0.5.109 that the Permit2 criterion `APN-X402-PERMIT2-OBSERVE` was not met: the public result must tell apart a pending or unknown payment, a FINALIZED settlement whose seller answer is not confirmed, and a FINALIZED settlement with the seller's result. `state: settled` and `capability: completed` said only that the payment was proven and nothing more runs. The lane kept the seller's `PAYMENT-RESPONSE` classification and locator, but nothing of the answer body, and no view showed the answer.
