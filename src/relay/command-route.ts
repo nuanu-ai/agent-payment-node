@@ -53,7 +53,8 @@ export function bindRelayPrepare(o: Options): CommandRequest {
   const source = o["--source-chain"]!, destination = o["--destination-chain"]!;
   if (o["--destination-asset"] !== undefined) return bindRelayTokenPrepare(o, source, destination);
   const family = (FAMILIES as Readonly<Record<string, string>>)[`${source}/${o["--asset"]}`];
-  const uses = family === "ethereum-usdc" ? ["--max-approval-network-fee-wei"] : family === "arbitrum-usdc" ? [...ROUTE_OPTIONS] : [];
+  const uses = family === "ethereum-usdc" ? ["--max-approval-network-fee-wei"] : family === "arbitrum-usdc"
+    ? ["--max-approval-network-fee-wei", "--payer", "--max-provider-fee-atomic", "--quote-file"] : [];
   if (family === undefined || (family === "ethereum-usdc" && destination !== "eip155:56" && destination !== "eip155:8453") ||
     (family === "arbitrum-usdc" && destination !== "eip155:1") ||
     (family === "native" && relayNativeRouteFor(Number(source.slice(7)), Number(destination.slice(7))) === null)) routeUnknown();
