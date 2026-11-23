@@ -5,14 +5,19 @@ import type {
   ProviderPermissionBinding,
 } from "./provider-ports.js";
 import type { ProviderProfileRecord } from "./provider-profile.js";
+import { beyondCapPendingNextActions, exceedsPermissionLifetime } from "./smart-account-permission-lifetime.js";
 
 /**
  * What a pending consent intent allows next. While it is live: the exact retry, or cancelling it after a MetaMask review.
  * Once expired the exact connect is refused before consent, so only the review, the local cancel and a new intent remain.
+ * A live intent longer than 24 hours (saved by 0.5.110 or earlier) is refused before consent too, so it gets the same three.
  * Forget removes only the local intent; MetaMask-side authority is reviewed and revoked there.
  */
 export function pendingPermissionNextActions(profile: string, permission: ProviderPendingPermissionBinding, nowUnix: number): readonly string[] {
   const forget = `apn wallet permission forget --profile ${profile} --expected-revision ${permission.revision}`;
+  if (nowUnix < permission.expires_at_unix && exceedsPermissionLifetime(permission.starts_at_unix, permission.expires_at_unix)) {
+    return beyondCapPendingNextActions(profile, permission.session_address, permission.revision);
+  }
   if (nowUnix < permission.expires_at_unix) return [
     "Retry wallet connect with the exact original provider, cap, expiry and idempotency key to reuse this session.",
     `After reviewing MetaMask, cancel only the local pending intent with ${forget}.`,

@@ -44,7 +44,7 @@ export class ProviderPermissionService {
         }
         throw new ApnError(
           "APN_PROVIDER_EFFECT_UNAVAILABLE",
-          "The provider permission is pending consent; retry the exact connect intent while it is live, or forget the current revision first.",
+          "The provider permission is pending consent; its next actions say how to continue or cancel it.",
           { nextActions: pendingPermissionNextActions(profile, pending.permission, Math.floor(this.context.clock.now().getTime() / 1000)) },
         );
       }

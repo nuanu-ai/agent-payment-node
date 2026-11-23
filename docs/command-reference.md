@@ -50,7 +50,7 @@ apn mcp config
 apn doctor keychain [--profile <profile>]
 apn wallet ensure [--profile <profile>]
 apn wallet import --profile <profile> --key-file <absolute-path> --key-name <env-name> --expected-address <checksummed-address>
-apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds>] [--idempotency-key <key>]
+apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds-within-24-hours>] [--idempotency-key <key>]
 apn wallet permission list --profile <profile>
 apn wallet permission sync --profile <profile> --expected-revision <positive-integer>
 apn wallet permission disable --profile <profile> --expected-revision <positive-integer>

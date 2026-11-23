@@ -2,13 +2,13 @@
 
 [Documentation index](README.md) · [Product overview](../README.md)
 
-This section was moved from the APN README without changes to its text.
+This section was moved from the APN README. Since 0.5.111 it also states the Smart Account expiry limit.
 
 ```sh
 apn wallet connect --profile provider-one --provider coinbase-agentic-wallet
 apn wallet connect --profile mm --provider metamask-agent-wallet [--auth-method browser]
 apn wallet connect --profile sa --provider metamask-smart-account --auth-method browser \
-  --permission-cap-usdc-atomic <cap> --permission-expires-at <unix-seconds> --idempotency-key sa-connect-0001
+  --permission-cap-usdc-atomic <cap> --permission-expires-at <unix-seconds-within-24-hours> --idempotency-key sa-connect-0001
 ```
 
 Authentication stays in the foreground terminal (MetaMask Smart Account consent opens the browser). APN binds the exact
@@ -40,7 +40,8 @@ tokens, seed phrases or private keys.
   the same request through its sandboxed SDK helper; `mm` stays for the sign-in and the reads
   ([MetaMask native](metamask-native-cli-sourceprep.md#the-hand-off)).
 - **MetaMask Smart Account**: APN keeps one encrypted session account and the ERC-7715 grant; each transfer derives one
-  exact child delegation after foreground approval. `wallet permission list|sync|disable|forget` manage the binding.
+  exact child delegation after foreground approval. The permission expiry is Unix seconds at most 24 hours from the
+  connect (`permission_expiry_beyond_cap` otherwise; a value in milliseconds is refused this way too). `wallet permission list|sync|disable|forget` manage the binding.
   `sync`, `disable` and `forget` take `--expected-revision`, the `revision` that `wallet permission list` shows; a stale
   one is refused with `APN_PROFILE_REVISION_CONFLICT` (`details.current_revision`), and the next actions are that list
   command and the same command again with the revision it shows, never a new `wallet connect`.

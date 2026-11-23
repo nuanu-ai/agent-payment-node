@@ -33,7 +33,7 @@ export class ProviderPermissionService {
                     const forgotten = await staleRevisionGuidance(request, profile, pending.lifecycle.forget(profileHash, request.expectedRevision));
                     return forgottenOutput(profile, pending.adapter.provider_id, forgotten.warning);
                 }
-                throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The provider permission is pending consent; retry the exact connect intent while it is live, or forget the current revision first.", { nextActions: pendingPermissionNextActions(profile, pending.permission, Math.floor(this.context.clock.now().getTime() / 1000)) });
+                throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The provider permission is pending consent; its next actions say how to continue or cancel it.", { nextActions: pendingPermissionNextActions(profile, pending.permission, Math.floor(this.context.clock.now().getTime() / 1000)) });
             }
             const adapter = this.context.requireProviderRegistry().resolve(bound.provider_id);
             bound = mutable ? await upgradeProviderProfile(adapter, bound, repository) : await previewProviderProfile(adapter, bound);
