@@ -62,9 +62,15 @@ export function mcpFieldName(optionName) {
 }
 function bindParsedCatalog(parsed) {
     const options = parsed.values;
-    if (parsed.command.path.join(" ") === "x402 permit2 approve")
-        return { request: { command: "x402.permit2.approve",
-                profile: value(options, "--profile"), url: value(options, "--url"), idempotencyKey: value(options, "--idempotency-key") }, rpcUrl: value(options, "--rpc-url") };
+    if (parsed.command.path.join(" ") === "x402 permit2 approve") {
+        const http = bindX402HttpRequest(options);
+        // A paid HEAD answer carries no body, so the seller's result could never be read back. Refused here, so the MCP
+        // handoff refuses it exactly as the CLI does.
+        if (http.httpRequest?.method === "HEAD")
+            throw new ApnError("APN_INVALID_INPUT", "x402 permit2 approve does not pay a HEAD request.");
+        return { request: { command: "x402.permit2.approve", profile: value(options, "--profile"), url: value(options, "--url"),
+                idempotencyKey: value(options, "--idempotency-key"), ...http }, rpcUrl: value(options, "--rpc-url") };
+    }
     if (parsed.command.path.join(" ") === "x402 permit2 observe") {
         if (options["--transaction"] !== undefined && options["--expired-unused"] === "true")
             throw new ApnError("APN_INVALID_INPUT", "Permit2 observation modes are mutually exclusive.");

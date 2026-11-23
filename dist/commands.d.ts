@@ -72,6 +72,7 @@ export type CommandRequest = {
     readonly profile: string;
     readonly url: string;
     readonly idempotencyKey: string;
+    readonly httpRequest?: X402HttpRequestV1;
 } | {
     readonly command: "x402.permit2.observe";
     readonly operationId: string;
