@@ -139,7 +139,7 @@ test("the strict SwapRouter02 decoder refuses every other shape, and a stored ro
     assert.throws(() => createBnbUniswapTokenRoute({ inputToken: BNB_USDT, outputToken: "native", recipient, amountIn: BNB_TOKEN_AMOUNT_IN,
       amountOutMinimum: "1", deadline: 1_795_625_000 }), invalid);
   }
-  for (const [inputToken, outputToken] of [[UNISWAP_USDC, "native"], [BNB_USDT.toLowerCase(), BNB_USDC], [BNB_USDT, ETHEREUM_USDT]]) {
+  for (const [inputToken, outputToken] of [[UNISWAP_USDC, "native"], [BNB_USDT.toLowerCase(), BNB_USDC], [BNB_USDT, ETHEREUM_USDT]] as const) {
     assert.throws(() => createBnbUniswapTokenRoute({ inputToken, outputToken, recipient: ACCOUNT, amountIn: BNB_TOKEN_AMOUNT_IN, amountOutMinimum: "1",
       deadline: 1_795_625_000 }), invalid);
   }
