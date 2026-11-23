@@ -7,6 +7,7 @@ import { bridgeHistoryAdmits, bridgeTransitionKind } from "./history-capacity.js
 import { bridgeExecutionDestination, bridgeNativeDenominationConversion, bridgeProviderBoundNativeDestination, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, BRIDGE_MAX_GAS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHeadroomWei, bridgeSame, bridgeUint } from "./validation.js";
 import { approvalData } from "./transaction.js";
+import { bridgeOutputAsSource, bridgeRequestScale } from "./denomination.js";
 import { BRIDGE_FEE_RULE_HASH, BRIDGE_RECEIPT_FEE_RULE_HASH } from "./rpc-fees.js";
 import { assetUsageReservationId, validateAssetUsageReservation } from "../asset-usage-ledger.js";
 import { bridgeMechanism, validateBridgeAllowlistBinding } from "./allowlist.js";
@@ -145,7 +146,7 @@ function validateIntent(op, legacy) {
     const included = m.feeCosts.filter((f) => f.included).reduce((sum, f) => sum + BigInt(f.amountAtomic), 0n);
     if (bridgeNativeDenominationConversion(r)
         ? i.implicitProtocolFeeAtomic !== "0" || included > BigInt(r.maxRouteFeeAtomic)
-        : included + BigInt(m.quotedOutputAtomic) + BigInt(i.implicitProtocolFeeAtomic) !== BigInt(r.amountAtomic))
+        : included + bridgeOutputAsSource(BigInt(m.quotedOutputAtomic), bridgeRequestScale(r)) + BigInt(i.implicitProtocolFeeAtomic) !== BigInt(r.amountAtomic))
         bridgeCorrupt();
 }
 export function validateEnvelope(e) {

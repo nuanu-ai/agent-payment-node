@@ -1,5 +1,5 @@
 import { type PortfolioCacheContext, type PortfolioCacheMetadata } from "./portfolio/cache.js";
-import type { AllowlistInventory } from "./allowlist-inventory.js";
+import type { AllowlistInventory, CandidateAsset } from "./allowlist-inventory.js";
 import type { PortfolioEndpoint, PortfolioFamily } from "./portfolio/registry.js";
 export declare const PORTFOLIO_MAX_ATTEMPTS = 3;
 /** Pause before attempt 2 and attempt 3. */
@@ -101,6 +101,8 @@ export interface AssetPortfolio {
 export interface AssetPortfolioInput {
     readonly cache?: PortfolioCacheContext;
     readonly inventory: AllowlistInventory;
+    /** Reviewed token rows outside the frozen list (the Binance-Peg USDT and USDC of BNB Smart Chain), read after its rows. */
+    readonly supplements?: readonly CandidateAsset[];
     readonly accounts: Readonly<Record<PortfolioFamily, PortfolioAccount>>;
     readonly endpoint: (chain: string) => PortfolioEndpoint;
 }

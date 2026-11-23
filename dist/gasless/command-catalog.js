@@ -1,7 +1,8 @@
 import { gaslessAddress, gaslessDecimal, gaslessFailure } from "./validation.js";
 import { gaslessCommandChain, gaslessCommandRequest } from "./command-input.js";
 import { GASLESS_DEPLOYMENTS, gaslessAsset } from "./registry.js";
-import { mmRegistry } from "../metamask-gasless/registry.js";
+import { mmRegistry, mmRequestToken } from "../metamask-gasless/registry.js";
+import { mmAddress } from "../metamask-gasless/validation.js";
 import { GASLESS_TERMINAL } from "./operation-model.js";
 import { SA_TERMINAL } from "../smart-account-gasless/operation-model.js";
 import { FACILITATOR_TERMINAL } from "../facilitator-gasless/operation-model.js";
@@ -10,7 +11,11 @@ const option = (name, type, constraints, required = true) => ({
     name, type, constraints, required, default: { kind: "none" }, sensitivity: "operator_input",
 });
 const profile = option("--profile", "profile", ["existing_bound_profile_required_for_balance_and_prepare"]);
-const chain = option("--chain", "string", ["numeric_mainnet_id_1_10_130_137_143_1329_8453_42161_43114_59144", "provider_specific_chain_admission"]);
+const chain = option("--chain", "string", ["numeric_mainnet_id_1_10_56_130_137_143_1329_8453_42161_43114_59144", "provider_specific_chain_admission"]);
+/** The MetaMask server-wallet transfer token; chain 56 holds two, so there it is required. */
+const asset = option("--asset", "address", ["exact_erc20_contract_MetaMask_server_wallet_only",
+    "required_on_chain_56_USDT_0x55d398326f99059fF775485246999027B3197955_or_USDC_0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+    "optional_elsewhere_naming_only_that_chain_USDC"], false);
 const operation = option("--operation", "operation_id", ["64_lowercase_hex_characters"]);
 const profileHash = option("--profile-hash", "string", ["64_lowercase_hex_characters"]);
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
@@ -67,9 +72,9 @@ export const GASLESS_COMMANDS = [
         summary: "Show exact mainnet USDC fee-transfer adapters and separate acceptance for all four profile types.",
         options: [{ ...profile, required: false }], effect: { class: "none", summary: "Static discovery; no wallet, state, Keychain, RPC or provider access." },
         approval: readApproval, output, states: done, recovery: [], examples: ["apn gasless capabilities"] },
-    { path: ["gasless", "balance"], synopsis: "apn gasless balance --profile <profile> --chain <chain-id>",
-        summary: "Read canonical USDC and current gasless permission state for the bound provider.",
-        options: [profile, chain], effect: { class: "network_read", summary: "Uses the selected chain's explicit APN_*_RPC_URL and pinned deployment identities; never signs." },
+    { path: ["gasless", "balance"], synopsis: "apn gasless balance --profile <profile> --chain <chain-id> [--asset <token-contract>]",
+        summary: "Read the gasless transfer token (canonical USDC; on chain 56 the named USDT or USDC) and current gasless permission state for the bound provider.",
+        options: [profile, chain, asset], effect: { class: "network_read", summary: "Uses the selected chain's explicit APN_*_RPC_URL and pinned deployment identities; never signs." },
         approval: readApproval, output, states: done, recovery: [], examples: ["apn gasless balance --profile default --chain 8453"] },
     { path: ["gasless", "transfer", "quote"],
         synopsis: "apn gasless transfer quote --profile <profile> --chain 1 --owner <address> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --rpc-url <public-ethereum-rpc> [--rpc-max-batch-items <2-30>]",
@@ -84,12 +89,12 @@ export const GASLESS_COMMANDS = [
         approval: readApproval, output, states: done, recovery: [],
         examples: ["apn gasless transfer quote --profile default --chain 1 --owner <owner> --to <recipient> --amount 0.005 --max-fee 0.004 --min-received 0.001 --rpc-url https://ethereum-rpc.example"] },
     { path: ["gasless", "transfer", "prepare"],
-        synopsis: "apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> (--amount <gross-USDC> --max-fee <USDC> --min-received <USDC> | --net-amount-atomic <net> --max-gross-atomic <gross-cap> --max-fee-atomic <fee-cap>) --idempotency-key <key>",
-        summary: "Prepare one same-chain USDC transfer. MetaMask server wallets also support an exact fixed net with explicit gross and fee ceilings.",
-        options: [profile, chain, option("--to", "address", ["nonzero_distinct_recipient"]),
-            option("--amount", "string", ["positive_gross_USDC_at_most_six_decimal_places", "exclusive_with_fixed_net_mode"], false),
-            option("--max-fee", "string", ["nonnegative_USDC_at_most_six_decimal_places"], false),
-            option("--min-received", "string", ["positive_USDC_recipient_floor_at_most_six_decimal_places"], false),
+        synopsis: "apn gasless transfer prepare --profile <profile> --chain <chain-id> [--asset <token-contract>] --to <address> (--amount <gross-USDC> --max-fee <USDC> --min-received <USDC> | --net-amount-atomic <net> --max-gross-atomic <gross-cap> --max-fee-atomic <fee-cap>) --idempotency-key <key>",
+        summary: "Prepare one same-chain USDC transfer; MetaMask server wallets also move chain 56 USDT or USDC named by --asset, with the fee in that token. MetaMask server wallets also support an exact fixed net with explicit gross and fee ceilings.",
+        options: [profile, chain, asset, option("--to", "address", ["nonzero_distinct_recipient"]),
+            option("--amount", "string", ["positive_gross_amount_at_most_the_token_decimals_6_for_USDC_18_on_chain_56", "exclusive_with_fixed_net_mode"], false),
+            option("--max-fee", "string", ["nonnegative_fee_in_the_transfer_token_at_most_its_decimals"], false),
+            option("--min-received", "string", ["positive_recipient_floor_at_most_the_token_decimals"], false),
             option("--net-amount-atomic", "string", ["positive_exact_recipient_atoms_MetaMask_server_only"], false),
             option("--max-gross-atomic", "string", ["positive_maximum_sender_debit_atoms_fixed_net_only"], false),
             option("--max-fee-atomic", "string", ["nonnegative_maximum_USDC_fee_atoms_fixed_net_only"], false),
@@ -132,12 +137,21 @@ export function includeGaslessRecovery(commands) {
     });
 }
 /**
- * Operator amount scale for one command chain, read from the registry row of the rail that admits it — the local rail's
- * asset where it has one, otherwise the MetaMask rail's. A chain no admitted rail carries fails closed.
+ * Operator amount scale for one command chain, read from the registry row of the rail that admits it — the named
+ * MetaMask token's row when `--asset` is given, else the local rail's asset where it has one, otherwise the MetaMask
+ * rail's one token row. A chain no admitted rail carries, or chain 56 without `--asset`, fails closed.
  */
-function commandDecimals(chainId) {
+function commandDecimals(chainId, asset) {
+    if (asset !== undefined)
+        return mmRegistry(chainId, mmAddress(asset)).row.decimals;
     const local = GASLESS_DEPLOYMENTS.find((r) => r.chainId === chainId);
-    return local === undefined ? mmRegistry(chainId).row.decimals : gaslessAsset(local.chainId, local.token).decimals;
+    if (local !== undefined)
+        return gaslessAsset(local.chainId, local.token).decimals;
+    return mmRegistry(chainId, mmRequestToken(chainId, undefined).token).row.decimals;
+}
+/** The `--asset` a command names, as given; an address it is not fails closed. */
+function commandAsset(o) {
+    return o["--asset"] === undefined ? {} : { asset: gaslessAddress(o["--asset"], "APN_INVALID_INPUT") };
 }
 export function bindGaslessCommand(path, o) {
     if (path === "gasless capabilities")
@@ -163,10 +177,10 @@ export function bindGaslessCommand(path, o) {
         gaslessFailure("APN_INVALID_INPUT", "gasless_chain_identity");
     const chainId = gaslessCommandChain(Number(o["--chain"]));
     if (path === "gasless balance")
-        return { command: "gasless.balance", profile: o["--profile"], chainId };
+        return { command: "gasless.balance", profile: o["--profile"], chainId, ...commandAsset(o) };
     if (path !== "gasless transfer prepare" && path !== "gasless transfer quote")
         gaslessFailure("APN_INVALID_INPUT", "gasless_command");
-    const decimals = commandDecimals(chainId);
+    const named = commandAsset(o), decimals = commandDecimals(chainId, named.asset);
     if (path === "gasless transfer quote") {
         const batchCap = o["--rpc-max-batch-items"];
         if (batchCap !== undefined && !/^(?:[2-9]|[12][0-9]|30)$/u.test(batchCap)) {
@@ -185,14 +199,14 @@ export function bindGaslessCommand(path, o) {
         if (!netFlags.every(flag => o[flag] !== undefined) || grossFlags.some(flag => o[flag] !== undefined))
             gaslessFailure("APN_INVALID_INPUT", "gasless_amount_mode");
         const netAtomic = o["--net-amount-atomic"], maxGrossAtomic = o["--max-gross-atomic"];
-        return { command: "gasless.transfer.prepare", profile: o["--profile"], idempotencyKey: o["--idempotency-key"],
+        return { command: "gasless.transfer.prepare", profile: o["--profile"], idempotencyKey: o["--idempotency-key"], ...named,
             request: gaslessCommandRequest({ chainId, recipient: gaslessAddress(o["--to"], "APN_INVALID_INPUT"),
                 grossAtomic: maxGrossAtomic, maxFeeAtomic: o["--max-fee-atomic"], minReceivedAtomic: netAtomic,
                 fixedNet: { netAtomic, maxGrossAtomic } }) };
     }
     if (!grossFlags.every(flag => o[flag] !== undefined))
         gaslessFailure("APN_INVALID_INPUT", "gasless_amount_mode");
-    return { command: "gasless.transfer.prepare", profile: o["--profile"], idempotencyKey: o["--idempotency-key"],
+    return { command: "gasless.transfer.prepare", profile: o["--profile"], idempotencyKey: o["--idempotency-key"], ...named,
         request: gaslessCommandRequest({ chainId, recipient: gaslessAddress(o["--to"], "APN_INVALID_INPUT"),
             grossAtomic: gaslessDecimal(o["--amount"], decimals, true), maxFeeAtomic: gaslessDecimal(o["--max-fee"], decimals),
             minReceivedAtomic: gaslessDecimal(o["--min-received"], decimals, true) }) };

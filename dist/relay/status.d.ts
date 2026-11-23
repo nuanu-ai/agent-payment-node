@@ -9,8 +9,8 @@ export declare class RelayKeylessStatusService {
         kind: "relay_provider_status";
         operationId: string;
         provider: "relay";
-        sourceChainId: 1 | 8453 | 42161 | 56;
-        destinationChainId: 1 | 8453 | 137 | 56 | 143 | 4326;
+        sourceChainId: 1 | 8453 | 42161 | 137 | 56;
+        destinationChainId: 1 | 8453 | 42161 | 137 | 56 | 143 | 4326;
         status: string;
         chainIdentityObserved: boolean;
         inTxHashes: readonly string[];
@@ -29,8 +29,8 @@ export declare class RelayKeylessStatusService {
         kind: "relay_provider_status";
         operationId: string;
         provider: "relay";
-        sourceChainId: 1 | 8453 | 42161 | 56;
-        destinationChainId: 1 | 8453 | 137 | 56 | 143 | 4326;
+        sourceChainId: 1 | 8453 | 42161 | 137 | 56;
+        destinationChainId: 1 | 8453 | 42161 | 137 | 56 | 143 | 4326;
         status: string;
         chainIdentityObserved: boolean;
         inTxHashes: readonly string[];

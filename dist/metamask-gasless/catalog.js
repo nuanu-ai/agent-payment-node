@@ -1,11 +1,12 @@
-import { MM_CHAINS, MM_RPC_ENV, mmRegistry } from "./registry.js";
-/** Pure catalog data; never hydrate a wallet or infer live provider availability. */
+import { MM_DEPLOYMENTS, MM_RPC_ENV, mmChainTokens, mmTokenSymbol } from "./registry.js";
+/**
+ * Pure catalog data; never hydrate a wallet or infer live provider availability. One entry per registry row: chain 56
+ * lists its USDT and its USDC, each naming the `--asset` its commands need.
+ */
 export function metaMaskGaslessNetworks() {
-    return MM_CHAINS.map(chainId => {
-        const { row, deploymentEvidenceHash } = mmRegistry(chainId);
-        return { chain_id: chainId, name: row.network, token: row.token, symbol: "USDC", decimals: 6,
-            rpc_environment: MM_RPC_ENV[chainId], finality_tag: row.finalityTag, deployment_evidence_hash: deploymentEvidenceHash,
-            executable_adapter: true, action_time_verification_required: true, mainnet_acceptance: "open" };
-    });
+    return MM_DEPLOYMENTS.map(({ row, deploymentEvidenceHash }) => ({ chain_id: row.chainId, name: row.network, token: row.token,
+        symbol: mmTokenSymbol(row.token), decimals: row.decimals, rpc_environment: MM_RPC_ENV[row.chainId], finality_tag: row.finalityTag,
+        deployment_evidence_hash: deploymentEvidenceHash, ...(mmChainTokens(row.chainId).length > 1 ? { asset_required: true } : {}),
+        executable_adapter: true, action_time_verification_required: true, mainnet_acceptance: "open" }));
 }
 //# sourceMappingURL=catalog.js.map

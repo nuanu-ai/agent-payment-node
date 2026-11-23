@@ -151,6 +151,10 @@ test("RELAY-BNB-004: a standing allowance to the depository is refused before an
     { relayExecuteTransport: source, relayApprovalInclusionWait: { polls: 0, delayMs: 0 }, ...consent(op.operationId, op.quoteDigest) });
   assert.equal(refused.ok, false);
   assert.equal(refused.error?.details?.reason, "source_allowance_not_zero", JSON.stringify(refused.error));
+  const target = `--profile ${lane.profile} --chain eip155:56 --asset ${BNB_USDT} --spender ${RELAY_TOKEN_DEPOSITORY}`;
+  assert.deepEqual((refused.error?.details?.nextActions as string[] | undefined)?.slice(0, 2), [`apn wallet allowance status ${target}`,
+    `apn wallet allowance revoke ${target} --max-gas-limit <gas-limit> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei>`],
+    JSON.stringify(refused.error));
   assert.equal(source.sent.length, 0);
 });
 

@@ -2,10 +2,10 @@ import { getAddress } from "viem";
 import { address as solanaAddress } from "@solana/kit";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { loadAllowlistInventory, resolveAllowlistAsset } from "../allowlist-inventory.js";
 import { CANONICAL_WBTC_POLICY_ASSETS } from "../canonical-wbtc-policy-assets.js";
 import { parseAtomic } from "../money.js";
 import { tronAddress } from "../tron/codec.js";
+import { resolveSwapAsset } from "./asset-identity.js";
 export const SWAP_QUOTE_SCHEMA = "apn.swap-quote.v1";
 const DIGEST = /^[a-f0-9]{64}$/u;
 const PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
@@ -88,13 +88,13 @@ function asset(value, mode) {
         failure(mode, "Swap asset identity is invalid.");
     return value;
 }
+/** The frozen inventory or the reviewed Binance-Peg supplement (asset-identity.ts); the frozen dataset itself is unchanged. */
 function resolveInventory(value, mode) {
     try {
-        return resolveAllowlistAsset({ chain: value.chain, kind: value.kind,
-            ...(value.identifier === null ? {} : { identifier: value.identifier }) }, loadAllowlistInventory());
+        return resolveSwapAsset(value);
     }
     catch {
-        return failure(mode, "Swap asset is absent from the frozen inventory.");
+        return failure(mode, "Swap asset is absent from the frozen inventory and its reviewed supplement.");
     }
 }
 function canonicalParty(family, value, mode) {

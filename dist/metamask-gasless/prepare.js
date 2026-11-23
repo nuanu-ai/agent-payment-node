@@ -12,7 +12,7 @@ import { MM_TTL_MS, MM_ZERO_ADDRESS } from "./model.js";
 import { mmRequestHash } from "./operation-model.js";
 import { metaMaskGaslessOwner } from "./owner.js";
 import { metaMaskGaslessQuote } from "./quotation.js";
-import { mmRegistry } from "./registry.js";
+import { mmRequestDeployment } from "./registry.js";
 import { mmAssertUniqueDelegation, mmTransfersBeside } from "./siblings.js";
 import { mmFail } from "./reasons.js";
 import { mmValidateUnsigned } from "./unsigned.js";
@@ -26,7 +26,7 @@ export class MetaMaskGaslessPreparation {
         const profile = canonicalProfile(input.profile), request = mmRequest(input.request), state = this.o.state;
         const key = canonicalIdempotencyKey(input.idempotencyKey), profileHash = state.profileHash(profile);
         const operationId = state.operationId(profile, key), idempotencyHash = state.idempotencyHash(key);
-        const { row, deploymentEvidenceHash } = mmRegistry(request.chainId);
+        const { row, deploymentEvidenceHash } = mmRequestDeployment(request);
         const requestHash = mmRequestHash(profileHash, { request, token: row.token });
         return await state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () => {
             const existing = await this.o.operations.resolvePrepare({ kind: "metamask_gasless_transfer", profileHash,
@@ -72,15 +72,15 @@ export class MetaMaskGaslessPreparation {
                         const checkedUnsigned = mmValidateUnsigned(unsigned, unsignedInput);
                         mmAssertUniqueDelegation(checkedUnsigned.delegationHash, await mmTransfersBeside(this.o.operations, this.o.records, profileHash, request.chainId, binding.address, operationId));
                         clock.check();
-                        const snapshot = await rpc.snapshot({ owner: binding.address, delegationHash: checkedUnsigned.delegationHash,
+                        const snapshot = await rpc.snapshot({ owner: binding.address, token: row.token, delegationHash: checkedUnsigned.delegationHash,
                             grossAtomic: mmActualGross(quote), ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) });
                         clock.check(undefined, [snapshot.observedAt]);
-                        const initialSnapshot = validateMetaMaskGaslessSnapshot(snapshot, { chainId: request.chainId,
+                        const initialSnapshot = validateMetaMaskGaslessSnapshot(snapshot, { chainId: request.chainId, token: row.token,
                             endpointHash: rpc.endpointHash, endpointOrigin: rpc.endpointOrigin, grossAtomic: mmActualGross(quote), ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) });
                         const prepared = clock.fresh(initialSnapshot.observedAt), preparedAt = new Date(prepared).toISOString();
                         // The journal keeps only the request id's hash; the id itself is sealed apart before the journal exists.
                         const requestId = mmUuid(this.o.ids.next()), requestIdHash = mmPrivateHash("request-id", requestId);
-                        const intent = { profile, request, binding, ...checkedUnsigned, token: row.token, decimals: 6,
+                        const intent = { profile, request, binding, ...checkedUnsigned, token: row.token, decimals: row.decimals,
                             deploymentEvidenceHash, initialSnapshot, ...(request.fixedNet ? { preparedGrossAtomic: mmActualGross(quote) } : {}), quote, requestIdHash, preparedAt,
                             expiresAt: new Date(prepared + MM_TTL_MS).toISOString(), policyHash: mmPolicyHash(profileHash, binding, request) };
                         const operation = newMetaMaskGaslessOperation({ profileHash, operationId, idempotencyHash, requestHash }, intent);

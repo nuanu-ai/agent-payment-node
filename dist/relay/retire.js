@@ -98,7 +98,7 @@ export class RelayRetireService {
             throw new ApnError("APN_OPERATION_BLOCKED", "Relay abandonment was declined.", { reason: "foreground_authorization_declined" });
         return source.journalIntegrityHash;
     }
-    /** Ethereum and Arbitrum token lanes. The principal hold is released only after the source state is re-proven. */
+    /** Ethereum USDC, token-route and Arbitrum lanes. The principal hold is released only after the source state is re-proven. */
     async retireTokenLane(op, profile, consented) {
         const retirements = new RelayRetirementRepository(this.state.root), existing = await retirements.load(op);
         if (existing !== null)
@@ -125,7 +125,8 @@ export class RelayRetireService {
         }
         return custody.withNoMaterial(op, async () => {
             await releaseRelayHold(this.state.root, op, source, now);
-            return new AssetUsageLedger(this.state.root).withNoMatchingRelayReservation(op.sourceAccount, op.policyDigest, op.amountAtomic, persist, 1, source.hold.reservationId);
+            // The source leg's own bucket: Ethereum USDC, or a token route's source token on its chain.
+            return new AssetUsageLedger(this.state.root).withNoMatchingRelayReservationIn(source.hold.identity, op.policyDigest, op.amountAtomic, persist, source.hold.reservationId);
         });
     }
 }

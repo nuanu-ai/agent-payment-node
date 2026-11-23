@@ -13,7 +13,7 @@ export declare class RelayEthereumFinalityRpc implements RelaySourceFinalityPort
     private readonly guardFactory;
     private readonly expectedChainId;
     private readonly rpc;
-    constructor(url: string, state: StateStore, rpc?: HttpsBaseRpc, guardFactory?: () => EvmDirectRpcGuard, expectedChainId?: 1 | 56 | 8453);
+    constructor(url: string, state: StateStore, rpc?: HttpsBaseRpc, guardFactory?: () => EvmDirectRpcGuard, expectedChainId?: 1 | 56 | 137 | 8453 | 42161);
     private read;
     /** P2: the finality head is read with the receipt, before the inclusion block; a canonical inclusion block at or
      * below that head is final, so neither header is re-read. */
@@ -27,7 +27,7 @@ export declare class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
     private readonly guard;
     private queued;
     private chain;
-    constructor(url: string, state: StateStore, rpc?: HttpsBaseRpc, guard?: EvmDirectRpcGuard, expectedChainId?: 56 | 137 | 143 | 8453 | 4326);
+    constructor(url: string, state: StateStore, rpc?: HttpsBaseRpc, guard?: EvmDirectRpcGuard, expectedChainId?: 1 | 56 | 137 | 143 | 8453 | 4326 | 42161);
     get physicalPosts(): number;
     private read;
     private flush;

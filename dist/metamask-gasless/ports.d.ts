@@ -52,9 +52,11 @@ export interface MetaMaskGaslessRpcPort {
     readonly endpointOrigin: string;
     readonly endpointHash: string;
     readonly rpcUrl: string;
-    balance(owner: Address): Promise<MetaMaskGaslessBalance>;
+    /** `token`: the transfer token; needed only on a chain whose registry holds several tokens (chain 56). */
+    balance(owner: Address, token?: Address): Promise<MetaMaskGaslessBalance>;
     snapshot(input: {
         readonly owner: Address;
+        readonly token?: Address;
         readonly delegationHash: Hex;
         readonly grossAtomic: string;
         readonly feeMode?: "sponsored";

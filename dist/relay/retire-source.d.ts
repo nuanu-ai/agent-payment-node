@@ -26,7 +26,7 @@ export interface RelayAbandonSummary {
 export interface RelayAbandonConsentPort {
     confirm(summary: RelayAbandonSummary): Promise<boolean>;
 }
-/** Token lanes only (Ethereum and Arbitrum). A signing marker, signed bytes, an unresolved send or a recorded
+/** Token lanes only (Ethereum USDC, token routes and Arbitrum). A signing marker, signed bytes, an unresolved send or a recorded
  * outcome is never retired here: those stay resumable, observable or are already terminal by proof. */
 export declare function relayRetireSource(root: string, op: RelayUnsignedOperation): Promise<RelayRetireSource>;
 /** Release the principal hold: nothing moved the principal. Unknown or foreign hold states refuse. */

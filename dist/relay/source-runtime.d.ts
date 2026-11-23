@@ -15,8 +15,8 @@ export interface RelayApprovalInclusionWait {
 export declare const RELAY_APPROVAL_INCLUSION_WAIT: RelayApprovalInclusionWait;
 export interface RelayExecutionSummary {
     readonly operationId: string;
-    readonly sourceChainId: 1;
-    readonly destinationChainId: 56 | 8453;
+    readonly sourceChainId: number;
+    readonly destinationChainId: number;
     readonly sourceAccount: string;
     readonly sourceToken: string;
     readonly amountAtomic: string;
@@ -27,6 +27,12 @@ export interface RelayExecutionSummary {
     readonly quoteDigest: string;
     readonly approvalNetworkFeeCeilingWei: string;
     readonly depositNetworkFeeCeilingWei: string;
+    /** Token routes only: the destination token and each side's decimals (amount and minimum are atomic in their own). */
+    readonly tokenRoute?: Readonly<{
+        destinationToken: string;
+        sourceDecimals: number;
+        destinationDecimals: number;
+    }>;
 }
 export interface RelayExecutionAuthorizationPort {
     confirm(summary: RelayExecutionSummary): Promise<boolean>;
@@ -50,6 +56,8 @@ export declare class RelayEthereumSourceRuntime {
     private signingNonce;
     /** One chain-id check per execute invocation (P2); approvals proven in this invocation are not re-read. */
     private chainVerified;
+    /** The saved operation's source chain, set before the first read of an invocation. */
+    private sourceChainId;
     private readonly provenApprovals;
     constructor(state: StateStore, wrapping: WrappingSecretPort, transport: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">, authorization: RelayExecutionAuthorizationPort, clock?: ClockPort, pacedOrigin?: string | undefined, approvalWait?: RelayApprovalInclusionWait);
     private get rpc();

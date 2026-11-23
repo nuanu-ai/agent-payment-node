@@ -1,10 +1,13 @@
 import { canonicalJson } from "../canonical.js";
 import { loadAllowlistInventory } from "../allowlist-inventory.js";
+import { binancePegPolicyAsset } from "../binance-peg-policy-assets.js";
 import { bridgeFailure } from "./validation.js";
 /**
  * Binds the bridge registry to the frozen allowlist (`data/allowlist/2026-09-17/dataset.json`). Every native coin and
  * every `frozen_list` token row must be the list's exact identity: chain, kind, contract, symbol and decimals. A
- * `legacy_pinned` row (WBTC) predates the list and keeps its own pins. A drift is an installation fault, not a refusal.
+ * `legacy_pinned` row (WBTC) predates the list and keeps its own pins. A `reviewed_supplement` row must be the exact
+ * owner-admitted Binance-Peg identity (`src/binance-peg-policy-assets.ts`) in its reviewed Across-only shape. A drift is
+ * an installation fault, not a refusal.
  */
 let verifiedRegistry = null;
 export function assertBridgeRegistryListed(registry) {
@@ -32,6 +35,15 @@ export function assertBridgeRegistryListed(registry) {
                     token.stargate !== null || token.approval !== "standard" || token.transferFee !== "none" ||
                     canonicalJson(token.peers) !== canonicalJson(reviewed.peers) || canonicalJson(token.code) !== canonicalJson(reviewed.code))
                     bridgeFailure("APN_INTERNAL", "bridge_registry_reviewed_wbtc_drift");
+                continue;
+            }
+            if (token.listing === "reviewed_supplement") {
+                const peg = binancePegPolicyAsset(row.caip2, "token", token.address);
+                if (peg === undefined || token.chainId !== row.chainId || token.kind !== "erc20" || peg.symbol !== token.symbol ||
+                    peg.decimals !== token.decimals || token.coinKey !== peg.symbol || token.pairKey !== peg.symbol.toLowerCase() ||
+                    !token.acrossSupported || token.stargate !== null || token.approval !== "standard" || token.transferFee !== "none" ||
+                    assets.some((asset) => asset.chain === row.caip2 && asset.kind === "token" && asset.identifier === token.address))
+                    bridgeFailure("APN_INTERNAL", "bridge_registry_supplement_drift");
                 continue;
             }
             const listed = assets.filter((asset) => asset.chain === row.caip2 && asset.kind === "token" && asset.identifier === token.address);

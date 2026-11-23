@@ -268,7 +268,13 @@ export class RelayApprovalEffectService {
     const funding = await this.ports.funding(op);
     // A token route approves exactly the principal from zero: a standing allowance is revoked first (Ethereum USDT
     // reverts a nonzero-to-nonzero approve, and a leftover allowance would outlive this operation).
-    if (leg.zeroAllowanceRequired && funding.allowanceAtomic !== 0n) blocked("source_allowance_not_zero");
+    if (leg.zeroAllowanceRequired && funding.allowanceAtomic !== 0n) {
+      const target = `--profile ${profile} --chain ${leg.chain} --asset ${leg.token} --spender ${leg.depository}`;
+      throw new ApnError("APN_OPERATION_BLOCKED", "Relay approval effect is blocked.", { reason: "source_allowance_not_zero",
+        nextActions: [`apn wallet allowance status ${target}`,
+          `apn wallet allowance revoke ${target} --max-gas-limit <gas-limit> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei>`,
+          `After the revoke is final, run the same apn relay execute again; if its quote deadline has passed, run apn relay retire --profile ${profile} --operation ${op.operationId} and prepare again.`] });
+    }
     if (funding.chainId !== leg.chainId || funding.nativeBalanceWei < BigInt(op.approvalNetworkFeeCeilingWei!) + BigInt(op.depositNetworkFeeCeilingWei!) ||
       funding.tokenBalanceAtomic < BigInt(op.amountAtomic) || funding.allowanceAtomic < 0n ||
       !relayEnvelopeFeeAdmitted(funding.baseFeePerGasWei, leg.approval) ||

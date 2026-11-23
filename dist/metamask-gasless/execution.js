@@ -208,10 +208,10 @@ export class MetaMaskGaslessExecution {
         return unsigned;
     }
     async chainState(op, rpc, delegationHash, grossAtomic) {
-        const snapshot = await rpc.snapshot({ owner: op.intent.binding.address, delegationHash,
+        const snapshot = await rpc.snapshot({ owner: op.intent.binding.address, token: op.intent.token, delegationHash,
             grossAtomic, ...(op.intent.quote.feeMode === "sponsored" ? { feeMode: op.intent.quote.feeMode } : {}) });
         this.clock.check(op);
-        const current = validateMetaMaskGaslessSnapshot(snapshot, { chainId: op.intent.request.chainId,
+        const current = validateMetaMaskGaslessSnapshot(snapshot, { chainId: op.intent.request.chainId, token: op.intent.token,
             endpointHash: rpc.endpointHash, endpointOrigin: rpc.endpointOrigin, grossAtomic, ...(op.intent.quote.feeMode === "sponsored" ? { feeMode: op.intent.quote.feeMode } : {}) });
         this.clock.beforeDispatchAtCurrent(op, current.observedAt);
         for (const key of ["safeState", "headState"]) {

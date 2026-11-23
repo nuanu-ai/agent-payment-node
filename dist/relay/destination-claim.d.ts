@@ -8,5 +8,7 @@ export declare class RelayDestinationClaimRepository extends SecureStateStore {
     claimEthereumUsdc(op: RelayUnsignedOperation, sourceHash: string, proof: RelayEthereumUsdcCreditProof): Promise<void>;
     /** The BNB or Base native payout of an Ethereum USDC operation whose deposit the saved effect journal records as final. */
     claimEthereumSource(op: RelayUnsignedOperation, sourceHash: string, proof: RelayBnbRecipientCreditEvidence): Promise<void>;
+    /** The destination-token payout of a token-route operation whose deposit the saved effect journal records as final. */
+    claimTokenRoute(op: RelayUnsignedOperation, sourceHash: string, proof: RelayBnbRecipientCreditEvidence): Promise<void>;
     private persist;
 }

@@ -1,6 +1,7 @@
 import type { Hex } from "../../../model.js";
 import type { SwapOperationRecord, SwapReceiptProof } from "../../model.js";
 import type { UniswapTransactionEnvelope } from "../../uniswap-v3/envelope.js";
+import type { UniswapNativeChainId } from "../../uniswap-v3/native-lane.js";
 export interface UniswapOwnerAdmission {
     readonly profile: string;
     readonly profileHash: string;
@@ -14,7 +15,7 @@ export interface UniswapOwnerAdmissionPort {
     assert(operation: SwapOperationRecord): Promise<UniswapOwnerAdmission>;
 }
 export interface UniswapExecutionFreshness {
-    readonly chainId: 1;
+    readonly chainId: UniswapNativeChainId;
     readonly account: string;
     readonly nonce: string;
     readonly gasLimit: string;
@@ -43,7 +44,7 @@ export interface UniswapExecutionApprovalRequest {
     readonly maxFeePerGas: string;
     readonly maxPriorityFeePerGas: string;
     readonly maximumGasCostAtomic: string;
-    readonly chainId: 1;
+    readonly chainId: UniswapNativeChainId;
     readonly router: string;
     readonly envelopeHash: string;
     readonly nonce: string;
@@ -64,7 +65,7 @@ export interface UniswapExecutionBinding {
     readonly walletBindingHash: string;
     readonly walletCreatedAt: string;
     readonly ownerAdmissionHash: string;
-    readonly chainId: 1;
+    readonly chainId: UniswapNativeChainId;
     readonly envelope: UniswapTransactionEnvelope;
     readonly envelopeHash: string;
     readonly nonce: string;

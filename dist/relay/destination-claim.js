@@ -7,6 +7,7 @@ import { ArbitrumSourceEffectJournalRepository } from "./arbitrum-source-effect-
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { RELAY_MEGA_USDM } from "./native-routes.js";
 import { ETHEREUM_USDC } from "./quote.js";
+import { relayTokenRouteByReference } from "./token-routes.js";
 const hash = /^0x[0-9a-fA-F]{64}$/u;
 function invalid() { throw new ApnError("APN_OPERATION_BLOCKED", "Relay destination claim binding is invalid."); }
 function unconfirmed() { throw new ApnError("APN_OPERATION_BLOCKED", "Relay payout claim requires the confirmed source operation."); }
@@ -53,6 +54,23 @@ export class RelayDestinationClaimRepository extends SecureStateStore {
             unconfirmed();
         await this.persist(op, sourceHash, quote.orderId, { transactionHash: proof.destinationTransactionHash, recipient: proof.recipient,
             token: "native", amountAtomic: proof.creditedWei, blockNumber: proof.destinationBlockNumber, blockHash: proof.destinationBlockHash });
+    }
+    /** The destination-token payout of a token-route operation whose deposit the saved effect journal records as final. */
+    async claimTokenRoute(op, sourceHash, proof) {
+        const quote = op.tokenQuote, route = quote === undefined ? null : relayTokenRouteByReference(quote.routeReference);
+        if (quote === undefined || route === null || op.sourceChainId !== route.source.chainId || op.destinationChainId !== route.destination.chainId ||
+            !op.statusLocator || !hash.test(sourceHash) || !hash.test(proof.destinationTransactionHash) ||
+            proof.sourceDepositHash?.toLowerCase() !== sourceHash.toLowerCase() || proof.operationId !== op.operationId ||
+            proof.operationIntegrityHash !== op.integrityHash || proof.quoteDigest !== op.quoteDigest || proof.orderId !== quote.orderId ||
+            proof.recipient !== op.recipient.toLowerCase() || proof.method !== "pinned_erc20_transfer_event" ||
+            proof.minimumOutputWei !== op.minOutputAtomic || BigInt(proof.creditedWei) < BigInt(op.minOutputAtomic))
+            invalid();
+        const deposit = (await new RelayEffectJournalRepository(this.root).load(op.profileHash, op.operationId))?.effects[1];
+        if (deposit?.phase !== "confirmed" || deposit.attempt?.transactionHash?.toLowerCase() !== sourceHash.toLowerCase())
+            unconfirmed();
+        await this.persist(op, sourceHash, quote.orderId, { transactionHash: proof.destinationTransactionHash, recipient: proof.recipient,
+            token: route.destination.address.toLowerCase(), amountAtomic: proof.creditedWei, blockNumber: proof.destinationBlockNumber,
+            blockHash: proof.destinationBlockHash });
     }
     async persist(op, sourceHash, orderId, payout) {
         const key = domainHash("apn.relay-destination-payout-key.v1", canonicalJson({ chainId: op.destinationChainId, transactionHash: payout.transactionHash.toLowerCase() }));

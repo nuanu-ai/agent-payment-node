@@ -1,7 +1,8 @@
 import { hashObject, sha256 } from "../canonical.js";
-import { bridgeAssetAddress, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgeCrossNativeConversion, bridgeDestinationChain, bridgeExecutionDestination, bridgeExecutionSource, bridgeFeeAsset, bridgeNativeCoin, bridgeNativeDenominationConversion, bridgeNativePrincipal, bridgeQuoteDestination } from "./asset-registry.js";
+import { bridgeAssetAddress, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgeCrossNativeConversion, bridgeDestinationChain, bridgeExecutionDestination, bridgeExecutionSourceLeg, bridgeFeeAsset, bridgeNativeCoin, bridgeNativeDenominationConversion, bridgeNativePrincipal, bridgeQuoteDestination } from "./asset-registry.js";
 import { FEE_FORWARDER } from "./abi.js";
 import { bridgeFeeForwarder, decodeBridgeCall } from "./decode.js";
+import { bridgeLossAsSource, bridgeOutputAsSource, bridgeOutputExceedsSource, bridgeRequestScale } from "./denomination.js";
 import { LIFI_ROUTE_RESPONSE_BYTES } from "./provider.js";
 import { BRIDGE_DIAMOND, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeFailure, bridgeHex, bridgeJson, bridgeOpaque, bridgeRecord, bridgeUint } from "./validation.js";
 /** Exact contracts for the reviewed composite BNB delivery graph. */
@@ -38,8 +39,9 @@ function toolGate(tool, request) {
     catch {
         return "asset_tool_unreviewed";
     }
-    // Destination-only chains (BNB, Monad, Linea) have no reviewed LI.FI source path; prepare would always refuse them.
-    if (!bridgeExecutionSource(request.fromChainId))
+    // Destination-only legs (Monad, Linea, native BNB) have no reviewed LI.FI source path; prepare would always refuse them.
+    // BNB Smart Chain is a source for its Binance-Peg token rows only.
+    if (!bridgeExecutionSourceLeg(request.fromChainId, request.fromToken))
         return "source_execution_unreviewed";
     return null;
 }
@@ -122,17 +124,24 @@ export function materializeBridgeRoute(selected, response, request, sender) {
     const implicitProtocolFeeAtomic = validateRouteEconomics(m);
     return { materialization: m, implicitProtocolFeeAtomic, providerNonceAtomic: tx.nonce === undefined ? null : providerQuantity(tx.nonce).toString() };
 }
+/**
+ * The token economics of one materialized route, and its unitemized protocol fee in source atomic units. A scaled pair
+ * (Binance-Peg 18 decimals against 6) compares output, loss and fees exactly at the finer precision; its unitemized fee
+ * counts the output at the source precision rounded down, so the fee is never understated.
+ */
 export function validateRouteEconomics(m) {
     const r = m.request, amount = bridgeUint(r.amountAtomic, true), output = bridgeUint(m.quotedOutputAtomic, true), minimum = bridgeUint(m.minimumOutputAtomic, true);
-    const conversion = bridgeNativeDenominationConversion(r);
-    if ((!conversion && (output > amount || amount - minimum > bridgeUint(r.maxRouteFeeAtomic))) || minimum > output || minimum < bridgeUint(r.minOutputAtomic, true) ||
+    const conversion = bridgeNativeDenominationConversion(r), scale = bridgeRequestScale(r);
+    if ((!conversion && (bridgeOutputExceedsSource(amount, output, scale) || bridgeLossAsSource(amount, minimum, scale) > bridgeUint(r.maxRouteFeeAtomic))) ||
+        minimum > output || minimum < bridgeUint(r.minOutputAtomic, true) ||
         (output - minimum) * 10000n > output * BigInt(r.slippageBps) + 9999n)
         bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "bridge_output_or_token_fee_limit");
     let included = 0n, sourceIncluded = 0n;
     const additional = [];
     for (const fee of m.feeCosts) {
         if (fee.included) {
-            if ((fee.chainId !== r.fromChainId && fee.chainId !== r.toChainId) || fee.asset !== bridgeFeeAsset(requestAsset(r, fee.chainId)))
+            if ((fee.chainId !== r.fromChainId && (scale.scaled || fee.chainId !== r.toChainId)) ||
+                fee.asset !== bridgeFeeAsset(requestAsset(r, fee.chainId)))
                 bridgeFailure("APN_PROVIDER_PROTOCOL", "included_fee_asset");
             included += bridgeUint(fee.amountAtomic);
             if (fee.chainId === r.fromChainId)
@@ -141,8 +150,9 @@ export function validateRouteEconomics(m) {
         else
             additional.push(fee);
     }
-    if ((conversion ? sourceIncluded > bridgeUint(r.maxRouteFeeAtomic) : included + output > amount))
+    if ((conversion ? sourceIncluded > bridgeUint(r.maxRouteFeeAtomic) : bridgeOutputExceedsSource(amount - included, output, scale))) {
         bridgeFailure("APN_PROVIDER_PROTOCOL", "token_fee_double_count");
+    }
     // Native Stargate adds the separately quoted LayerZero fee to the principal; token Stargate carries only that fee.
     const stargateFeeValue = m.tool === "stargateV2" && additional.length === 1 ?
         (bridgeNativePrincipal(r) ? (amount + bridgeUint(additional[0].amountAtomic)).toString() : additional[0].amountAtomic) : null;
@@ -150,7 +160,7 @@ export function validateRouteEconomics(m) {
         additional.length !== 1 || additional[0].chainId !== r.fromChainId || additional[0].asset !== "native" ||
             stargateFeeValue !== m.transaction.valueAtomic)
         bridgeFailure("APN_PROVIDER_PROTOCOL", "native_fee_identity");
-    return conversion ? "0" : (amount - included - output).toString();
+    return conversion ? "0" : (amount - included - bridgeOutputAsSource(output, scale)).toString();
 }
 function assertStep(step, request, sender) {
     bridgeOpaque(step.id);

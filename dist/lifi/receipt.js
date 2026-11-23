@@ -5,6 +5,7 @@ import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, bridgeFailure } fr
 import { isLegacyBridgeOperation } from "./legacy-operation.js";
 import { BRIDGE_ARCHIVE_RPC_ENV, BRIDGE_RECEIPT_RPC_ENV } from "./rpc-archive.js";
 import { BRIDGE_RPC_ENV } from "./rpc-transport.js";
+import { bridgeLossAsSource, bridgeRequestScale } from "./denomination.js";
 /** The next actions a receipt binds. Stored receipts hash them, so they never change for a transition already written. */
 export function bridgeNextActions(op) {
     if (op.terminal)
@@ -68,7 +69,7 @@ function projectBridgeOperation(op, legacy) {
     const from = assetProjection(m.request.fromChainId, m.request.fromToken);
     const to = assetProjection(m.request.toChainId, m.request.toToken);
     const sameDenomination = fromAsset.pairKey === toAsset.pairKey && fromAsset.decimals === toAsset.decimals;
-    const nativePrincipal = bridgeNativePrincipal(m.request);
+    const nativePrincipal = bridgeNativePrincipal(m.request), scale = bridgeRequestScale(m.request);
     const assetBounds = {
         binding: "intent.materialization.request",
         same_denomination: sameDenomination,
@@ -81,6 +82,10 @@ function projectBridgeOperation(op, legacy) {
         destination: { chain: to.chain, asset: to.token, symbol: to.symbol, decimals: to.decimals,
             expected_output_atomic: m.quotedOutputAtomic, minimum_output_atomic: m.minimumOutputAtomic,
             owner_minimum_output_atomic: m.request.minOutputAtomic },
+        // Only the Binance-Peg pair carries this: one value at two precisions. No stored receipt of another pair changes.
+        ...(scale.scaled ? { scaled_precision: { finer_decimals: Math.max(fromAsset.decimals, toAsset.decimals),
+                token_loss_bound_source_atomic: bridgeLossAsSource(BigInt(m.request.amountAtomic), BigInt(m.minimumOutputAtomic), scale).toString(),
+                rounding: "loss_rounded_up_to_source_atomic" } } : {}),
     };
     const effects = op.effects.map((e) => ({
         role: e.role, phase: e.phase, envelope_hash: e.envelope.envelopeHash, transaction_hash: e.transactionHash,
@@ -215,7 +220,13 @@ export function previousCurrentBridgeReceipt(op) {
     return { ...previous, receipt_hash: hashObject(previous) };
 }
 export function currentBridgeReceiptCandidates(op) {
-    const current = bridgeReceipt(op), previous = previousCurrentBridgeReceipt(op);
+    const current = bridgeReceipt(op);
+    // A pair with two precisions exists only since 0.5.114, which always wrote asset_bounds: no receipt in the
+    // previous form was ever written for it, and its mixed-unit loss bound must not be accepted.
+    if (bridgeRequestScale(op.intent.materialization.request).scaled) {
+        return op.observationTelemetry === undefined ? [current, receiptWithoutObservationTelemetry(current)] : [current];
+    }
+    const previous = previousCurrentBridgeReceipt(op);
     // PR217 added an always-present projection of the optional journal telemetry. A transition written by an older
     // writer has no journal field at all, so accept only its exact receipt forms with the empty projection omitted.
     // Once a transition binds [] or any telemetry rows, omission is no longer a candidate.

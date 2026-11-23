@@ -1,12 +1,12 @@
-import type { UNISWAP_ROUTER } from "../uniswap-pin.js";
-/** The unsigned Universal Router transaction the keyless route builds, binds and signs. */
+import type { UniswapNativeChainId } from "./native-lane.js";
+/** The unsigned router transaction a keyless native-input route builds, binds and signs; `to` is its lane's pinned router. */
 export interface UniswapTransactionEnvelope {
     readonly from: string;
-    readonly to: typeof UNISWAP_ROUTER;
+    readonly to: `0x${string}`;
     readonly data: `0x${string}`;
     readonly value: string;
     readonly gasLimit: string;
-    readonly chainId: 1;
+    readonly chainId: UniswapNativeChainId;
     readonly maxFeePerGas?: string;
     readonly maxPriorityFeePerGas?: string;
     readonly gasPrice?: string;

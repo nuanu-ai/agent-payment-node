@@ -28,13 +28,14 @@ export declare class MetaMaskGaslessService {
     readonly records: MetaMaskGaslessRepositoryPort;
     readonly operations: OperationService;
     constructor(context: RuntimeContext);
-    balance(profile: string, chainId: MetaMaskGaslessChainId): Promise<{
+    /** `asset`: the token contract; required on a chain with several tokens (56), optional elsewhere where it may name only that one. */
+    balance(profile: string, chainId: MetaMaskGaslessChainId, asset?: string): Promise<{
         profile: string;
         provider: string;
-        chain_id: 1 | 10 | 8453 | 42161 | 137 | 59144 | 143 | 1329;
+        chain_id: 1 | 10 | 8453 | 42161 | 137 | 56 | 59144 | 143 | 1329;
         token: `0x${string}`;
-        symbol: string;
-        decimals: number;
+        symbol: import("./registry.js").MetaMaskGaslessSymbol;
+        decimals: 18 | 6;
         address: `0x${string}`;
         balance_atomic: string;
         designation: "empty" | "pinned";
@@ -68,8 +69,8 @@ export declare class MetaMaskGaslessService {
         transfer: {
             readonly chain_id: MetaMaskGaslessChainId;
             readonly token: import("../model.js").Address;
-            readonly symbol: "USDC";
-            readonly decimals: 6;
+            readonly symbol: import("./registry.js").MetaMaskGaslessSymbol;
+            readonly decimals: import("./model.js").MetaMaskGaslessDecimals;
             readonly sender: import("../model.js").Address;
             readonly recipient: import("../model.js").Address;
             readonly fee_recipient: import("../model.js").Address | null;
@@ -153,8 +154,8 @@ export declare class MetaMaskGaslessService {
         transfer: {
             readonly chain_id: MetaMaskGaslessChainId;
             readonly token: import("../model.js").Address;
-            readonly symbol: "USDC";
-            readonly decimals: 6;
+            readonly symbol: import("./registry.js").MetaMaskGaslessSymbol;
+            readonly decimals: import("./model.js").MetaMaskGaslessDecimals;
             readonly sender: import("../model.js").Address;
             readonly recipient: import("../model.js").Address;
             readonly fee_recipient: import("../model.js").Address | null;

@@ -1,8 +1,9 @@
 import type { Address, Hex } from "../model.js";
 import type { OperationService } from "../operation-service.js";
-import type { MetaMaskGaslessState } from "./model.js";
+import type { MetaMaskGaslessDecimals, MetaMaskGaslessState } from "./model.js";
 import type { MetaMaskGaslessOperationRecord } from "./operation-model.js";
 import type { MetaMaskGaslessRepositoryPort } from "./ports.js";
+import { type MetaMaskGaslessSymbol } from "./registry.js";
 /** Said once beside the listed transfers, on the approval screen and in the prepare and approve output. */
 export declare const MM_SIBLING_WARNING: string;
 /** One earlier transfer as its own record holds it: the recipient and the gross of the batch actually dispatched. */
@@ -11,6 +12,10 @@ export interface MetaMaskGaslessSiblingOutput {
     readonly state: MetaMaskGaslessState;
     readonly recipient: Address;
     readonly dispatched_gross_atomic: string;
+    /** Named only on a chain with several tokens (56), where an earlier transfer may move the other one. */
+    readonly token?: Address;
+    readonly symbol?: MetaMaskGaslessSymbol;
+    readonly decimals?: MetaMaskGaslessDecimals;
 }
 export interface MetaMaskGaslessSiblingsOutput {
     readonly unresolved_beside?: {

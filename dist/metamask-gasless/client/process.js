@@ -82,7 +82,7 @@ export class MetaMaskGaslessProviderClient {
                 throw observeFailureError(response.failure.reason, response.observeDiagnostic);
             if (response.diagnostic !== undefined) {
                 const quoted = request.mode === "quote" ? request.input : undefined;
-                throw withMetaMaskProviderRefusal(readFailureError(response.failure.reason, response.diagnostic), response.diagnostic, quoted?.chainId, quoted?.binding);
+                throw withMetaMaskProviderRefusal(readFailureError(response.failure.reason, response.diagnostic), response.diagnostic, quoted?.chainId, quoted?.binding, quoted?.token);
             }
             throw mmError(response.failure.reason);
         }

@@ -1,4 +1,4 @@
-import { MM_MIN_REMAINING_MS, MM_PROVIDER_STATUSES, MM_TTL_MS, MM_ZERO_ADDRESS } from "../model.js";
+import { MM_MIN_REMAINING_MS, MM_PROVIDER_STATUSES, MM_TOKEN_DECIMALS, MM_TTL_MS, MM_ZERO_ADDRESS } from "../model.js";
 import { mmActualGross, mmUnusedGross, mmAssertIntentEconomics, mmRepriceWithinCap } from "../economics.js";
 import { mmBinding, mmRequestIdHash } from "../identity.js";
 import { mmRecordedDeployment } from "../recorded.js";
@@ -49,7 +49,7 @@ function blockOrder(first, second) {
  * The prepare-time chain state as saved. Its pins were compared with the registry when it was read; a saved record is
  * checked for shape only, so a later registry or token upgrade never turns it into corrupt state.
  */
-function chainState(value, feeMode) {
+function chainState(value, decimals, feeMode) {
     const s = mmExact(value, ["protocolCodeHashes", "tokenProxyCodeHash", "tokenImplementationAddress",
         "tokenImplementationCodeHash", "tokenDecimals", "ownerCodeHash", "designation", "usdcBalanceAtomic", "counterAtomic"]);
     const codes = mmExact(s.protocolCodeHashes, feeMode === "sponsored" ? SPONSORED_PROTOCOL : BATCH_PROTOCOL);
@@ -58,7 +58,7 @@ function chainState(value, feeMode) {
     mmHex(s.tokenProxyCodeHash, 32);
     mmCanonicalAddress(s.tokenImplementationAddress);
     mmHex(s.tokenImplementationCodeHash, 32);
-    if (s.tokenDecimals !== 6 || !["empty", "pinned"].includes(s.designation) || mmUint(s.counterAtomic).toString() !== "0")
+    if (s.tokenDecimals !== decimals || !["empty", "pinned"].includes(s.designation) || mmUint(s.counterAtomic).toString() !== "0")
         corrupt();
     const ownerCodeHash = mmHex(s.ownerCodeHash, 32);
     if (s.designation === "empty" ? ownerCodeHash !== EMPTY_CODE_HASH : ownerCodeHash === EMPTY_CODE_HASH)
@@ -66,7 +66,7 @@ function chainState(value, feeMode) {
     mmUint(s.usdcBalanceAtomic);
     return s;
 }
-function snapshot(value, chainId, feeMode) {
+function snapshot(value, chainId, decimals, feeMode) {
     const s = mmExact(value, ["chainId", "endpointHash", "endpointOrigin", "observedAt", "safeBlock", "headBlock",
         "safeState", "headState"]);
     if (s.chainId !== chainId)
@@ -76,8 +76,8 @@ function snapshot(value, chainId, feeMode) {
     mmIso(s.observedAt);
     const safeBlock = block(s.safeBlock), headBlock = block(s.headBlock);
     blockOrder(safeBlock, headBlock);
-    chainState(s.safeState, feeMode);
-    chainState(s.headState, feeMode);
+    chainState(s.safeState, decimals, feeMode);
+    chainState(s.headState, decimals, feeMode);
     return s;
 }
 /**
@@ -95,11 +95,14 @@ export function mmJournalIntent(value, profileHash) {
     const request = mmRequest(i.request, "mm_gasless_state_corrupt"), binding = mmBinding(i.binding, "mm_gasless_state_corrupt");
     mmCanonicalAddress(i.token);
     mmHash(i.deploymentEvidenceHash);
+    // The token's scale as the record froze it, never today's registry: 6 (USDC rows) or 18 (chain 56 rows).
+    if (!MM_TOKEN_DECIMALS.includes(i.decimals))
+        corrupt();
     if (sealed)
         mmHash(i.requestIdHash);
     else
         mmUuid(i.requestId);
-    const initial = snapshot(i.initialSnapshot, request.chainId, i.quote.feeMode);
+    const initial = snapshot(i.initialSnapshot, request.chainId, i.decimals, i.quote.feeMode);
     const preparedAt = mmIso(i.preparedAt), expiresAt = mmIso(i.expiresAt);
     if (time(expiresAt) - time(preparedAt) !== MM_TTL_MS || time(initial.observedAt) > time(preparedAt))
         corrupt();

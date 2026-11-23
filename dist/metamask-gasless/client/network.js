@@ -6,7 +6,7 @@ import { canonicalJson, exactKeys, isPlainRecord, sha256 } from "../../canonical
 import { parsePublicHttpsUrl } from "../../network-policy.js";
 import { HttpsFetchExchange } from "./https-exchange.js";
 import { serverTransactionBody } from "./server-transaction.js";
-import { MM_SENTINEL_SLUG, mmRegistry } from "../registry.js";
+import { MM_SENTINEL_SLUG, mmChainFacts, mmRegistry } from "../registry.js";
 import { mmFail } from "../reasons.js";
 import { encodeFunctionData, parseAbi } from "viem";
 const MIMIR = "https://agentic-mimir-service.api.cx.metamask.io";
@@ -471,7 +471,7 @@ function validateSentinelBody(body, context) {
         String(tx.from).toLowerCase() !== context.owner || String(tx.to).toLowerCase() !== context.input.token || tx.data !== expectedData ||
         tx.value !== "0x0" || !Array.isArray(tx.authorizationList) || tx.authorizationList.length !== 1 ||
         !isPlainRecord(tx.authorizationList[0]) || !exactKeys(tx.authorizationList[0], ["address", "from"]) ||
-        String(tx.authorizationList[0].address).toLowerCase() !== mmRegistry(context.input.chainId).row.protocol.delegate.address ||
+        String(tx.authorizationList[0].address).toLowerCase() !== mmChainFacts(context.input.chainId).protocol.delegate.address ||
         String(tx.authorizationList[0].from).toLowerCase() !== context.owner) {
         mmFail("mm_gasless_provider_unavailable");
     }
@@ -534,7 +534,9 @@ function validateResponse(key, body, requestBody, context) {
         const sent = requestBody === null ? null : parseBody(requestBody);
         if (!exactKeys(value, ["jsonrpc", "id", "result"]) || value.jsonrpc !== "2.0" || sent === null || value.id !== sent.id ||
             typeof value.result !== "string" || !/^0x[0-9a-fA-F]{64}$/u.test(value.result) ||
-            (key === "rpc-decimals" && BigInt(value.result) !== 6n))
+            // The SDK scales the amount by this answer: it must be the pinned row's scale (6 for USDC, 18 on chain 56).
+            (key === "rpc-decimals" && (context.mode !== "quote" ||
+                BigInt(value.result) !== BigInt(mmRegistry(context.input.chainId, context.input.token).row.decimals))))
             mmFail("mm_gasless_provider_unavailable");
     }
     else if (key === "sentinel-quote")

@@ -2,6 +2,7 @@ import type { Hex } from "viem";
 import type { EvmRpcCall } from "../../../evm-ports.js";
 import { type SwapOperationRecord, type SwapReceiptEconomics, type SwapReceiptProof } from "../../model.js";
 import { type SwapUnlandedProof } from "../../unlanded.js";
+import { type UniswapNativeLane } from "../../uniswap-v3/native-lane.js";
 import { type UniswapBalanceEvidencePort } from "./evidence-store.js";
 import type { UniswapExecutionBinding, UniswapReceiptObserverPort } from "./types.js";
 /** A finalized outcome: success carries the full receipt proof; a revert carries its finalized status-0 proof. */
@@ -9,12 +10,14 @@ export type UniswapObservedOutcome = {
     readonly outcome: "succeeded" | "reverted";
     readonly proof: SwapReceiptProof;
 };
-export declare class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPort {
+/** Observe-only receipt reader of one native-input lane; an operation of another chain is refused before any read. */
+export declare class UniswapNativeReceiptObserver implements UniswapReceiptObserverPort {
+    private readonly lane;
     private readonly call;
     private readonly now;
     private readonly evidence?;
     /** Without an evidence store every observation reads the balances around the swap block again. */
-    constructor(call: EvmRpcCall, now?: () => Date, evidence?: UniswapBalanceEvidencePort | undefined);
+    constructor(lane: UniswapNativeLane, call: EvmRpcCall, now: () => Date, evidence?: UniswapBalanceEvidencePort | undefined);
     observe(operationValue: SwapOperationRecord, bindingValue: UniswapExecutionBinding, transactionHash: Hex): Promise<SwapReceiptProof | null>;
     observeOutcome(operationValue: SwapOperationRecord, bindingValue: UniswapExecutionBinding, transactionHash: Hex): Promise<UniswapObservedOutcome | null>;
     /** One read of a swap its record proved finalized: its own receipt and the finalized head, for the economics (no balances). */
@@ -27,5 +30,10 @@ export declare class UniswapEthereumReceiptObserver implements UniswapReceiptObs
     private balanceEvidence;
     private balance;
     private assertChain;
+    private own;
     private assertTransactionEnvelope;
+}
+/** The Ethereum mainnet lane's observer, over APN_ETHEREUM_RPC_URL. */
+export declare class UniswapEthereumReceiptObserver extends UniswapNativeReceiptObserver {
+    constructor(call: EvmRpcCall, now?: () => Date, evidence?: UniswapBalanceEvidencePort);
 }

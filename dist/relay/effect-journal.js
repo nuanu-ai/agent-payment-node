@@ -16,10 +16,13 @@ function body(journal) {
     const { integrityHash: _, ...rest } = journal;
     return rest;
 }
+/** The saved quote whose two envelopes the journal binds: Ethereum USDC, or a token route's own (token-quote.ts). */
 function prepared(op) {
     validateRelayUnsignedOperation(op);
-    if (op.quote === undefined || op.quote.quoteDigest !== op.quoteDigest)
+    const quote = op.tokenQuote ?? op.quote;
+    if (quote === undefined || quote.quoteDigest !== op.quoteDigest)
         blocked("prepared quote required");
+    return quote;
 }
 function validateEffect(effect, role) {
     if (effect.role !== role || !RELAY_EFFECT_PHASES.includes(effect.phase))
@@ -47,7 +50,7 @@ function validateEffect(effect, role) {
         corrupt("never landed attempt");
 }
 export function validateRelayEffectJournal(value, op) {
-    prepared(op);
+    const quote = prepared(op);
     if (value === null || typeof value !== "object" || Array.isArray(value))
         corrupt("shape");
     const j = value;
@@ -55,9 +58,9 @@ export function validateRelayEffectJournal(value, op) {
         "sourceOwner", "quoteDigest", "orderId", "approvalEnvelope", "depositEnvelope", "effects", "createdAt", "integrityHash"].sort().join(",") ||
         j.schemaVersion !== "apn.relay-effect-journal.v1" || j.profileHash !== op.profileHash ||
         j.operationId !== op.operationId || j.preparedIntegrityHash !== op.integrityHash ||
-        j.sourceOwner !== op.sourceAccount || j.quoteDigest !== op.quoteDigest || j.orderId !== op.quote.orderId ||
-        hashObject(j.approvalEnvelope) !== hashObject(op.quote.approval) ||
-        hashObject(j.depositEnvelope) !== hashObject(op.quote.deposit) || !iso(j.createdAt) ||
+        j.sourceOwner !== op.sourceAccount || j.quoteDigest !== op.quoteDigest || j.orderId !== quote.orderId ||
+        hashObject(j.approvalEnvelope) !== hashObject(quote.approval) ||
+        hashObject(j.depositEnvelope) !== hashObject(quote.deposit) || !iso(j.createdAt) ||
         !Array.isArray(j.effects) || j.effects.length !== 2 || !hexHash(j.integrityHash))
         corrupt("binding");
     validateEffect(j.effects[0], "approval");
@@ -69,14 +72,14 @@ export function validateRelayEffectJournal(value, op) {
     return j;
 }
 export function createRelayEffectJournal(op, createdAt) {
-    prepared(op);
+    const quote = prepared(op);
     if (!iso(createdAt))
         blocked("invalid creation time");
     const pending = (role) => ({ role, phase: "pending", attempt: null, observedAt: null });
     const fields = {
         schemaVersion: "apn.relay-effect-journal.v1", profileHash: op.profileHash, operationId: op.operationId,
         preparedIntegrityHash: op.integrityHash, sourceOwner: op.sourceAccount, quoteDigest: op.quoteDigest,
-        orderId: op.quote.orderId, approvalEnvelope: op.quote.approval, depositEnvelope: op.quote.deposit,
+        orderId: quote.orderId, approvalEnvelope: quote.approval, depositEnvelope: quote.deposit,
         effects: [pending("approval"), pending("deposit")], createdAt,
     };
     return validateRelayEffectJournal({ ...fields, integrityHash: hashObject(fields) }, op);
