@@ -78,12 +78,14 @@ test("the bridge registry is the frozen list's exact identities; WBTC stays a le
     for (const token of row.tokens) {
       const listed = assets.find((a) => a.chain === row.caip2 && a.kind === "token" && a.identifier === token.address);
       if (token.symbol === "WBTC") { assert.equal(token.listing, "legacy_pinned"); assert.equal(listed, undefined); continue; }
+      // The Binance-Peg rows of BNB Smart Chain are the owner's reviewed supplement, never frozen-list rows.
+      if (chainId === 56) { assert.equal(token.listing, "reviewed_supplement"); assert.equal(listed, undefined); continue; }
       assert.equal(token.listing, "frozen_list"); assert.equal(listed?.symbol, token.symbol); assert.equal(listed?.decimals, token.decimals);
     }
   }
   const usdt = bridgeTokenRow(1, USDT);
   assert.deepEqual({ decimals: usdt.decimals, approval: usdt.approval, transferFee: usdt.transferFee, peers: usdt.peers, stargate: usdt.stargate },
-    { decimals: 6, approval: "zero_first", transferFee: "tether_fee_zero", peers: [], stargate: null });
+    { decimals: 6, approval: "zero_first", transferFee: "tether_fee_zero", peers: [56], stargate: null });
   assert.equal(usdt.code.upgradeability, "immutable");
   const capabilities = bridgeCapabilities();
   assert.ok(capabilities.chains.every((row) => row.native_coin.tools.join() ===
@@ -94,7 +96,8 @@ test("the bridge registry is the frozen list's exact identities; WBTC stays a le
 
 test("unlisted, unpaired and mixed-kind legs are refused with a named reason", async () => {
   assert.throws(() => bridgeAssetRow(42161, USDT0_ARBITRUM), /asset_not_on_frozen_list/u);
-  assert.throws(() => bridgeAssetPair({ fromChainId: 1, toChainId: 42161, fromToken: USDT, toToken: USDC[42161] }), /asset_has_no_listed_peer/u);
+  // Ethereum USDT's one peer is BNB Smart Chain's Binance-Peg USDT; USDC on Arbitrum is another pair key and chain.
+  assert.throws(() => bridgeAssetPair({ fromChainId: 1, toChainId: 42161, fromToken: USDT, toToken: USDC[42161] }), /admitted_asset_pair/u);
   assert.throws(() => bridgeAssetPair({ fromChainId: 1, toChainId: 8453, fromToken: BRIDGE_ZERO_ADDRESS, toToken: USDC[8453] }), /admitted_asset_pair/u);
   assert.throws(() => bridgeAssetPair({ fromChainId: 1, toChainId: 8453, fromToken: USDC[1], toToken: BRIDGE_ZERO_ADDRESS }), /admitted_asset_pair/u);
   assert.equal(bridgeAssetRow(1, BRIDGE_ZERO_ADDRESS).kind, "native");

@@ -46,20 +46,25 @@ test("LI.FI registry admits exactly the reviewed chains, first-class native coin
     assert.ok(row.tokens.every((asset) => asset.kind === "erc20" && asset.address !== BRIDGE_ZERO_ADDRESS));
   }
   assert.deepEqual(BRIDGE_CHAINS.map((id) => BRIDGE_ASSET_REGISTRY[id].tokens.map((t) => `${t.symbol}/${t.coinKey}/${t.decimals}`)),
-    [["USDC/USDC/6", "USDT/USDT/6", "WBTC/WBTC/8"], [], [], ["USDC/USDC/6"], ["USDC/USDC/6", "WBTC/WBTC/8"], []]);
+    [["USDC/USDC/6", "USDT/USDT/6", "WBTC/WBTC/8"], ["USDC/USDC/18", "USDT/USDT/18"], [], ["USDC/USDC/6"], ["USDC/USDC/6", "WBTC/WBTC/8"], []]);
   assert.equal(bridgeTokenRow(1, USDC[1]).code.upgradeability, "legacy_proxy");
   assert.equal(bridgeTokenRow(8453, USDC[8453]).code.upgradeability, "legacy_proxy");
   assert.equal(bridgeTokenRow(42161, USDC[42161]).code.upgradeability, "legacy_proxy");
   assert.equal(bridgeTokenRow(1, WBTC[1]).code.upgradeability, "immutable");
   assert.equal(bridgeTokenRow(42161, WBTC[42161]).code.upgradeability, "beacon_proxy");
-  assert.deepEqual([...bridgeTokenRow(1, USDC[1]).peers], [8453, 42161]);
+  assert.deepEqual([...bridgeTokenRow(1, USDC[1]).peers], [56, 8453, 42161]);
   assert.deepEqual([...bridgeTokenRow(1, WBTC[1]).peers], [42161]);
   assert.equal(bridgeTokenRow(1, USDC[1]).stargate?.assetId, 1);
   assert.equal(bridgeTokenRow(1, WBTC[1]).stargate, null);
   for (const chainId of BRIDGE_CHAINS) for (const asset of BRIDGE_ASSET_REGISTRY[chainId].tokens) {
     for (const peer of asset.peers) {
       const other = bridgePeerToken(asset, peer);
-      assert.equal(other.pairKey, asset.pairKey); assert.equal(other.decimals, asset.decimals);
+      // Only a Binance-Peg row (18 decimals) and its 6-decimal peer differ in decimals; every other pair shares them.
+      assert.equal(other.pairKey, asset.pairKey);
+      if (other.decimals !== asset.decimals) {
+        const peg = asset.chainId === 56 ? asset : other, six = asset.chainId === 56 ? other : asset;
+        assert.deepEqual([peg.chainId, peg.listing, peg.decimals, six.listing, six.decimals], [56, "reviewed_supplement", 18, "frozen_list", 6]);
+      }
       assert.ok(other.peers.includes(chainId), `${asset.symbol} peer sets must be symmetric`);
     }
   }

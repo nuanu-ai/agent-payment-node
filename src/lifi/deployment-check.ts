@@ -6,7 +6,7 @@ import { bridgeDeployment } from "./deployments.js";
 import type { BridgeBlock, BridgeDeploymentContract, BridgeDeploymentIdentity, BridgeTool } from "./model.js";
 import { rpcHexValue } from "./rpc-batch-codec.js";
 import type { RpcBatchReadItem } from "./rpc-session.js";
-import { bridgeFailure } from "./validation.js";
+import { BRIDGE_ZERO_ADDRESS, bridgeFailure } from "./validation.js";
 
 /** The identity of the light check. Records frozen by 0.5.41/0.5.42 carry the earlier full-proof identity and stay valid. */
 export const BRIDGE_DEPLOYMENT_CHECK = "apn.bridge.deployment-check.v2" as const;
@@ -35,7 +35,8 @@ export interface BridgeDeploymentCheck {
  */
 export function bridgeDeploymentCheck(chainId: BridgeChainId, peerChainId: BridgeChainId, tool: BridgeTool, token: Address,
   role: "source" | "destination"): BridgeDeploymentCheck {
-  const contract = bridgeDeployment(chainId, peerChainId, tool, token), composite = role === "destination" && chainId === 56;
+  const contract = bridgeDeployment(chainId, peerChainId, tool, token);
+  const composite = role === "destination" && chainId === 56 && token === BRIDGE_ZERO_ADDRESS;
   const reads = role === "destination" && !composite ? [] : contract.reads.filter((row) => row.kind === "call" &&
     !row.data.startsWith(IMPLEMENTATION_SELECTOR) && !(row.address.toLowerCase() === FEE_FORWARDER.toLowerCase() && row.data.startsWith(OWNER_SELECTOR)));
   return { chainId, peerChainId, tool, token, role, reads,
