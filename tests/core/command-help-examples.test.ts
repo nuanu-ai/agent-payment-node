@@ -13,7 +13,6 @@ const FILL: Readonly<Record<string, string>> = {
   "<usdc-usdt-or-wbtc-address>": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "<usdc-or-usdt-address>": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
   "<the-other-usdc-or-usdt-address>": "0xdAC17F958D2ee523a2206206994597C13D831ec7", "<destination-mint-transaction-hash>": `0x${"c".repeat(64)}`,
   "<unix-seconds-within-30-minutes>": "1900000000", "<unix-seconds-within-10-minutes>": "1900000000", "<unix-seconds>": "1900000000",
-  "<unix-seconds-within-24-hours>": "1900000000",
   "<tron-address>": TRON, "<same-tron-address>": TRON, "<solana-address>": SOLANA, "<solana-recipient-address>": SOLANA,
   "<solana-address-of-the-profile>": SOLANA,
 };

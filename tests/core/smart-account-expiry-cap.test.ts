@@ -16,8 +16,14 @@ import { ApnError } from "../../src/errors.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import { METAMASK_SMART_ACCOUNT_PROVIDER_ID, MetaMaskSmartAccountAdapter } from "../../src/metamask-smart-account-adapter.js";
 import type { SmartAccountConsentPort, SmartAccountConsentRequest } from "../../src/metamask-smart-account-consent.js";
-import { validateSmartAccountPermissionRecord, type SmartAccountPermissionRecord } from "../../src/metamask-smart-account-record.js";
+import {
+  projectPendingPermissionBinding,
+  validateSmartAccountPermissionRecord,
+  type PendingSmartAccountPermissionRecord,
+  type SmartAccountPermissionRecord,
+} from "../../src/metamask-smart-account-record.js";
 import type { Address, Hex } from "../../src/model.js";
+import { pendingPermissionNextActions } from "../../src/provider-permission-output.js";
 import { SMART_ACCOUNT_PERMISSION_MAX_LIFETIME_SECONDS } from "../../src/smart-account-permission-lifetime.js";
 import { testRuntime } from "./installed-runtime.js";
 import { temporaryState } from "./helpers.js";
@@ -65,6 +71,8 @@ test("an expiry one second past 24 hours, or in milliseconds, is refused before 
     const refused = await run(connect(expiry));
     assert.deepEqual([refused.error?.code, refused.error?.details?.reason, refused.error?.details?.latest_expires_at_unix],
       ["APN_INVALID_INPUT", "permission_expiry_beyond_cap", String(NOW + 86_400)], JSON.stringify(refused));
+    assert.deepEqual(refused.next_actions,
+      ["Run the same wallet connect again with a --permission-expires-at in Unix seconds no later than latest_expires_at_unix."]);
     assert.equal(refused.error?.message,
       `Permission expiry must be Unix seconds at most 24 hours from now: no later than ${NOW + 86_400} (${new Date((NOW + 86_400) * 1000).toISOString()}).`);
   }
@@ -106,15 +114,20 @@ test("a pending intent that 0.5.110 saved with a 30-day window is not sent to Me
     session_private_key: SESSION_KEY, created_at: new Date((NOW - 60) * 1000).toISOString(), updated_at: new Date((NOW - 60) * 1000).toISOString(),
     max_observed_unix: NOW - 60, revocation_freshness: "never_synced", consent_port: 43_123 } as SmartAccountPermissionRecord);
   const before = canonicalJson(store.record);
+  const capActions = [
+    `In MetaMask, check whether a permission for session ${SESSION} was granted, and revoke it there if it is not wanted.`,
+    `Then cancel only the local pending intent with apn wallet permission forget --profile ${PROFILE} --expected-revision 1.`,
+    "Start a new wallet connect with an expiry at most 24 hours from now and a new idempotency key.",
+  ];
   await assert.rejects(adapter.connect(intent), (error: ApnError) => {
     assert.deepEqual([error.code, error.details?.reason], ["APN_INVALID_INPUT", "permission_expiry_beyond_cap"]);
-    assert.deepEqual(error.details?.nextActions, [
-      `In MetaMask, check whether a permission for session ${SESSION} was granted, and revoke it there if it is not wanted.`,
-      `Then cancel only the local pending intent with apn wallet permission forget --profile ${PROFILE} --expected-revision 1.`,
-      "Start a new wallet connect with an expiry at most 24 hours from now and a new idempotency key.",
-    ]);
+    assert.deepEqual(error.details?.nextActions, capActions);
     return true;
   });
+  // list, status, sync and disable advise the same while the intent is live, never the exact retry; once expired, the expired guidance.
+  const binding = projectPendingPermissionBinding(store.record as PendingSmartAccountPermissionRecord);
+  assert.deepEqual(pendingPermissionNextActions(PROFILE, binding, NOW), capActions);
+  assert.match(pendingPermissionNextActions(PROFILE, binding, expiresAtUnix)[0]!, /^The intent expired at /u);
   assert.equal(consent.requests.length, 0, "MetaMask is never asked");
   assert.equal(canonicalJson(store.record), before, "the pending intent is left as it was");
 });
