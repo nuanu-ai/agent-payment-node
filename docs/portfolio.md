@@ -5,7 +5,9 @@
 This section was moved from the APN README without changes to its text.
 
 `apn wallet portfolio --profile <profile> [--refresh]` reads the native coin and every listed token
-(`data/allowlist/2026-09-17/dataset.json`) for the profile's EVM wallet and its Solana and TRON accounts. It never signs or
+(`data/allowlist/2026-09-17/dataset.json`), plus, since 0.5.114, the Binance-Peg USDT and USDC of BNB Smart Chain (the
+reviewed supplement in `src/binance-peg-policy-assets.ts`, 18 decimals), for the profile's EVM wallet and its Solana and
+TRON accounts. It never signs or
 moves funds and needs no policy. Each network uses its `APN_<CHAIN>_RPC_URL` or the pinned keyless default (Ethereum
 `https://ethereum-rpc.publicnode.com`, Base `https://mainnet.base.org`, Arbitrum `https://arb1.arbitrum.io/rpc`, OP
 `https://mainnet.optimism.io`, Polygon `https://polygon-bor-rpc.publicnode.com`, BNB `https://bsc-rpc.publicnode.com`,
