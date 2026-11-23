@@ -2,6 +2,14 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.113 — 2026-11-23
+
+QA on 0.5.111: the cheap USDT Permit2 seller (ScraplingData `/v1/ping`) asks for BNB Smart Chain USDT `0x55d398326f99059fF775485246999027B3197955`, and `allowlist resolve` refused it with `APN_ALLOWLIST_ASSET_NOT_FOUND` / `unknown_token_deployment`. The frozen 2026-09-17 dataset lists only native BNB on that chain and refuses its USDT and USDC by name: Binance, not Tether or Circle, issues them 1:1 against reserves it holds. The owner admitted both on 2026-11-23.
+
+- **Binance-Peg USDT and USDC on BNB Smart Chain resolve.** USDT `0x55d398326f99059fF775485246999027B3197955` and USDC `0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d`, 18 decimals each (read from the contracts), are a reviewed supplement in `src/binance-peg-policy-assets.ts`, with `evidence.issuer` naming Binance. `allowlist resolve` names them; an owner policy can admit them on any rail, and each lane still checks its own token capabilities (Permit2 needs `x402 permit2 allowance set`, since neither token has an EIP-2612 permit). Direct transfers on BNB Smart Chain list them, and x402 errors name them with their 18 decimals. As for frozen rows, only the checksummed spelling resolves.
+- **The frozen dataset does not change.** `allowlist inventory`, the dataset digest and the inventory digest stay as they were, so every owner policy activated earlier keeps its binding. The two tokens are not in `allowlist inventory` or the portfolio.
+- **Downgrade.** A policy that admits one of these tokens is refused by 0.5.112 and earlier (`unknown_token_deployment`); policies without them are unaffected.
+
 ## 0.5.112 — 2026-11-23
 
 `x402 permit2 approve` sent only a plain GET, so a seller whose paid endpoint takes a POST with a body could not be paid through Permit2. The only Permit2 seller on Avalanche in the public catalogs on 2026-11-23, `x402check.xyz`, is such a seller.

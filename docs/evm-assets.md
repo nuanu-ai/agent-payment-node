@@ -20,18 +20,21 @@ wallet policy and the portfolio use. Enabling a network for direct transfers ena
 | Arbitrum One | `eip155:42161` | ETH | USDC `0xaf88d065e77c8cC2239327C5EDb3A432268e5831`, USD₮0 `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9` | Arbitrum inclusive | `safe` head |
 | OP Mainnet | `eip155:10` | ETH | USDC `0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85` | OP Stack (L1 data + operator fee) | inclusion |
 | Polygon PoS | `eip155:137` | POL | USDC `0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359` | EIP-1559 | inclusion |
-| BNB Smart Chain | `eip155:56` | BNB | none (native only) | EIP-1559, zero base fee | `safe` head |
+| BNB Smart Chain | `eip155:56` | BNB | Binance-Peg USDT `0x55d398326f99059fF775485246999027B3197955`, Binance-Peg USDC `0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d` (18 decimals) | EIP-1559, zero base fee | `safe` head |
 | Avalanche C-Chain | `eip155:43114` | AVAX | USDC `0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E`, USDT `0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7` | EIP-1559 | `safe` head |
 | Unichain | `eip155:130` | ETH | USDC `0x078D782b760474a361dDA0AF3839290b0EF57AD6` | OP Stack (L1 data + operator fee) | inclusion |
 | Linea | `eip155:59144` | ETH | USDC `0x176211869cA2b568f2A7D4EE941E073a821EE1ff` | EIP-1559 | inclusion |
 | Monad | `eip155:143` | MON | USDC `0x754704Bc059F8C67012fEd69BC8A327a5aafb603` | gas-limit billed | `safe` head |
 | Sei EVM | `eip155:1329` | SEI | USDC `0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392` | EIP-1559 | `safe` head |
 
-Native coins have 18 decimals. USDC, USDT and USD₮0 have 6; WETH has 18.
+Native coins have 18 decimals. USDC, USDT and USD₮0 have 6, except the Binance-Peg USDC and USDT of BNB Smart Chain,
+which have 18; WETH has 18.
 
 - Direct transfers accept only these assets. USDC and USDT come from the frozen allowlist inventory
   (`data/allowlist/2026-09-17/dataset.json`); WETH on Ethereum and Base and USD₮0 on Arbitrum are separately pinned
-  direct-only identities. Any other contract is refused with `APN_ALLOWLIST_REFUSED` (`allowlist_asset_unlisted`)
+  direct-only identities. The Binance-Peg USDT and USDC of BNB Smart Chain are a reviewed supplement (since 0.5.113):
+  Binance, not Tether or Circle, issues them 1:1 against reserves it holds, and the frozen dataset refuses them as not
+  issuer-issued; the owner admitted both, on every rail. Any other contract is refused with `APN_ALLOWLIST_REFUSED` (`allowlist_asset_unlisted`)
   before any RPC call.
 - A symbol is not an identity: select a token by its exact contract.
 - Decimals come from the pinned row. `--decimals` is optional and, when given, must equal it. A contract that reports

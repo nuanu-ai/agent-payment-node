@@ -1,4 +1,5 @@
 import { loadAllowlistInventory } from "./allowlist-inventory.js";
+import { BINANCE_PEG_POLICY_ASSETS } from "./binance-peg-policy-assets.js";
 import { releasedX402Pair } from "./x402-network.js";
 
 /**
@@ -7,7 +8,7 @@ import { releasedX402Pair } from "./x402-network.js";
  */
 export function x402TokenUnit(chainId: number, token: string): { readonly symbol: string; readonly decimals: number } | null {
   if (releasedX402Pair(chainId, token)) return { symbol: "USDC", decimals: 6 };
-  const listed = loadAllowlistInventory().assets.find((row) => row.chain === `eip155:${chainId}` &&
+  const listed = [...loadAllowlistInventory().assets, ...BINANCE_PEG_POLICY_ASSETS].find((row) => row.chain === `eip155:${chainId}` &&
     row.identifier?.toLowerCase() === token.toLowerCase());
   return listed === undefined ? null : { symbol: listed.symbol, decimals: listed.decimals };
 }

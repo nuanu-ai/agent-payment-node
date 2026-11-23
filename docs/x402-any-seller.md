@@ -5,8 +5,9 @@ Solana for an admitted classic SPL mint. The seller supplies only `payTo`, the a
 token must be admitted by the owner, and the token's identity is read from the chain at prepare. Nothing is inferred
 from the seller's words alone.
 
-Admissions made through an allowlist row (Permit2, Solana) can name only an asset of the frozen allowlist inventory. On
-Solana that is USDC and USDT (`wallet capabilities-solana` lists them); wSOL is not in it.
+Admissions made through an allowlist row (Permit2, Solana) can name only an asset of the frozen allowlist inventory or
+of a reviewed supplement. On Solana that is USDC and USDT (`wallet capabilities-solana` lists them); wSOL is not in it.
+On BNB Smart Chain (since 0.5.113) it is the Binance-Peg USDT and USDC, both with 18 decimals.
 
 Related pages: [offer selection](x402-offer-selection.md), [settlement fields](x402-settlement-compatibility.md),
 [Permit2 requests](x402-non-usdc.md), [allowlist policy](allowlist-policy.md).

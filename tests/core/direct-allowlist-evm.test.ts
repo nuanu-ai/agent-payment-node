@@ -51,7 +51,8 @@ test("unlisted networks, unpinned contracts and wrong decimals refuse identicall
     [{ asset: EVM_USDC[8453], decimals: "18" }, "allowlist_decimals_mismatch"],
     [{ chain: "eip155:10", asset: EVM_USDC[8453] }, "allowlist_asset_unlisted"],
     [{ chain: "eip155:137", asset: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F" }, "allowlist_asset_unlisted"],
-    [{ chain: "eip155:56", asset: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d" }, "allowlist_asset_unlisted"],
+    // Binance-Peg BUSD: unlisted, unlike the Binance-Peg USDT and USDC admitted in 0.5.113.
+    [{ chain: "eip155:56", asset: "0xe9e7cea3dedca5984780bafc599bd69add087d56" }, "allowlist_asset_unlisted"],
     [{ chain: "eip155:43114", asset: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7", decimals: "18" }, "allowlist_decimals_mismatch"],
   ];
   for (const [override, reason] of cases) {

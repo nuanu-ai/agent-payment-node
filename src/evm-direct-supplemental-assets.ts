@@ -1,5 +1,6 @@
 import { merchantPolicyAsset } from "./x402-merchant/pins.js";
 import { reviewedWbtcPolicyAsset } from "./canonical-wbtc-policy-assets.js";
+import { binancePegPolicyAsset } from "./binance-peg-policy-assets.js";
 import { getAddress } from "viem";
 import type { AllowlistInventory, CandidateAsset } from "./allowlist-inventory.js";
 import { resolveAllowlistAsset } from "./allowlist-inventory.js";
@@ -32,6 +33,9 @@ export function resolveDirectPolicyAsset(input: { readonly chain: string; readon
   if (merchant !== undefined) return merchant;
   const wbtc = reviewedWbtcPolicyAsset(input);
   if (wbtc !== undefined) return wbtc;
+  // Binance-Peg USDT and USDC on BNB Smart Chain resolve on every rail; the rail's own checks still apply.
+  const peg = binancePegPolicyAsset(input.chain, input.kind, input.identifier);
+  if (peg !== undefined) return peg;
   if (input.rail === "direct" && input.kind === "token" && input.identifier !== undefined && input.chain.startsWith("eip155:")) {
     let canonical: string | undefined;
     try { canonical = getAddress(input.identifier); } catch { /* The frozen resolver classifies invalid identities. */ }

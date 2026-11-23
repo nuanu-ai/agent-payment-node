@@ -7,6 +7,7 @@ import { AssetUsageLedger, assetUsageReservationId, type AssetUsageIdentity, typ
 import { DirectAssetUsageAdapter, validateDirectAssetUsageLease, type DirectAssetUsageLease } from "./direct-asset-usage.js";
 import { ApnError } from "./errors.js";
 import { directEvmSupplementalAsset } from "./evm-direct-supplemental-assets.js";
+import { binancePegPolicyAsset } from "./binance-peg-policy-assets.js";
 import type { ClockPort } from "./ports.js";
 
 export const DIRECT_ALLOWLIST_SCHEMA = "apn.direct-allowlist.v1" as const;
@@ -45,7 +46,7 @@ export function requireListedDirectAsset(chain: string, asset: AssetUsageIdentit
     refuse("allowlist_network_unlisted", "The network is not on the frozen allowlist; direct transfers are refused.", { chain });
   }
   const row = inventory.assets.find((entry) => entry.chain === chain && entry.kind === asset.kind && entry.identifier === asset.identifier)
-    ?? (asset.kind === "token" ? directEvmSupplementalAsset(chain, asset.identifier) : undefined);
+    ?? (asset.kind === "token" ? directEvmSupplementalAsset(chain, asset.identifier) ?? binancePegPolicyAsset(chain, asset.kind, asset.identifier) : undefined);
   if (row === undefined) {
     refuse("allowlist_asset_unlisted", "The asset has no pinned direct identity for this network.",
       { chain, asset: asset.identifier ?? "native" });

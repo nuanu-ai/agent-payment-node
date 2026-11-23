@@ -18,10 +18,11 @@ import { RECIPIENT, WALLET, temporaryState } from "./helpers.js";
 
 const EIGHT = [10, 137, 56, 43114, 130, 59144, 143, 1329] as const;
 /** Pinned here independently of the dataset so a list revision cannot silently change what these networks accept. */
-const LIST_TOKENS: Readonly<Record<typeof EIGHT[number], readonly [string, Address][]>> = {
+const LIST_TOKENS: Readonly<Record<typeof EIGHT[number], readonly (readonly [string, Address, number?])[]>> = {
   10: [["USDC", "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"]],
   137: [["USDC", "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"]],
-  56: [],
+  // Binance-Peg, reviewed supplement since 0.5.113; 18 decimals.
+  56: [["USDT", "0x55d398326f99059fF775485246999027B3197955", 18], ["USDC", "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", 18]],
   43114: [["USDC", "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E"], ["USDT", "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7"]],
   130: [["USDC", "0x078D782b760474a361dDA0AF3839290b0EF57AD6"]],
   59144: [["USDC", "0x176211869cA2b568f2A7D4EE941E073a821EE1ff"]],
@@ -69,13 +70,16 @@ test("the direct registry enables the eight remaining list networks with their l
   for (const chainId of EIGHT) {
     const chain = `eip155:${chainId}`, rows = directEvmListRows(chainId);
     assert.deepEqual(rows.map((row) => [row.kind, row.symbol, row.identifier, row.decimals]),
-      [["native", NATIVE[chainId], null, 18], ...LIST_TOKENS[chainId].map(([symbol, address]) => ["token", symbol, address, 6])], chain);
+      [["native", NATIVE[chainId], null, 18], ...LIST_TOKENS[chainId].map(([symbol, address, decimals]) => ["token", symbol, address, decimals ?? 6])], chain);
     assert.deepEqual(listedEvmAsset(chain, "native"), { selection: { chainId, token: "native" }, decimals: 18 });
-    for (const [, address] of LIST_TOKENS[chainId]) assert.deepEqual(listedEvmAsset(chain, address.toLowerCase(), 6), { selection: { chainId, token: address, decimals: 6 }, decimals: 6 });
+    for (const [, address, listed] of LIST_TOKENS[chainId]) {
+      const decimals = listed ?? 6;
+      assert.deepEqual(listedEvmAsset(chain, address.toLowerCase(), decimals), { selection: { chainId, token: address, decimals }, decimals });
+    }
   }
   // A token listed on another network, or not listed at all, is refused on these networks before any RPC.
   assert.throws(() => listedEvmAsset("eip155:10", LIST_TOKENS[130][0]![1]), refused("allowlist_asset_unlisted"));
-  assert.throws(() => listedEvmAsset("eip155:56", "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"), refused("allowlist_asset_unlisted"));
+  assert.throws(() => listedEvmAsset("eip155:56", "0xe9e7cea3dedca5984780bafc599bd69add087d56"), refused("allowlist_asset_unlisted"));
   assert.throws(() => listedEvmAsset("eip155:137", "0xc2132D05D31c914a87C6611C10748AEb04B58e8F"), refused("allowlist_asset_unlisted"));
   assert.throws(() => listedEvmAsset("eip155:43114", LIST_TOKENS[43114][1]![1], 18), refused("allowlist_decimals_mismatch"));
   assert.throws(() => listedEvmAsset("eip155:10", "native", 6), refused("allowlist_decimals_mismatch"));
