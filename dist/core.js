@@ -30,6 +30,7 @@ import { gaslessCapabilities } from "./gasless/catalog.js";
 import { gaslessChain } from "./gasless/validation.js";
 import { MetaMaskGaslessService } from "./metamask-gasless/service.js";
 import { mmAddress, mmChain } from "./metamask-gasless/validation.js";
+import { mmRequestToken } from "./metamask-gasless/registry.js";
 import { mmFail } from "./metamask-gasless/reasons.js";
 import { gaslessProvider } from "./core-gasless-provider.js";
 import { publicRelayNativeSourceJournal } from "./relay/native-source.js";
@@ -41,6 +42,7 @@ import { loadAllowlistInventory, resolveAllowlistAsset } from "./allowlist-inven
 import { binancePegPolicyAsset } from "./binance-peg-policy-assets.js";
 import { executeAllowlistPolicyCommand } from "./allowlist-policy-command.js";
 import { executeUniswapCommand } from "./swap/uniswap-command-service.js";
+import { executeUniswapBnbCommand } from "./swap/uniswap-bnb/command-service.js";
 import { executeSunSwapCommand } from "./swap/sunswap-tron/command-service.js";
 import { executeJupiterCommand } from "./swap/jupiter-solana/command-service.js";
 import { executeOrcaCommand } from "./swap/orca-solana/command-service.js";
@@ -126,6 +128,12 @@ export class ApnCore {
                 if (service === undefined)
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay Arbitrum prepare runtime is unavailable.");
                 return operationOutcome(await service.prepareArbitrum(request));
+            }
+            case "relay.token.prepare": {
+                const service = this.context.relayPrepare;
+                if (service === undefined)
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay token prepare runtime is unavailable.");
+                return operationOutcome(await service.prepareToken(request));
             }
             case "relay.native.prepare": {
                 const service = this.context.relayPrepare;
@@ -268,6 +276,12 @@ export class ApnCore {
             case "swap.uniswap-token.approve":
             case "swap.uniswap-token.execute":
             case "swap.uniswap-token.cleanup": return await executeUniswapCommand(request, this.context);
+            case "swap.uniswap-bnb.inventory":
+            case "swap.uniswap-bnb.quote":
+            case "swap.uniswap-bnb.prepare":
+            case "swap.uniswap-bnb.status":
+            case "swap.uniswap-bnb.approve":
+            case "swap.uniswap-bnb.execute": return await executeUniswapBnbCommand(request, this.context);
             case "swap.sunswap.inventory":
             case "swap.sunswap.quote":
             case "swap.sunswap.prepare":
@@ -331,11 +345,13 @@ export class ApnCore {
             case "gasless.capabilities": return dataOutcome(gaslessCapabilities(request.profile), "static_gasless_capabilities");
             case "gasless.balance": {
                 const provider = await gaslessProvider(this.context, request.profile);
+                if (request.asset !== undefined && provider !== "metamask-agent-wallet")
+                    throw gaslessAssetRefusal();
                 return dataOutcome(provider === "coinbase-agentic-wallet"
                     ? request.chainId !== 8453 ? mmFail("mm_gasless_capability_unavailable") : await this.providerWallet.balance(request.profile)
                     : provider === "metamask-smart-account"
                         ? await this.smartAccountGasless.balance(request.profile, request.chainId)
-                        : provider === "metamask-agent-wallet" ? await this.metaMaskGasless.balance(request.profile, mmChain(request.chainId))
+                        : provider === "metamask-agent-wallet" ? await this.metaMaskGasless.balance(request.profile, mmChain(request.chainId), request.asset === undefined ? undefined : mmAddress(request.asset))
                             : request.chainId === 43114 ? await this.facilitatorGasless.balance(request.profile)
                                 : await this.gasless.balance(request.profile, gaslessChain(request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE")), "chain_verified_public_read");
             }
@@ -489,6 +505,8 @@ export class ApnCore {
     async prepareGasless(request) {
         if (request.request.fixedNet && await gaslessProvider(this.context, request.profile) !== "metamask-agent-wallet")
             throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Fixed-net gasless transfers require a MetaMask server wallet.");
+        if (request.asset !== undefined && await gaslessProvider(this.context, request.profile) !== "metamask-agent-wallet")
+            throw gaslessAssetRefusal();
         const key = canonicalIdempotencyKey(request.idempotencyKey);
         const existing = await this.operations.findIdempotency(this.context.state.idempotencyHash(key));
         if (existing?.kind === "direct_transfer" && existing.record.providerDirect?.coinbaseGasless !== undefined)
@@ -502,14 +520,22 @@ export class ApnCore {
             return await this.smartAccountGasless.prepare({ ...request, request: saRequest(request.request) });
         if (provider === "coinbase-agentic-wallet")
             return await this.transfer.prepareCoinbaseGasless(request);
-        if (provider === "metamask-agent-wallet")
-            return await this.metaMaskGasless.prepare({ ...request, request: { ...request.request,
-                    chainId: mmChain(request.request.chainId), recipient: mmAddress(request.request.recipient) } });
+        if (provider === "metamask-agent-wallet") {
+            const chainId = mmChain(request.request.chainId);
+            return await this.metaMaskGasless.prepare({ profile: request.profile, idempotencyKey: request.idempotencyKey, request: {
+                    ...request.request, chainId, recipient: mmAddress(request.request.recipient),
+                    ...mmRequestToken(chainId, request.asset === undefined ? undefined : mmAddress(request.asset))
+                } });
+        }
         // Avalanche has no EIP-7702 bundler path; new Local transfers there use the public x402 facilitator route.
         if (request.request.chainId === 43114 && existing?.kind !== "gasless_transfer")
             return await this.facilitatorGasless.prepare(request);
         return await this.gasless.prepare({ ...request, request: { ...request.request,
                 chainId: gaslessChain(request.request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE") } });
     }
+}
+/** Only a MetaMask server wallet names its gasless transfer token; every other gasless provider moves its one USDC. */
+function gaslessAssetRefusal() {
+    return new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "An explicit gasless --asset is admitted only for MetaMask server-wallet profiles.", { reason: "gasless_asset_provider" });
 }
 //# sourceMappingURL=core.js.map

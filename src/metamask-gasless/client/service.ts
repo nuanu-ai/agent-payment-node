@@ -11,10 +11,10 @@ import { mmQuoteHash } from "../economics.js";
 import { mmPrivateHash } from "../identity.js";
 import type { MetaMaskGaslessBinding, MetaMaskGaslessProviderIntent, MetaMaskGaslessProviderObservation,
   MetaMaskGaslessQuote, MetaMaskGaslessUnsignedResult } from "../model.js";
-import { mmRegistry } from "../registry.js";
+import { mmChainFacts, mmRegistry } from "../registry.js";
 import { mmClassify, mmFail, mmFailure } from "../reasons.js";
 import { mmValidateUnsigned } from "../unsigned.js";
-import { mmAddress, mmHex, mmUint } from "../validation.js";
+import { mmAddress, mmFormat, mmHex, mmUint } from "../validation.js";
 import { HelperNetworkPolicy, networkContextEmpty, networkContextQuote, networkContextRequest, networkContextServerRequest,
   networkContextServerTransaction, type FetchExchange } from "./network.js";
 import { readPrivateSession, readPrivateState, type PrivateSession, type PrivateState } from "./private-state.js";
@@ -193,7 +193,8 @@ async function quote(input: Extract<HelperRequest, { mode: "quote" }>["input"], 
   let raw: unknown;
   try {
     raw = await service.quoteGaslessTransfer({ state: walletState as never, chainId: input.chainId, recipient: input.recipient,
-      amount: formatSix(input.netAtomic), token: input.token, gasToken: input.token, relay });
+      // The SDK parses this decimal text at the decimals it reads on chain, which the network policy holds to the row's.
+      amount: mmFormat(input.netAtomic, mmRegistry(input.chainId, input.token).row.decimals), token: input.token, gasToken: input.token, relay });
   } catch (error) {
     const sponsored = policy.takeSponsoredQuote(error);
     if (sponsored === undefined) {
@@ -214,7 +215,7 @@ async function quote(input: Extract<HelperRequest, { mode: "quote" }>["input"], 
 async function buildUnsigned(input: Extract<HelperRequest, { mode: "buildUnsigned" }>["input"]): Promise<MetaMaskGaslessUnsignedResult> {
   const evm = await foxEvm();
   const controller = await ethereumControllers();
-  mmRegistry(input.chainId);
+  mmChainFacts(input.chainId);
   const executions = input.executions.map((item) => ({ target: item.target, value: BigInt(item.value), callData: item.callData }));
   const prepared = evm.prepareDelegation({ delegator: input.owner, chainId: input.chainId, executions });
   const unsignedDelegation = { delegator: mmAddress(prepared.unsignedDelegation.delegator),
@@ -312,7 +313,7 @@ function validateSdkQuote(value: unknown, input: Extract<HelperRequest, { mode: 
   if (!isPlainRecord(value) || typeof value.amount !== "bigint" || value.amount !== mmUint(input.netAtomic, true) ||
     mmAddress(value.token, "mm_gasless_quote_invalid") !== input.token || mmAddress(value.recipient, "mm_gasless_quote_invalid") !== input.recipient ||
     mmAddress(value.feeToken, "mm_gasless_quote_invalid") !== input.token || typeof value.feeAmount !== "bigint" || value.feeAmount < 0n ||
-    value.feeDecimals !== 6 || typeof value.feeTokenSymbol !== "string" || value.feeTokenSymbol.length < 1 || value.feeTokenSymbol.length > 32 ||
+    value.feeDecimals !== mmRegistry(input.chainId, input.token).row.decimals || typeof value.feeTokenSymbol !== "string" || value.feeTokenSymbol.length < 1 || value.feeTokenSymbol.length > 32 ||
     !Array.isArray(value.executions) || value.executions.length !== 2) mmFail("mm_gasless_quote_invalid");
   const feeRecipient = mmAddress(value.feeRecipient, "mm_gasless_quote_invalid");
   if (feeRecipient === owner || feeRecipient === input.recipient || feeRecipient === input.token) mmFail("mm_gasless_quote_invalid");
@@ -361,10 +362,6 @@ function unknownStatus(status: string, sent: ResponseProgress | undefined, reaso
 }
 function unavailable(intent: MetaMaskGaslessProviderIntent, now: Date): MetaMaskGaslessProviderObservation {
   return { observedAt: now.toISOString(), requestIdHash: mmPrivateHash("request-id", intent.requestId), status: "unavailable", txHash: null };
-}
-function formatSix(value: string): string {
-  const n = mmUint(value, true), fraction = (n % 1_000_000n).toString().padStart(6, "0").replace(/0+$/u, "");
-  return `${n / 1_000_000n}${fraction ? `.${fraction}` : ""}`;
 }
 function assertBeforeDeadline(value: string, now: Date): void {
   const expires = Date.parse(value), current = now.getTime();

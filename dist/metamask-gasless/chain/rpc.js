@@ -4,7 +4,7 @@ import { parsePublicHttpsUrl } from "../../network-policy.js";
 import { classifyX402LogAvailabilityMessage } from "../../rpc-envelope.js";
 import { GaslessHttps } from "../../gasless/https.js";
 import { mmAssertStableQuote, mmQuote } from "../economics.js";
-import { mmRegistry, MM_RPC_ENV, MM_SENTINEL_SLUG } from "../registry.js";
+import { mmRecordRegistry, mmRegistry, MM_RPC_ENV, MM_SENTINEL_SLUG } from "../registry.js";
 import { mmFail } from "../reasons.js";
 import { mmEvidenceAt, mmEvidenceFail } from "./diagnostic.js";
 import { mmValidateUnsigned } from "../unsigned.js";
@@ -68,7 +68,6 @@ export class MetaMaskGaslessRpc {
     endpointOrigin;
     endpointHash;
     rpcUrl;
-    deployment;
     clock;
     transport;
     sequence = 0n;
@@ -76,7 +75,6 @@ export class MetaMaskGaslessRpc {
     observationOnly;
     constructor(options) {
         this.chainId = mmChain(options.chainId);
-        this.deployment = mmRegistry(this.chainId);
         const endpoint = rpcEndpoint(options.rpcUrl);
         this.rpcUrl = endpoint.toString();
         this.endpointOrigin = endpoint.origin;
@@ -86,13 +84,13 @@ export class MetaMaskGaslessRpc {
         this.observationOnly = options.observationOnly === true;
         this.callRpc = async (method, params) => await this.call(method, params);
     }
-    async balance(ownerInput) {
+    async balance(ownerInput, token) {
         if (this.observationOnly)
             mmFail("mm_gasless_rpc_binding");
-        const owner = strictOwner(ownerInput);
+        const owner = strictOwner(ownerInput), row = mmRegistry(this.chainId, token).row;
         await this.assertChain();
-        const at = await rpcBlock(this.callRpc, this.deployment.row.finalityTag);
-        const state = await readMetaMaskChainState(this.callRpc, this.deployment.row, owner, at.block, null);
+        const at = await rpcBlock(this.callRpc, row.finalityTag);
+        const state = await readMetaMaskChainState(this.callRpc, row, owner, at.block, null);
         // Every read was pinned to this block by hash with requireCanonical, so its header is not rechecked.
         if ("counterAtomic" in state)
             mmFail("mm_gasless_internal");
@@ -103,18 +101,19 @@ export class MetaMaskGaslessRpc {
         if (this.observationOnly)
             mmFail("mm_gasless_rpc_binding");
         const owner = strictOwner(input.owner), delegationHash = mmHex(input.delegationHash, 32, "mm_gasless_evidence_invalid");
+        const row = mmRegistry(this.chainId, input.token).row;
         const grossAtomic = mmUint(input.grossAtomic, true, "mm_gasless_evidence_invalid").toString();
         await this.assertChain();
-        const safe = await mmEvidenceAt("safe", async () => await rpcBlock(this.callRpc, this.deployment.row.finalityTag));
+        const safe = await mmEvidenceAt("safe", async () => await rpcBlock(this.callRpc, row.finalityTag));
         const head = await mmEvidenceAt("latest", async () => await rpcBlock(this.callRpc, "latest"));
         const sameBlock = safe.block.numberAtomic === head.block.numberAtomic &&
             safe.block.hash === head.block.hash && safe.block.timestampAtomic === head.block.timestampAtomic;
         const [safeState, headState] = sameBlock
-            ? await mmEvidenceAt("safe", async () => await readMetaMaskChainState(this.callRpc, this.deployment.row, owner, safe.block, delegationHash, input.feeMode))
+            ? await mmEvidenceAt("safe", async () => await readMetaMaskChainState(this.callRpc, row, owner, safe.block, delegationHash, input.feeMode))
                 .then(state => [state, state])
             : await Promise.all([
-                mmEvidenceAt("safe", async () => await readMetaMaskChainState(this.callRpc, this.deployment.row, owner, safe.block, delegationHash, input.feeMode)),
-                mmEvidenceAt("latest", async () => await readMetaMaskChainState(this.callRpc, this.deployment.row, owner, head.block, delegationHash, input.feeMode)),
+                mmEvidenceAt("safe", async () => await readMetaMaskChainState(this.callRpc, row, owner, safe.block, delegationHash, input.feeMode)),
+                mmEvidenceAt("latest", async () => await readMetaMaskChainState(this.callRpc, row, owner, head.block, delegationHash, input.feeMode)),
             ]);
         // Both states were read pinned to their block hash with requireCanonical, so no header is rechecked.
         if (!("counterAtomic" in safeState) || !("counterAtomic" in headState))
@@ -122,7 +121,7 @@ export class MetaMaskGaslessRpc {
         const snapshot = { chainId: this.chainId, endpointHash: this.endpointHash,
             endpointOrigin: this.endpointOrigin, observedAt: this.clock.now().toISOString(),
             safeBlock: safe.block, headBlock: head.block, safeState, headState };
-        return validateMetaMaskGaslessSnapshot(snapshot, { chainId: this.chainId, endpointHash: this.endpointHash,
+        return validateMetaMaskGaslessSnapshot(snapshot, { chainId: this.chainId, token: row.token, endpointHash: this.endpointHash,
             endpointOrigin: this.endpointOrigin, grossAtomic, ...(input.feeMode === "sponsored" ? { feeMode: input.feeMode } : {}) });
     }
     async observe(intent, cursor, provider) {
@@ -131,7 +130,7 @@ export class MetaMaskGaslessRpc {
         // Another provider must first prove the same chain history at the operation's frozen safe anchor.
         // Any endpoint of the chain may observe once it proves the same history at the operation's frozen safe anchor.
         await recheckBlock(this.callRpc, intent.initialSnapshot.safeBlock, "mm_gasless_rpc_binding");
-        return await observeMetaMaskGasless({ deployment: mmObservedDeployment(intent, this.deployment), call: this.callRpc,
+        return await observeMetaMaskGasless({ deployment: mmObservedDeployment(intent, mmRecordRegistry(this.chainId, intent.token)), call: this.callRpc,
             clock: this.clock }, intent, cursor, provider);
     }
     /** Chain facts for the owner's disable of this exact dispatched delegation, against the deployment it froze. */
@@ -139,7 +138,7 @@ export class MetaMaskGaslessRpc {
         this.assertIntent(intent);
         await this.assertChain();
         const call = async (method, params) => await this.call(method, params, REVOCATION_METHODS.has(method));
-        return await readMetaMaskRevocationChain(call, mmObservedDeployment(intent, this.deployment), intent, disable, operationId);
+        return await readMetaMaskRevocationChain(call, mmObservedDeployment(intent, mmRecordRegistry(this.chainId, intent.token)), intent, disable, operationId);
     }
     /** The delegator's native balance at the latest block, right before its disable is sent. */
     async revocationBalance(intent, disable) {

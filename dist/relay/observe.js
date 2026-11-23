@@ -18,15 +18,17 @@ export class RelayObserveService {
     status;
     native;
     usage;
+    token;
     usedBnbInvocations = new WeakSet();
     /** The factory must return a fresh budgeted BNB adapter for each observation. */
     bnbInvocation;
-    constructor(state, source, bnbInvocation, status = new RelayKeylessStatusService(state), native, usage = new AssetUsageLedger(state.root)) {
+    constructor(state, source, bnbInvocation, status = new RelayKeylessStatusService(state), native, usage = new AssetUsageLedger(state.root), token) {
         this.state = state;
         this.source = source;
         this.status = status;
         this.native = native;
         this.usage = usage;
+        this.token = token;
         this.bnbInvocation = bnbInvocation;
     }
     /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
@@ -43,6 +45,11 @@ export class RelayObserveService {
             if (this.native === undefined)
                 throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay native observer is unavailable.");
             return this.native.observe(op);
+        }
+        if (op.tokenQuote !== undefined) {
+            if (this.token === undefined)
+                throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay token-route observer is unavailable.");
+            return this.token.observe(op);
         }
         const quote = op.quote;
         if (op.sourceChainId !== 1 || op.destinationChainId !== 56 || quote === undefined ||

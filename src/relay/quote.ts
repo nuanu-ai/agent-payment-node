@@ -132,7 +132,7 @@ function liveLocator(requestId: unknown, endpoint?: unknown): RelayStatusLocator
  * will not quote (AMOUNT_TOO_LOW, NO_SWAP_ROUTES_FOUND, AMOUNT_TOO_HIGH) with a 4xx and its own code: a refusal carrying
  * both. No answer, HTTP 429 or 5xx is unavailable; a body that is not JSON is the route's invalid quote. */
 export async function postRelayQuote(request: Record<string, unknown>, fetcher: typeof fetch,
-  route: "relay_quote" | "relay_native_quote", invalid: (check: string) => never): Promise<unknown> {
+  route: "relay_quote" | "relay_native_quote" | "relay_token_quote", invalid: (check: string) => never): Promise<unknown> {
   const unavailable = (httpStatus?: number): never => {
     throw new ApnError("APN_PROVIDER_UNAVAILABLE", "The Relay quote service did not answer.",
       { reason: `${route}_unavailable`, ...(httpStatus === undefined ? {} : { http_status: httpStatus }) });

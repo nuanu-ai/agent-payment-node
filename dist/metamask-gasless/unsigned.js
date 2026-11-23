@@ -1,6 +1,6 @@
 import { concatHex, encodeAbiParameters, hashTypedData, keccak256, stringToHex, toHex } from "viem";
 import { MM_SINGLE_ENFORCER } from "./single-protocol.js";
-import { mmRegistry } from "./registry.js";
+import { mmChainFacts } from "./registry.js";
 import { mmFail } from "./reasons.js";
 import { mmCanonicalAddress, mmExact, mmHex, mmUint } from "./validation.js";
 export const MM_ANY_BENEFICIARY = "0x0000000000000000000000000000000000000a11";
@@ -37,7 +37,7 @@ function caveatHash(caveat) {
 export function mmValidateUnsigned(value, input, reason = "mm_gasless_quote_invalid") {
     const result = mmExact(value, ["unsignedDelegation", "delegationHash", "signingDigest", "relayTo", "mode"], reason);
     const d = mmExact(result.unsignedDelegation, ["delegator", "delegate", "authority", "salt", "caveats"], reason);
-    const protocol = (input.deployment ?? mmRegistry(input.chainId).row).protocol;
+    const protocol = (input.deployment ?? mmChainFacts(input.chainId)).protocol;
     const manager = protocol.manager?.address ?? mmFail(reason), limitedCalls = protocol.limitedCalls?.address ?? mmFail(reason);
     const batch = input.feeMode === "sponsored" ? MM_SINGLE_ENFORCER.address : protocol.exactBatch?.address ?? mmFail(reason);
     if (mmCanonicalAddress(d.delegator, reason) !== input.owner || d.delegate !== MM_ANY_BENEFICIARY ||

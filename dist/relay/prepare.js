@@ -22,6 +22,7 @@ import { createRelayArbitrumSourceDraft } from "./arbitrum-usdc-source-draft.js"
 import { RELAY_ARBITRUM_USDC } from "./arbitrum-usdc-ethereum-quote.js";
 import { relayStatusLocator } from "./quote.js";
 import { isIdempotencyKey } from "../idempotency-key-contract.js";
+import { prepareRelayToken } from "./token-prepare.js";
 export const RELAY_ROUTE_REFERENCE = "ethereum-usdc-bnb-native-v1";
 export const RELAY_BASE_ROUTE_REFERENCE = "ethereum-usdc-base-eth-v1";
 const POSITIVE = /^[1-9][0-9]*$/u;
@@ -130,6 +131,10 @@ export class RelayUnsignedPrepareService {
         });
     }
     async prepareBase(input) { return this.prepare(input, "base"); }
+    /** A Binance-Peg BNB token route (token-routes.ts): ERC-20 source, ERC-20 destination, each side in its own decimals. */
+    async prepareToken(input) {
+        return prepareRelayToken({ state: this.state, clock: this.clock, operations: this.operations, ports: this.ports }, input);
+    }
     /** A local quote file is validated before create-only persistence; no network or wallet is used. */
     async prepareArbitrum(input) {
         allowlistProfileHash(input.profile);

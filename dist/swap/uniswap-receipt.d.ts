@@ -32,7 +32,7 @@ export interface UniswapReceiptEvidence {
     };
     readonly observedAt: string;
 }
-/** Ethereum charges a type-0/2 transaction gasUsed x effectiveGasPrice; both come from the receipt or neither is kept. */
+/** Ethereum and BNB Smart Chain charge a type-0/2 transaction gasUsed x effectiveGasPrice; both come from the receipt or neither is kept. */
 export type UniswapReceiptFee = {
     readonly gasUsed?: string;
     readonly effectiveGasPrice?: string;

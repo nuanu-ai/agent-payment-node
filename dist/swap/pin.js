@@ -9,6 +9,7 @@ const VERSION = /^(?=[A-Za-z0-9._+-]{1,64}$)(?=.*[0-9])[A-Za-z0-9][A-Za-z0-9._+-
 /** Exact network of each protocol family. Shared with route admissions, which carry no network family of their own. */
 export const SWAP_PROTOCOL_NETWORKS = {
     uniswap_ethereum: { family: "evm", chain: "eip155:1" },
+    uniswap_bnb: { family: "evm", chain: "eip155:56" },
     sunswap_tron: { family: "tron", chain: "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc" },
     jupiter_solana: { family: "solana", chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" },
     orca_solana: { family: "solana", chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" },

@@ -4,6 +4,7 @@ import { evmRpcBlock, evmRpcHex, evmRpcQuantity, recheckEvmBlock } from "../../.
 import type { ClockPort } from "../../../ports.js";
 import { validateSwapOperation, type SwapOperationRecord } from "../../model.js";
 import type { UniswapTransactionEnvelope } from "../../uniswap-v3/envelope.js";
+import { uniswapNativeLaneOf } from "../../uniswap-v3/native-lane.js";
 import type { UniswapV3PinVerifier } from "../../uniswap-v3/pins.js";
 import type { UniswapExecutionFreshness, UniswapExecutionGuardPort } from "./types.js";
 
@@ -17,7 +18,11 @@ export class UniswapExecutionGuard implements UniswapExecutionGuardPort {
 
   async inspect(operationValue: SwapOperationRecord, envelope: UniswapTransactionEnvelope): Promise<UniswapExecutionFreshness> {
     const operation = validateSwapOperation(operationValue), account = operation.quote.account;
-    if (evmRpcQuantity(await this.call("eth_chainId", [])) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap execution requires exact Ethereum chain 1 RPC.");
+    const lane = uniswapNativeLaneOf(operation.quote.sourceAsset.chain);
+    if (lane === undefined) blocked("Uniswap execution names no native-input lane.", "uniswap_envelope_binding");
+    if (evmRpcQuantity(await this.call("eth_chainId", [])) !== BigInt(lane.chainId)) {
+      throw new ApnError("APN_CHAIN_MISMATCH", `Uniswap execution requires exact ${lane.networkName} chain ${lane.chainId} RPC.`);
+    }
     const head = await evmRpcBlock(this.call, "latest"), baseFee = evmRpcQuantity(head.raw.baseFeePerGas);
     await this.verifyPins(this.call, head.tag);
     const [latest, pending, balance] = await Promise.all([
@@ -35,7 +40,7 @@ export class UniswapExecutionGuard implements UniswapExecutionGuardPort {
       value: `0x${BigInt(envelope.value).toString(16)}` }, head.tag])); }
     catch { blocked("The exact swap would revert at the current head.", "uniswap_presend_simulation"); }
     await recheckEvmBlock(this.call, head);
-    return { chainId: 1, account, nonce: nonce.toString(), gasLimit: envelope.gasLimit, maxFeePerGas: maxFee.toString(),
+    return { chainId: lane.chainId, account, nonce: nonce.toString(), gasLimit: envelope.gasLimit, maxFeePerGas: maxFee.toString(),
       maxPriorityFeePerGas: priority.toString(), simulationBlockNumber: operation.quote.simulation.blockNumber,
       simulationBlockHash: operation.quote.simulation.blockHash as `0x${string}`, headBlockNumber: head.number, headBlockHash: head.hash,
       checkedAt: this.clock.now().toISOString() };

@@ -8,17 +8,19 @@ import { approvalCode } from "../approval-code.js";
 import { ArbitrumSourceEffectJournalRepository } from "./arbitrum-source-effect-journal.js";
 import { RELAY_ARBITRUM_USDC } from "./arbitrum-usdc-ethereum-quote.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
-import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
+import { ETHEREUM_DEPOSITORY } from "./quote.js";
+import { relayErc20SourceToken, relayErc20UsageIdentity } from "./erc20-source-leg.js";
 function blocked(reason) {
     throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement is refused for this source effect state.", { reason });
 }
 function hold(op) {
     const arbitrum = op.arbitrumDraft !== undefined;
-    const identity = { account: getAddress(op.sourceAccount), chain: arbitrum ? "eip155:42161" : "eip155:1",
-        asset: { kind: "token", identifier: arbitrum ? RELAY_ARBITRUM_USDC : ETHEREUM_USDC } };
+    // Ethereum USDC and token routes hold their source leg's own token on its own chain.
+    const identity = arbitrum ? { account: getAddress(op.sourceAccount), chain: "eip155:42161",
+        asset: { kind: "token", identifier: RELAY_ARBITRUM_USDC } } : relayErc20UsageIdentity(op);
     return { identity, reservationId: assetUsageReservationId(identity, `${arbitrum ? "relay-arbitrum-approval" : "relay-execute"}:${op.operationId}`) };
 }
-/** Token lanes only (Ethereum and Arbitrum). A signing marker, signed bytes, an unresolved send or a recorded
+/** Token lanes only (Ethereum USDC, token routes and Arbitrum). A signing marker, signed bytes, an unresolved send or a recorded
  * outcome is never retired here: those stay resumable, observable or are already terminal by proof. */
 export async function relayRetireSource(root, op) {
     if (op.arbitrumDraft !== undefined) {
@@ -53,7 +55,8 @@ export async function releaseRelayHold(root, op, source, at) {
 }
 export function relayAbandonSummary(op, source) {
     return { operationId: op.operationId, sourceChainId: op.sourceChainId, sourceAccount: op.sourceAccount,
-        token: op.arbitrumDraft !== undefined ? RELAY_ARBITRUM_USDC : ETHEREUM_USDC, spender: ETHEREUM_DEPOSITORY,
+        token: op.arbitrumDraft !== undefined ? RELAY_ARBITRUM_USDC : relayErc20SourceToken(op).token,
+        spender: op.arbitrumDraft !== undefined ? ETHEREUM_DEPOSITORY : relayErc20SourceToken(op).depository,
         approvedAtomic: op.amountAtomic, journalIntegrityHash: source.journalIntegrityHash };
 }
 /** Fresh foreground consent to abandon a route after its approval: the deposit is never sent afterwards. */

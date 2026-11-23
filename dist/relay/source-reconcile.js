@@ -1,8 +1,7 @@
-/** Idempotent reconciliation of a finality-proven Ethereum USDC Relay deposit; no signer or sender is reachable. */
-import { getAddress } from "viem";
+/** Idempotent reconciliation of a finality-proven Relay ERC-20 deposit (Ethereum USDC or a token route); no signer or sender is reachable. */
 import { assetUsageReservationId } from "../asset-usage-ledger.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
-import { ETHEREUM_USDC } from "./quote.js";
+import { relayErc20UsageIdentity } from "./erc20-source-leg.js";
 /**
  * The caller proved `sourceHash` (the deposit's first and only attempt, after a confirmed approval) final and canonical on
  * Ethereum. The deposit journal records it confirmed and the exact submitted usage hold is finalized under that journal,
@@ -20,8 +19,7 @@ export async function reconcileRelayFinalizedSource(state, usage, op, sourceHash
         if (deposit.attempt?.attemptNumber !== 1 || deposit.attempt.transactionHash !== sourceHash ||
             !["submitting", "confirmed"].includes(deposit.phase))
             return false;
-        const identity = { account: getAddress(op.sourceAccount), chain: "eip155:1",
-            asset: { kind: "token", identifier: ETHEREUM_USDC } };
+        const identity = relayErc20UsageIdentity(op);
         const reservationId = assetUsageReservationId(identity, `relay-execute:${op.operationId}`);
         const reservation = await usage.load(identity, reservationId);
         if (reservation === null || !["submitted", "finalized"].includes(reservation.state) ||

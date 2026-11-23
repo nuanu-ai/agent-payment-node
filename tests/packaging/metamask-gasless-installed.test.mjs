@@ -108,7 +108,7 @@ test("installed CLI and MCP discovery enumerate the same finite gasless surface 
   assert.equal(cli.ok, true, JSON.stringify(cli));
   assert.equal(cli.data.profile_binding_inspected, false);
   assert.deepEqual(cli.data.provider_networks["metamask-agent-wallet"].map(row => row.chain_id),
-    [1, 10, 137, 143, 1329, 8453, 42161, 59144]);
+    [1, 10, 56, 56, 137, 143, 1329, 8453, 42161, 59144]);
   const connection = await mcp(s);
   try {
     const discovery = await connection.client.listTools();

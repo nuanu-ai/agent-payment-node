@@ -118,8 +118,11 @@ export interface BridgeTokenAsset {
     readonly approval: "standard" | "zero_first";
     /** `tether_fee_zero`: the owner-settable transfer fee, its cap and the deprecation forward are pinned at zero. */
     readonly transferFee: "none" | "tether_fee_zero";
-    /** `frozen_list` rows must equal the frozen allowlist identity; `legacy_pinned` rows predate it and stay as pinned. */
-    readonly listing: "frozen_list" | "legacy_pinned";
+    /**
+     * `frozen_list` rows must equal the frozen allowlist identity; `legacy_pinned` rows predate it and stay as pinned;
+     * `reviewed_supplement` rows must equal the owner-admitted Binance-Peg supplement (`src/binance-peg-policy-assets.ts`).
+     */
+    readonly listing: "frozen_list" | "legacy_pinned" | "reviewed_supplement";
 }
 export type BridgeAsset = BridgeNativeCoin | BridgeTokenAsset;
 export interface BridgeChainRow {
@@ -165,7 +168,9 @@ export declare function bridgeDestinationChain(value: unknown, code?: ErrorCode)
 export declare function bridgeExecutionDestination(value: unknown): value is BridgeExecutionChainId;
 /** A source needs the reviewed LI.FI Diamond and FeeForwarder path; destination-only proof support is insufficient. */
 export declare function bridgeExecutionSource(value: unknown): value is BridgeExecutionSourceChainId;
-export declare function bridgeExecutionSourceCaip2(value: unknown): boolean;
+/** A source leg with that path: any leg of a full source chain, or a token row of a token-only source chain (BSC). */
+export declare function bridgeExecutionSourceLeg(chainId: unknown, token: unknown): boolean;
+export declare function bridgeExecutionSourceCaip2(value: unknown, kind: "native" | "token"): boolean;
 export declare function bridgeChainRow(value: unknown, code?: ErrorCode): BridgeChainRow;
 export declare function bridgeNativeCoin(chainId: unknown, code?: ErrorCode): BridgeNativeCoin;
 /**
@@ -183,10 +188,26 @@ export declare function bridgeCrossNativeConversion(request: Pick<BridgeRouteReq
 export declare function bridgeNativeDenominationConversion(request: Pick<BridgeRouteRequest, "fromChainId" | "toChainId" | "fromToken" | "toToken">): boolean;
 /** Native destinations that require a provider named transaction plus exact trace and balance proof. */
 export declare function bridgeProviderBoundNativeDestination(request: Pick<BridgeRouteRequest, "fromChainId" | "toChainId" | "fromToken" | "toToken">): boolean;
-/** Both legs must share a pair key, decimals and each other's chain as a peer: native pairs with native, a token with its own. */
+/**
+ * Both legs must share a pair key, decimals (or form the reviewed scaled pair) and each other's chain as a peer: native
+ * pairs with native, a token with its own.
+ */
 export declare function bridgeAssetPair(request: Pick<BridgeRouteRequest, "fromChainId" | "toChainId" | "fromToken" | "toToken">, code?: ErrorCode): {
     readonly from: BridgeAsset;
     readonly to: BridgeAsset;
+};
+/**
+ * The one reviewed pair whose legs carry different decimals: a Binance-Peg row of BNB Smart Chain (18) and the same pair
+ * key's frozen-list row (6) on a peer chain. It is the same value at two precisions, never a conversion between assets.
+ */
+export declare function bridgeScaledPair(a: BridgeAsset, b: BridgeAsset): boolean;
+/**
+ * The factors that bring each leg's atomic amount to the finer precision of the two: 1 and 1 when the decimals match,
+ * otherwise 10^12 on the 6-decimal leg of a scaled pair. Any other decimals mismatch is refused.
+ */
+export declare function bridgeLegScale(from: BridgeAsset, to: BridgeAsset, code?: ErrorCode): {
+    readonly source: bigint;
+    readonly destination: bigint;
 };
 /** The peer chain's row for the same pair key, which is what a cross-chain tool pin and a route pair must agree on. */
 export declare function bridgePeerToken(asset: BridgeTokenAsset, peerChainId: BridgeChainId, code?: ErrorCode): BridgeTokenAsset;

@@ -50,6 +50,8 @@ async function laneStatusCommand(record) {
     const { swapMechanismDigest } = await import("../../swap/pin.js"), { JUPITER_V1_KNOWN_ROUTES } = await import("../../swap/jupiter-solana/v1-route-config.js");
     if (JUPITER_V1_KNOWN_ROUTES.some(route => swapMechanismDigest(route.mechanismPin) === digest))
         return "swap.jupiter.status";
+    if (record.quote.sourceAsset.chain === "eip155:56")
+        return "swap.uniswap-bnb.status";
     return record.quote.sourceAsset.chain.startsWith("tron:") ? "swap.sunswap.status" : "swap.uniswap.status";
 }
 async function laneStatus(context, record) {
@@ -62,6 +64,9 @@ async function laneStatus(context, record) {
     }
     if (command === "swap.sunswap.status") {
         return await (await import("../../swap/sunswap-tron/command-service.js")).executeSunSwapCommand({ command, operationId }, context);
+    }
+    if (command === "swap.uniswap-bnb.status") {
+        return await (await import("../../swap/uniswap-bnb/command-service.js")).executeUniswapBnbCommand({ command, operationId }, context);
     }
     return await (await import("../../swap/uniswap-command-service.js")).executeUniswapCommand({ command, operationId }, context);
 }

@@ -2,7 +2,7 @@ import { hashObject } from "../canonical.js";
 import { FEE_FORWARDER } from "./abi.js";
 import { bridgeDeployment } from "./deployments.js";
 import { rpcHexValue } from "./rpc-batch-codec.js";
-import { bridgeFailure } from "./validation.js";
+import { BRIDGE_ZERO_ADDRESS, bridgeFailure } from "./validation.js";
 /** The identity of the light check. Records frozen by 0.5.41/0.5.42 carry the earlier full-proof identity and stay valid. */
 export const BRIDGE_DEPLOYMENT_CHECK = "apn.bridge.deployment-check.v2";
 const OWNER_SELECTOR = "0x8da5cb5b", IMPLEMENTATION_SELECTOR = "0x5c60da1b";
@@ -17,7 +17,8 @@ const OWNER_SELECTOR = "0x8da5cb5b", IMPLEMENTATION_SELECTOR = "0x5c60da1b";
  * receipt, so only the BNB composite, whose delivery depends on Fly's router configuration, reads anything there.
  */
 export function bridgeDeploymentCheck(chainId, peerChainId, tool, token, role) {
-    const contract = bridgeDeployment(chainId, peerChainId, tool, token), composite = role === "destination" && chainId === 56;
+    const contract = bridgeDeployment(chainId, peerChainId, tool, token);
+    const composite = role === "destination" && chainId === 56 && token === BRIDGE_ZERO_ADDRESS;
     const reads = role === "destination" && !composite ? [] : contract.reads.filter((row) => row.kind === "call" &&
         !row.data.startsWith(IMPLEMENTATION_SELECTOR) && !(row.address.toLowerCase() === FEE_FORWARDER.toLowerCase() && row.data.startsWith(OWNER_SELECTOR)));
     return { chainId, peerChainId, tool, token, role, reads,

@@ -3,6 +3,7 @@ import { canonicalOperationId } from "../transfer-policy.js";
 import { mmDispatchIntent } from "./dispatch.js";
 import { mmActualGross } from "./economics.js";
 import { mmFail } from "./reasons.js";
+import { mmTokenSymbol } from "./registry.js";
 /** Said once beside the listed transfers, on the approval screen and in the prepare and approve output. */
 export const MM_SIBLING_WARNING = "Each earlier MetaMask gasless transfer listed here, from the same server wallet on this chain, has no proved " +
     "outcome yet and may still complete beside this one.";
@@ -12,7 +13,9 @@ export const MM_SIBLING_WARNING = "Each earlier MetaMask gasless transfer listed
  */
 export function mmSiblingsOutput(siblings) {
     return siblings.length === 0 ? {} : { unresolved_beside: { operations: siblings.map(sibling => ({ operation_id: sibling.operationId,
-                state: sibling.state, recipient: sibling.intent.request.recipient, dispatched_gross_atomic: mmActualGross(mmDispatchIntent(sibling).quote) })),
+                state: sibling.state, recipient: sibling.intent.request.recipient, dispatched_gross_atomic: mmActualGross(mmDispatchIntent(sibling).quote),
+                ...(sibling.intent.request.token === undefined ? {} : { token: sibling.intent.token, symbol: mmTokenSymbol(sibling.intent.token),
+                    decimals: sibling.intent.decimals }) })),
             warning: MM_SIBLING_WARNING } };
 }
 /** A delegation hash an unresolved sibling also holds would make the two transfers' redemption proofs indistinguishable. */

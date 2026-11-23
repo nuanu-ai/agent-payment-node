@@ -6,6 +6,7 @@ import { type RelayDepositObservation } from "./deposit-effect.js";
 import { type RelayBnbProofPorts, type RelayBnbProofResult } from "./destination-proof.js";
 import { RelayKeylessStatusService } from "./status.js";
 import { RelayNativeObserveService } from "./native-observe.js";
+import type { RelayTokenObserveService } from "./token-observe.js";
 export interface RelaySourceFinalityPorts {
     /** A fresh, canonical, finalized Ethereum observation. At most two physical RPC POSTs. */
     finalizedDeposit(hash: Hex): Promise<RelayDepositObservation | null>;
@@ -31,10 +32,11 @@ export declare class RelayObserveService {
     private readonly status;
     private readonly native?;
     private readonly usage;
+    private readonly token?;
     private readonly usedBnbInvocations;
     /** The factory must return a fresh budgeted BNB adapter for each observation. */
     private readonly bnbInvocation;
-    constructor(state: StateStore, source: RelaySourceFinalityPorts, bnbInvocation: () => RelayBnbProofPorts, status?: RelayKeylessStatusService, native?: RelayNativeObserveService | undefined, usage?: Pick<AssetUsageLedger, "load" | "transition">);
+    constructor(state: StateStore, source: RelaySourceFinalityPorts, bnbInvocation: () => RelayBnbProofPorts, status?: RelayKeylessStatusService, native?: RelayNativeObserveService | undefined, usage?: Pick<AssetUsageLedger, "load" | "transition">, token?: RelayTokenObserveService | undefined);
     /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
     observe(profile: string, operationId: string): Promise<RelayObserveResult>;
 }

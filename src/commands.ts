@@ -43,6 +43,9 @@ export type CommandRequest =
   | { readonly command: "relay.arbitrum.approval-execute"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.arbitrum.deposit-dispatch"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.native.prepare"; readonly profile: string; readonly sourceChain: string; readonly destinationChain: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
+  | { readonly command: "relay.token.prepare"; readonly profile: string; readonly sourceChain: string; readonly asset: string;
+      readonly destinationChain: string; readonly destinationAsset: string; readonly recipient: string; readonly amountAtomic: string;
+      readonly minOutputAtomic: string; readonly maxApprovalNetworkFeeWei: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
   /** `relay execute` and `relay observe` before the saved operation names their route (relay/command-route.ts). */
   | { readonly command: "relay.route"; readonly action: "execute" | "observe"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.execute"; readonly profile: string; readonly operationId: string }
@@ -64,6 +67,12 @@ export type CommandRequest =
       readonly maxGasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string }
   | { readonly command: "swap.uniswap.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
   | { readonly command: "swap.uniswap.status" | "swap.uniswap.approve" | "swap.uniswap.execute"; readonly operationId: string }
+  | { readonly command: "swap.uniswap-bnb.inventory" }
+  | { readonly command: "swap.uniswap-bnb.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
+      readonly outputToken: string; readonly amountAtomic: string; readonly slippageBps: number; readonly ownerSlippageCapBps: number; readonly deadline: number;
+      readonly maxGasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string }
+  | { readonly command: "swap.uniswap-bnb.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
+  | { readonly command: "swap.uniswap-bnb.status" | "swap.uniswap-bnb.approve" | "swap.uniswap-bnb.execute"; readonly operationId: string }
   | { readonly command: "swap.uniswap-token.inventory" }
   | { readonly command: "swap.uniswap-token.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
       readonly sourceToken: string; readonly outputToken: string; readonly amountAtomic: string; readonly minimumOutputAtomic: string;
@@ -114,9 +123,11 @@ export type CommandRequest =
       readonly maxFeePerGasWei: string; readonly maxPriorityFeePerGasWei: string; readonly maxNativeDebitWei: string;
       readonly idempotencyKey: string }
   | { readonly command: "gasless.capabilities"; readonly profile?: string }
-  | { readonly command: "gasless.balance"; readonly profile: string; readonly chainId: GaslessCommandChainId }
+  /** `asset`: the MetaMask server-wallet transfer token, required on chain 56 (USDT or USDC); no other provider takes one. */
+  | { readonly command: "gasless.balance"; readonly profile: string; readonly chainId: GaslessCommandChainId; readonly asset?: Address }
   | { readonly command: "gasless.transfer.quote"; readonly profile: string; readonly owner: Address; readonly request: GaslessCommandRequest; readonly rpcMaxBatchItems?: number }
-  | { readonly command: "gasless.transfer.prepare"; readonly profile: string; readonly request: GaslessCommandRequest; readonly idempotencyKey: string }
+  | { readonly command: "gasless.transfer.prepare"; readonly profile: string; readonly request: GaslessCommandRequest; readonly idempotencyKey: string;
+      readonly asset?: Address }
   | { readonly command: "gasless.transfer.approve" | "gasless.transfer.approve-sealed" | "gasless.transfer.revoke"; readonly operationId: string }
   | { readonly command: "gasless.usdt.status" | "gasless.usdt.resume"; readonly profileHash: string; readonly operationId: string }
   | { readonly command: "gasless.usdt.execute" | "gasless.usdt.execution-status" | "gasless.usdt.observe"; readonly profileHash: string; readonly operationId: string }

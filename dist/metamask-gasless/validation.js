@@ -15,9 +15,13 @@ export function mmUint(value, positive = false, reason = "mm_gasless_input") {
         mmFail(reason);
     return parsed;
 }
-export function mmFormat(value) {
-    const n = mmUint(value), fraction = (n % 1000000n).toString().padStart(6, "0").replace(/0+$/u, "");
-    return `${n / 1000000n}${fraction ? `.${fraction}` : ""}`;
+/** Exact decimal text of token atoms at the token's own scale (6 for USDC rows, 18 for the chain 56 rows). */
+export function mmFormat(value, decimals) {
+    if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 36)
+        mmFail("mm_gasless_internal");
+    const n = mmUint(value), scale = 10n ** BigInt(decimals);
+    const fraction = (n % scale).toString().padStart(decimals, "0").replace(/0+$/u, "");
+    return `${n / scale}${fraction ? `.${fraction}` : ""}`;
 }
 export function mmAddress(value, reason = "mm_gasless_input") {
     if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(value))
@@ -65,11 +69,18 @@ export function mmChain(value) {
     return value;
 }
 export function mmSame(a, b) { return canonicalJson(a) === canonicalJson(b); }
+/**
+ * The request's shape only. Its optional token is a canonical address; which chains need it is the registry's rule,
+ * applied when a request is prepared (`mmRequestDeployment`), so a saved record never depends on today's rows.
+ */
 export function mmRequest(value, reason = "mm_gasless_input") {
-    const fixed = isPlainRecord(value) && Object.hasOwn(value, "fixedNet");
-    const r = mmExact(value, ["chainId", "recipient", "grossAtomic", "maxFeeAtomic", "minReceivedAtomic", ...(fixed ? ["fixedNet"] : [])], reason);
+    const fixed = isPlainRecord(value) && Object.hasOwn(value, "fixedNet"), token = isPlainRecord(value) && Object.hasOwn(value, "token");
+    const r = mmExact(value, ["chainId", "recipient", "grossAtomic", "maxFeeAtomic", "minReceivedAtomic", ...(fixed ? ["fixedNet"] : []),
+        ...(token ? ["token"] : [])], reason);
     mmChain(r.chainId);
     if (mmCanonicalAddress(r.recipient, reason) === MM_ZERO_ADDRESS)
+        mmFail(reason);
+    if (token && (mmCanonicalAddress(r.token, reason) === MM_ZERO_ADDRESS || r.token === r.recipient))
         mmFail(reason);
     const gross = mmUint(r.grossAtomic, true, reason), minimum = mmUint(r.minReceivedAtomic, true, reason);
     mmUint(r.maxFeeAtomic, false, reason);

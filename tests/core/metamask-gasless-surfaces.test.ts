@@ -17,7 +17,8 @@ import { temporaryState } from "./helpers.js";
 import { MM_TEST_RECIPIENT, mmFixture } from "./metamask-gasless-helpers.js";
 
 const LOCAL_CHAINS = [1, 10, 130, 137, 8453, 42161, 43114] as const;
-const METAMASK_CHAINS = [1, 10, 137, 143, 1329, 8453, 42161, 59144] as const;
+// One row per token: chain 56 lists its USDT and its USDC.
+const METAMASK_CHAINS = [1, 10, 56, 56, 137, 143, 1329, 8453, 42161, 59144] as const;
 const GASLESS_PATHS = [
   "gasless usdt prepare",
   "gasless usdt status",
@@ -80,7 +81,7 @@ test("the combined gasless surface preserves common commands and exposes impleme
   assert.deepEqual(commands.map(command => command.path.join(" ")), GASLESS_PATHS);
   const chain = requiredCommand(commands, "gasless balance").options.find(option => option.name === "--chain");
   assert.deepEqual(chain?.constraints, [
-    "numeric_mainnet_id_1_10_130_137_143_1329_8453_42161_43114_59144",
+    "numeric_mainnet_id_1_10_56_130_137_143_1329_8453_42161_43114_59144",
     "provider_specific_chain_admission",
   ]);
   assert.deepEqual(projectMcpTools().filter(tool => tool.name.startsWith("apn_gasless_")).map(tool => tool.name), GASLESS_TOOLS);
@@ -95,7 +96,7 @@ test("CLI and MCP share strict ten-chain input while the local adapter rejects i
     required: prepare.inputSchema.required,
     additionalProperties: prepare.inputSchema.additionalProperties,
   }, {
-    properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "net_amount_atomic", "max_gross_atomic", "max_fee_atomic", "idempotency_key"],
+    properties: ["profile", "chain", "asset", "to", "amount", "max_fee", "min_received", "net_amount_atomic", "max_gross_atomic", "max_fee_atomic", "idempotency_key"],
     required: ["profile", "chain", "to", "idempotency_key"],
     additionalProperties: false,
   });

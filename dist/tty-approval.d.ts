@@ -45,6 +45,8 @@ export declare class TtyRelayExecuteConfirmation implements RelayExecutionAuthor
     private readonly options;
     constructor(options?: TtyTransferApprovalOptions);
     confirm(summary: RelayExecutionConfirmationSummary): Promise<boolean>;
+    /** A token route names both tokens and both decimals: the amount and the minimum are each atomic in their own token. */
+    private confirmTokenRoute;
 }
 /** The challenge identifies the single Arbitrum ERC20 approval and its exact saved quote. */
 export declare class TtyRelayArbitrumApprovalConfirmation {

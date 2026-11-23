@@ -1,6 +1,6 @@
 import { GASLESS_ZERO_ADDRESS, gaslessAddress, gaslessFailure, gaslessUint } from "./validation.js";
 /** Shared command surface only; each provider retains its own strict persisted schema. */
-export const GASLESS_COMMAND_CHAINS = [1, 10, 130, 137, 143, 1329, 8453, 42161, 43114, 59144];
+export const GASLESS_COMMAND_CHAINS = [1, 10, 56, 130, 137, 143, 1329, 8453, 42161, 43114, 59144];
 export function gaslessCommandChain(value) {
     if (!GASLESS_COMMAND_CHAINS.includes(value))
         gaslessFailure("APN_INVALID_INPUT", "gasless_chain_unsupported");

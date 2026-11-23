@@ -90,7 +90,7 @@ export class RelayRetireService {
     return source.journalIntegrityHash;
   }
 
-  /** Ethereum and Arbitrum token lanes. The principal hold is released only after the source state is re-proven. */
+  /** Ethereum USDC, token-route and Arbitrum lanes. The principal hold is released only after the source state is re-proven. */
   private async retireTokenLane(op: RelayUnsignedOperation, profile: string, consented: string | null) {
     const retirements = new RelayRetirementRepository(this.state.root), existing = await retirements.load(op);
     if (existing !== null) return publicRelayUnsignedOperation(op, existing);
@@ -111,8 +111,9 @@ export class RelayRetireService {
     if (op.arbitrumDraft !== undefined) { await releaseRelayHold(this.state.root, op, source, now); return persist(); }
     return custody.withNoMaterial(op, async () => {
       await releaseRelayHold(this.state.root, op, source, now);
-      return new AssetUsageLedger(this.state.root).withNoMatchingRelayReservation(op.sourceAccount, op.policyDigest,
-        op.amountAtomic, persist, 1, source.hold.reservationId);
+      // The source leg's own bucket: Ethereum USDC, or a token route's source token on its chain.
+      return new AssetUsageLedger(this.state.root).withNoMatchingRelayReservationIn(source.hold.identity, op.policyDigest,
+        op.amountAtomic, persist, source.hold.reservationId);
     });
   }
 }

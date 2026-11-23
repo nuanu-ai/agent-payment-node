@@ -24,6 +24,11 @@ export declare function materializeBridgeRoute(selected: ParsedBridgeRoute, resp
     readonly implicitProtocolFeeAtomic: string;
     readonly providerNonceAtomic: string | null;
 };
+/**
+ * The token economics of one materialized route, and its unitemized protocol fee in source atomic units. A scaled pair
+ * (Binance-Peg 18 decimals against 6) compares output, loss and fees exactly at the finer precision; its unitemized fee
+ * counts the output at the source precision rounded down, so the fee is never understated.
+ */
 export declare function validateRouteEconomics(m: BridgeMaterialization): string;
 export declare function bridgeRouteProjection(choice: BridgeRouteChoice): {
     route_id: string;

@@ -12,7 +12,7 @@ import { advanceMetaMaskGaslessOperation } from "./journal/transitions.js";
 import { MetaMaskGaslessObservationService } from "./observation.js";
 import { metaMaskGaslessOwner } from "./owner.js";
 import { MetaMaskGaslessPreparation } from "./prepare.js";
-import { mmRegistry } from "./registry.js";
+import { mmRegistry, mmRequestToken, mmTokenSymbol } from "./registry.js";
 import { mmFail } from "./reasons.js";
 import { mmChain } from "./validation.js";
 import { openMetaMaskRevocationRequests, readMetaMaskRevocationRequests } from "./revocation/requests.js";
@@ -34,6 +34,8 @@ function prepareGuidance(error, profile, request) {
     if (!(error instanceof ApnError))
         return error;
     const d = error.details ?? {}, chainId = request.chainId, again = "No operation was written, so the same prepare may run again";
+    // The transfer token's symbol and scale: USDC at 6 decimals, or chain 56's USDT or USDC at 18.
+    const token = () => { const row = mmRegistry(chainId, request.token).row; return { symbol: mmTokenSymbol(row.token), decimals: row.decimals }; };
     // Named only inside a refusal that already proved the chain; any other error passes through untouched.
     const where = () => `on ${directEvmNetwork(chainId).name} (chain ${chainId})`;
     let nextActions;
@@ -41,14 +43,14 @@ function prepareGuidance(error, profile, request) {
         const required = d.mm_read_native_required_wei, current = d.mm_read_native_current_wei, symbol = d.native_symbol;
         nextActions = typeof required === "string" && typeof current === "string" && typeof symbol === "string"
             ? [`MetaMask's relay simulation for this transfer ${where()} needs ${required} wei of native ${symbol} for gas on the server wallet, which ` +
-                    `holds ${current} wei. APN neither sends this transfer with native gas instead nor reads it as a USDC shortfall. ${again} once MetaMask quotes a USDC relay fee.`]
-            : [`MetaMask's fee quote named no cause APN can verify, so APN cannot tell whether USDC, native gas or the relay itself is short. ${again}.`];
+                    `holds ${current} wei. APN neither sends this transfer with native gas instead nor reads it as a ${token().symbol} shortfall. ${again} once MetaMask quotes a ${token().symbol} relay fee.`]
+            : [`MetaMask's fee quote named no cause APN can verify, so APN cannot tell whether ${token().symbol}, native gas or the relay itself is short. ${again}.`];
     }
     else if (d.reason === "mm_gasless_balance" && typeof d.usdc_current_atomic === "string" && typeof d.usdc_required_atomic === "string") {
-        const required = d.usdc_required_atomic, short = (BigInt(required) - BigInt(d.usdc_current_atomic)).toString();
-        nextActions = [`apn gasless balance --profile ${canonicalProfile(profile)} --chain ${chainId}`,
-            `The server wallet's USDC ${where()} is ${short} atoms (${formatAtomic(short, 6)} USDC) short of this transfer plus MetaMask's quoted relay fee. ` +
-                `${again} once it holds at least ${required} USDC atoms.`];
+        const required = d.usdc_required_atomic, short = (BigInt(required) - BigInt(d.usdc_current_atomic)).toString(), { symbol, decimals } = token();
+        nextActions = [`apn gasless balance --profile ${canonicalProfile(profile)} --chain ${chainId}${request.token === undefined ? "" : ` --asset ${request.token}`}`,
+            `The server wallet's ${symbol} ${where()} is ${short} atoms (${formatAtomic(short, decimals)} ${symbol}) short of this transfer plus MetaMask's quoted relay fee. ` +
+                `${again} once it holds at least ${required} ${symbol} atoms.`];
     }
     else if (d.reason === "mm_gasless_fee_cap" && typeof d.fee_atomic === "string") {
         nextActions = [mmFeeCapNextAction(request, BigInt(d.fee_atomic))];
@@ -66,21 +68,23 @@ export class MetaMaskGaslessService {
         this.records = context.metaMaskGasless?.records ?? new MetaMaskGaslessOperationRepository(context.state.root);
         this.operations = new OperationService(context.state, context.providerX402Repository, undefined, undefined, undefined, this.records);
     }
-    async balance(profile, chainId) {
-        const { row } = mmRegistry(mmChain(chainId)), clock = new MetaMaskGaslessClock(this.context.clock);
+    /** `asset`: the token contract; required on a chain with several tokens (56), optional elsewhere where it may name only that one. */
+    async balance(profile, chainId, asset) {
+        const selected = mmChain(chainId), { row } = mmRegistry(selected, mmRequestToken(selected, asset).token);
+        const clock = new MetaMaskGaslessClock(this.context.clock);
         clock.check();
         const owner = await metaMaskGaslessOwner(this.context.state, profile);
         clock.check();
         const rpc = this.dependencies().rpcFor(chainId);
         if (rpc.chainId !== chainId)
             mmFail("mm_gasless_rpc_binding");
-        const balance = await rpc.balance(owner.address);
+        const balance = await rpc.balance(owner.address, row.token);
         clock.check(undefined, [balance.observedAt]);
         if (balance.chainId !== chainId || balance.endpointHash !== rpc.endpointHash || balance.endpointOrigin !== rpc.endpointOrigin) {
             mmFail("mm_gasless_rpc_binding");
         }
         return { profile: owner.profile, provider: "metamask-agent-wallet", chain_id: chainId,
-            token: row.token, symbol: "USDC", decimals: 6, address: owner.address, balance_atomic: balance.state.usdcBalanceAtomic,
+            token: row.token, symbol: mmTokenSymbol(row.token), decimals: row.decimals, address: owner.address, balance_atomic: balance.state.usdcBalanceAtomic,
             designation: balance.state.designation, block: balance.block, observed_at: balance.observedAt,
             rpc_origin: balance.endpointOrigin, endpoint_hash: balance.endpointHash,
             sender_native_balance_required: false, proof_class: "chain_verified_public_read" };

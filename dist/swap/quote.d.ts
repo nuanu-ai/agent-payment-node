@@ -1,4 +1,4 @@
-import { type CandidateKind } from "../allowlist-inventory.js";
+import type { CandidateKind } from "../allowlist-inventory.js";
 export declare const SWAP_QUOTE_SCHEMA: "apn.swap-quote.v1";
 export interface SwapAssetIdentity {
     readonly chain: string;

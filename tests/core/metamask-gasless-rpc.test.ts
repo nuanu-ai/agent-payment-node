@@ -6,18 +6,20 @@ import { addressWord } from "../../src/metamask-gasless/chain/abi.js";
 import { MetaMaskGaslessRpc, metaMaskGaslessRpcFactory } from "../../src/metamask-gasless/chain/rpc.js";
 import { validateMetaMaskGaslessSnapshot } from "../../src/metamask-gasless/chain/snapshot.js";
 import { MM_CHAINS } from "../../src/metamask-gasless/model.js";
-import { MM_RPC_ENV, mmRegistry } from "../../src/metamask-gasless/registry.js";
+import { MM_DEPLOYMENTS, MM_RPC_ENV, mmRegistry } from "../../src/metamask-gasless/registry.js";
 import { blockHash, block, blockNumber, FakeRpcTransport, intent, now, quantity, rawSettlementLogs, RPC_URL, runtime,
   runtimeText, vector, type Json } from "./metamask-gasless-rpc-fake.js";
 
-test("static runtime fixture drives fixed EIP-1898 snapshots for all eight registry rows", async () => {
+test("static runtime fixtures drive fixed EIP-1898 snapshots for every registry row", async () => {
   assert.equal(sha256(runtimeText), "f37646220871b16931912855b8e5eb0a6627318378e7c132dabd165815364682");
-  for (const chainId of MM_CHAINS) {
-    const transport = new FakeRpcTransport(chainId);
+  // Chain 56 reads its USDT (no proxy) and its USDC (EIP-1967 proxy) from APN's own 2026-11-23 evidence bytes.
+  for (const { row: { chainId, token, decimals } } of MM_DEPLOYMENTS) {
+    const transport = new FakeRpcTransport(chainId, { token });
     const rpc = new MetaMaskGaslessRpc({ chainId, rpcUrl: RPC_URL, clock: now, transport });
-    const snapshot = await rpc.snapshot({ owner: vector.owner, delegationHash: vector.delegationHash,
+    const snapshot = await rpc.snapshot({ owner: vector.owner, token, delegationHash: vector.delegationHash,
       grossAtomic: "1000000" });
     assert.equal(snapshot.chainId, chainId); assert.equal(snapshot.safeState.counterAtomic, "0");
+    assert.equal(snapshot.safeState.tokenDecimals, decimals);
     assert.equal(snapshot.headState.designation, "pinned");
     assert.ok(transport.calls.every(call => readMethods.has(call.method)));
     const pinned = transport.calls.filter(call => ["eth_getCode", "eth_getStorageAt", "eth_call"].includes(call.method));

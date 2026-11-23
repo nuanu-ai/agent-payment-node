@@ -20,7 +20,7 @@ import { bridgeRouteProjection, materializeBridgeRoute, parseBridgeRoutes } from
 import { bridgeNoRouteEvidence } from "./no-route.js";
 import { newBridgeOperation } from "./transitions.js";
 import { bridgePreparePostBudget } from "./send-budget.js";
-import { bridgeExecutionDestination, bridgeExecutionSource, bridgeNativePrincipal, validateBridgeRequest } from "./asset-registry.js";
+import { bridgeExecutionDestination, bridgeExecutionSourceLeg, bridgeNativePrincipal, validateBridgeRequest } from "./asset-registry.js";
 import { bridgeFailure, bridgeHash, bridgeOpaque } from "./validation.js";
 import { BridgeAllowlistGate } from "./allowlist.js";
 import type { StoredBridgeOperationRecord } from "./legacy-operation.js";
@@ -75,7 +75,7 @@ export class BridgePreparation {
       const selected = parseBridgeRoutes({ status: 200, body: quote.rawResponse }, quote.request, quote.owner.address).find((r) => r.choice.routeId === routeId);
       if (selected === undefined) bridgeFailure("APN_INVALID_INPUT", "route_not_in_snapshot");
       if (!bridgeExecutionDestination(quote.request.toChainId)) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "destination_execution_unreviewed");
-      if (!bridgeExecutionSource(quote.request.fromChainId)) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "source_execution_unreviewed");
+      if (!bridgeExecutionSourceLeg(quote.request.fromChainId, quote.request.fromToken)) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "source_execution_unreviewed");
       if (!selected.choice.preparable) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_bridge_decoder_unavailable");
       const allowlist = await new BridgeAllowlistGate({ state, clock: { now: () => new Date(this.o.now()) } }, true)
         .admit(profile, quote.owner.address, quote.request, selected.choice.tool);

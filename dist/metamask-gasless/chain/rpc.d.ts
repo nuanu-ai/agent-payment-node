@@ -25,16 +25,16 @@ export declare class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
     readonly endpointOrigin: string;
     readonly endpointHash: string;
     readonly rpcUrl: string;
-    private readonly deployment;
     private readonly clock;
     private readonly transport;
     private sequence;
     private readonly callRpc;
     private readonly observationOnly;
     constructor(options: MetaMaskGaslessRpcOptions);
-    balance(ownerInput: Address): Promise<MetaMaskGaslessBalance>;
+    balance(ownerInput: Address, token?: Address): Promise<MetaMaskGaslessBalance>;
     snapshot(input: {
         readonly owner: Address;
+        readonly token?: Address;
         readonly delegationHash: Hex;
         readonly grossAtomic: string;
         readonly feeMode?: "sponsored";

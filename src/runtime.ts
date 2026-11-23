@@ -60,8 +60,8 @@ import type { CircleSolanaDeliveryReader } from "./lifi/circle-v2-solana-deliver
 
 export interface RelayExecutionConfirmationSummary {
   readonly operationId: string;
-  readonly sourceChainId: 1;
-  readonly destinationChainId: 56 | 8453;
+  readonly sourceChainId: number;
+  readonly destinationChainId: number;
   readonly sourceAccount: string;
   readonly sourceToken: string;
   readonly amountAtomic: string;
@@ -72,6 +72,8 @@ export interface RelayExecutionConfirmationSummary {
   readonly quoteDigest: string;
   readonly approvalNetworkFeeCeilingWei: string;
   readonly depositNetworkFeeCeilingWei: string;
+  /** Token routes only: the destination token and each side's decimals. */
+  readonly tokenRoute?: Readonly<{ destinationToken: string; sourceDecimals: number; destinationDecimals: number }>;
 }
 export type RelayExecuteConfirmation = (summary: RelayExecutionConfirmationSummary) => Promise<boolean>;
 export interface RelayExecuteHandler { execute(profile: string, operationId: string): Promise<RelayEffectJournal> }
@@ -94,6 +96,7 @@ export interface CoreDependencies {
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
+  readonly uniswapBnbRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap-bnb.quote" }>>;
   readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly orcaRuntime?: OrcaRuntimeSelector;
@@ -167,6 +170,7 @@ export class RuntimeContext {
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
+  readonly uniswapBnbRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap-bnb.quote" }>>;
   readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly orcaRuntime?: OrcaRuntimeSelector;
@@ -239,6 +243,7 @@ export class RuntimeContext {
     if (dependencies.stargateToken !== undefined) this.stargateToken = dependencies.stargateToken;
     if (dependencies.portfolio !== undefined) this.portfolio = dependencies.portfolio;
     if (dependencies.uniswapRuntime !== undefined) this.uniswapRuntime = dependencies.uniswapRuntime;
+    if (dependencies.uniswapBnbRuntime !== undefined) this.uniswapBnbRuntime = dependencies.uniswapBnbRuntime;
     if (dependencies.uniswapTokenRuntime !== undefined) this.uniswapTokenRuntime = dependencies.uniswapTokenRuntime;
     if (dependencies.sunswapRuntime !== undefined) this.sunswapRuntime = dependencies.sunswapRuntime;
     if (dependencies.orcaRuntime !== undefined) this.orcaRuntime = dependencies.orcaRuntime;

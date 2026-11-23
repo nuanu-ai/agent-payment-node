@@ -7,11 +7,11 @@ import { serverTransactionInput, serverTransactionResult, type MetaMaskServerTra
 import { isPlainRecord } from "../../canonical.js";
 import type { MetaMaskGaslessBinding, MetaMaskGaslessProviderIntent, MetaMaskGaslessProfileIdentity,
   MetaMaskGaslessProviderObservation, MetaMaskGaslessQuote, MetaMaskGaslessUnsignedResult } from "../model.js";
-import { MM_PROVIDER_STATUSES } from "../model.js";
+import { MM_PROVIDER_STATUSES, MM_TOKEN_DECIMALS } from "../model.js";
 import type { MetaMaskGaslessQuoteInput, MetaMaskGaslessUnsignedInput } from "../ports.js";
 import { mmAssertProfileBinding, mmBinding, mmPrivateHash } from "../identity.js";
 import { mmAssertStableQuote, mmQuote, mmQuoteHash } from "../economics.js";
-import { mmRegistry } from "../registry.js";
+import { mmRecordRegistry, mmRegistry } from "../registry.js";
 import { MM_REASON_CODES, mmFail, type MetaMaskGaslessFailure } from "../reasons.js";
 import { mmValidateUnsigned } from "../unsigned.js";
 import { mmAddress, mmCanonicalAddress, mmChain, mmExact, mmHash, mmHex, mmIso, mmRequest, mmUint,
@@ -115,6 +115,8 @@ function profileIdentity(value: unknown): MetaMaskGaslessProfileIdentity {
 function quoteInput(value: unknown): MetaMaskGaslessQuoteInput {
   const q = mmExact(value, ["binding", "chainId", "token", "recipient", "netAtomic", "rpcUrl"], "mm_gasless_input");
   mmBinding(q.binding, "mm_gasless_input"); mmChain(q.chainId); mmCanonicalAddress(q.token, "mm_gasless_input");
+  // The token is one of the chain's pinned rows (chain 56 holds two); any other is refused before the SDK loads.
+  mmRegistry(q.chainId as number, q.token as string);
   mmCanonicalAddress(q.recipient, "mm_gasless_input"); mmUint(q.netAtomic, true, "mm_gasless_input");
   if (typeof q.rpcUrl !== "string" || q.rpcUrl.length > 2048) mmFail("mm_gasless_input");
   return q as unknown as MetaMaskGaslessQuoteInput;
@@ -150,14 +152,15 @@ function quoteOutput(value: unknown, input: MetaMaskGaslessQuoteInput): MetaMask
     execution.target !== input.token || execution.value !== "0")) mmFail("mm_gasless_provider_unavailable");
   const gross = (mmUint(quote.netAtomic, true, "mm_gasless_provider_unavailable") +
     mmUint(quote.feeAtomic, false, "mm_gasless_provider_unavailable")).toString();
-  return mmQuote(quote, { chainId: input.chainId, recipient: input.recipient, grossAtomic: gross,
+  return mmQuote(quote, { chainId: input.chainId, token: input.token, recipient: input.recipient, grossAtomic: gross,
     maxFeeAtomic: quote.feeAtomic, minReceivedAtomic: quote.netAtomic }, input.binding, quote.netAtomic, "mm_gasless_provider_unavailable");
 }
 function intent(value: unknown): MetaMaskGaslessProviderIntent {
   const keys = ["profile", "request", "binding", "token", "decimals", "deploymentEvidenceHash", "initialSnapshot", "quote",
     "requestId", "preparedAt", "expiresAt", "policyHash", "unsignedDelegation", "delegationHash", "signingDigest", "relayTo", "mode"];
   const i = mmExact(value, [...keys, ...(isPlainRecord(value) && Object.hasOwn(value, "preparedGrossAtomic") ? ["preparedGrossAtomic"] : [])], "mm_gasless_state_corrupt");
-  if (typeof i.profile !== "string" || i.profile.length < 1 || i.profile.length > 128 || i.decimals !== 6) mmFail("mm_gasless_state_corrupt");
+  if (typeof i.profile !== "string" || i.profile.length < 1 || i.profile.length > 128 ||
+    !(MM_TOKEN_DECIMALS as readonly unknown[]).includes(i.decimals)) mmFail("mm_gasless_state_corrupt");
   const request = mmRequest(i.request, "mm_gasless_state_corrupt"), binding = mmBinding(i.binding, "mm_gasless_state_corrupt");
   mmCanonicalAddress(i.token, "mm_gasless_state_corrupt"); mmHash(i.deploymentEvidenceHash, "mm_gasless_state_corrupt");
   mmHash(i.policyHash, "mm_gasless_state_corrupt"); mmUuid(i.requestId, "mm_gasless_state_corrupt");
@@ -165,28 +168,29 @@ function intent(value: unknown): MetaMaskGaslessProviderIntent {
   if (request.fixedNet ? typeof i.preparedGrossAtomic !== "string" : Object.hasOwn(i, "preparedGrossAtomic")) mmFail("mm_gasless_state_corrupt");
   if (request.fixedNet) mmUint(i.preparedGrossAtomic, true, "mm_gasless_state_corrupt");
   const quote = quoteResult(i.quote), typed = i as unknown as MetaMaskGaslessProviderIntent;
-  const deployment = mmRegistry(request.chainId);
-  if (i.token !== deployment.row.token || i.deploymentEvidenceHash !== deployment.deploymentEvidenceHash) mmFail("mm_gasless_state_corrupt");
+  const deployment = mmRecordRegistry(request.chainId, i.token as string);
+  if (i.token !== deployment.row.token || i.decimals !== deployment.row.decimals || (request.token !== undefined && request.token !== i.token) ||
+    i.deploymentEvidenceHash !== deployment.deploymentEvidenceHash) mmFail("mm_gasless_state_corrupt");
   mmQuote(quote, request, binding, quote.netAtomic, "mm_gasless_state_corrupt");
   mmAssertStableQuote(request, quote, "mm_gasless_state_corrupt");
   const unsigned = mmValidateUnsigned({ unsignedDelegation: i.unsignedDelegation, delegationHash: i.delegationHash,
     signingDigest: i.signingDigest, relayTo: i.relayTo, mode: i.mode },
   { owner: binding.address, chainId: request.chainId, executions: quote.executions, ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) }, "mm_gasless_state_corrupt");
-  void unsigned; snapshot(i.initialSnapshot, request.chainId, quote.feeMode);
+  void unsigned; snapshot(i.initialSnapshot, request.chainId, deployment.row.decimals, quote.feeMode);
   return typed;
 }
 function block(value: unknown, reason: "mm_gasless_state_corrupt") {
   const b = mmExact(value, ["numberAtomic", "hash", "timestampAtomic"], reason);
   mmUint(b.numberAtomic, false, reason); mmHex(b.hash, 32, reason); mmUint(b.timestampAtomic, false, reason);
 }
-function snapshot(value: unknown, chainId: number, feeMode?: "sponsored"): void {
+function snapshot(value: unknown, chainId: number, decimals: number, feeMode?: "sponsored"): void {
   const s = mmExact(value, ["chainId", "endpointHash", "endpointOrigin", "observedAt", "safeBlock", "headBlock", "safeState", "headState"], "mm_gasless_state_corrupt");
   if (s.chainId !== chainId || typeof s.endpointOrigin !== "string" || s.endpointOrigin.length > 2048) mmFail("mm_gasless_state_corrupt");
   mmHash(s.endpointHash, "mm_gasless_state_corrupt"); mmIso(s.observedAt, "mm_gasless_state_corrupt");
   block(s.safeBlock, "mm_gasless_state_corrupt"); block(s.headBlock, "mm_gasless_state_corrupt");
-  chainState(s.safeState, feeMode); chainState(s.headState, feeMode);
+  chainState(s.safeState, decimals, feeMode); chainState(s.headState, decimals, feeMode);
 }
-function chainState(value: unknown, feeMode?: "sponsored"): void {
+function chainState(value: unknown, decimals: number, feeMode?: "sponsored"): void {
   const s = mmExact(value, ["protocolCodeHashes", "tokenProxyCodeHash", "tokenImplementationAddress", "tokenImplementationCodeHash",
     "tokenDecimals", "ownerCodeHash", "designation", "usdcBalanceAtomic", "counterAtomic"], "mm_gasless_state_corrupt");
   const keys = ["manager", "delegate", "limitedCalls", feeMode === "sponsored" ? "exactSingle" : "exactBatch"];
@@ -194,7 +198,7 @@ function chainState(value: unknown, feeMode?: "sponsored"): void {
   for (const key of keys) mmHex(hashes[key], 32, "mm_gasless_state_corrupt");
   mmHex(s.tokenProxyCodeHash, 32, "mm_gasless_state_corrupt"); mmCanonicalAddress(s.tokenImplementationAddress, "mm_gasless_state_corrupt");
   mmHex(s.tokenImplementationCodeHash, 32, "mm_gasless_state_corrupt"); mmHex(s.ownerCodeHash, 32, "mm_gasless_state_corrupt");
-  if (s.tokenDecimals !== 6 || !["empty", "pinned"].includes(String(s.designation))) mmFail("mm_gasless_state_corrupt");
+  if (s.tokenDecimals !== decimals || !["empty", "pinned"].includes(String(s.designation))) mmFail("mm_gasless_state_corrupt");
   mmUint(s.usdcBalanceAtomic, false, "mm_gasless_state_corrupt"); mmUint(s.counterAtomic, false, "mm_gasless_state_corrupt");
 }
 function observation(value: unknown, intentValue: MetaMaskGaslessProviderIntent): MetaMaskGaslessProviderObservation {

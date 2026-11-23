@@ -1,5 +1,6 @@
 import type { Address, Hex } from "../model.js";
-import type { MetaMaskGaslessBinding, MetaMaskGaslessChainId, MetaMaskGaslessCursor, MetaMaskGaslessIntent, MetaMaskGaslessMutable, MetaMaskGaslessSettlement, MetaMaskGaslessState } from "./model.js";
+import type { MetaMaskGaslessBinding, MetaMaskGaslessChainId, MetaMaskGaslessCursor, MetaMaskGaslessDecimals, MetaMaskGaslessIntent, MetaMaskGaslessMutable, MetaMaskGaslessSettlement, MetaMaskGaslessState } from "./model.js";
+import type { MetaMaskGaslessSymbol } from "./registry.js";
 import type { MetaMaskGaslessReason } from "./reasons.js";
 export declare const MM_OPERATION_VERSION: "apn.metamask-gasless-operation.v1";
 export declare const MM_OPERATION_KIND: "metamask_gasless_transfer";
@@ -61,8 +62,8 @@ export interface MetaMaskGaslessPublicOperation {
     readonly transfer: {
         readonly chain_id: MetaMaskGaslessChainId;
         readonly token: Address;
-        readonly symbol: "USDC";
-        readonly decimals: 6;
+        readonly symbol: MetaMaskGaslessSymbol;
+        readonly decimals: MetaMaskGaslessDecimals;
         readonly sender: Address;
         readonly recipient: Address;
         readonly fee_recipient: Address | null;

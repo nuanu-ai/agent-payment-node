@@ -2,7 +2,7 @@ import { encodeFunctionData, parseAbi } from "viem";
 import { hashObject } from "../canonical.js";
 import type { MetaMaskGaslessBinding, MetaMaskGaslessIntent, MetaMaskGaslessQuote,
   MetaMaskGaslessQuoteMaterial, MetaMaskGaslessRequest } from "./model.js";
-import { MM_ZERO_ADDRESS } from "./model.js";
+import { MM_TOKEN_DECIMALS, MM_ZERO_ADDRESS } from "./model.js";
 import { mmRegistry } from "./registry.js";
 import { mmRecordedDeployment, type MmDeploymentView } from "./recorded.js";
 import { mmFail, type MetaMaskGaslessFailureReason } from "./reasons.js";
@@ -31,7 +31,7 @@ export function mmQuoteHash(quote: MetaMaskGaslessQuoteMaterial): string {
 /** Validate each quote independently; convergence and final G=N+F are separate checks. */
 export function mmQuote(value: unknown, request: MetaMaskGaslessRequest, binding: MetaMaskGaslessBinding,
   requestedNet: string, reason: MetaMaskGaslessFailureReason = "mm_gasless_quote_invalid",
-  row: MmDeploymentView = mmRegistry(request.chainId).row): MetaMaskGaslessQuote {
+  row: MmDeploymentView = mmRegistry(request.chainId, request.token).row): MetaMaskGaslessQuote {
   const sponsored = value !== null && typeof value === "object" && "feeMode" in value;
   const q = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash",
     ...(sponsored ? ["feeMode", "sponsorshipHash"] : [])], reason);
@@ -71,7 +71,7 @@ export function mmAssertStableQuote(request: MetaMaskGaslessRequest, quote: Meta
  */
 export function mmRepriceWithinCap(value: unknown, request: MetaMaskGaslessRequest,
   binding: MetaMaskGaslessBinding, reason: MetaMaskGaslessFailureReason = "mm_gasless_quote_invalid",
-  row: MmDeploymentView = mmRegistry(request.chainId).row): MetaMaskGaslessQuote {
+  row: MmDeploymentView = mmRegistry(request.chainId, request.token).row): MetaMaskGaslessQuote {
   const candidate = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash",
     ...(value !== null && typeof value === "object" && "feeMode" in value ? ["feeMode", "sponsorshipHash"] : [])], reason);
   const netAtomic = typeof candidate.netAtomic === "string" ? candidate.netAtomic : mmFail(reason);
@@ -80,7 +80,7 @@ export function mmRepriceWithinCap(value: unknown, request: MetaMaskGaslessReque
   return quote;
 }
 export function mmPolicyHash(profileHash: string, binding: MetaMaskGaslessBinding, request: MetaMaskGaslessRequest,
-  token = mmRegistry(request.chainId).row.token): string {
+  token = mmRegistry(request.chainId, request.token).row.token): string {
   return hashObject({ purpose: "apn.metamask-gasless.policy.v1", profileHash, binding,
     chainId: request.chainId, token, recipient: request.recipient,
     grossAtomic: request.grossAtomic, maxFeeAtomic: request.maxFeeAtomic, minReceivedAtomic: request.minReceivedAtomic,
@@ -90,7 +90,8 @@ export function mmPolicyHash(profileHash: string, binding: MetaMaskGaslessBindin
 export function mmAssertIntentEconomics(intent: MetaMaskGaslessIntent, profileHash: string): void {
   const r = mmRequest(intent.request, "mm_gasless_state_corrupt");
   const deployment = mmRecordedDeployment(intent);
-  if (intent.decimals !== 6 || intent.policyHash !== mmPolicyHash(profileHash, intent.binding, r, deployment.token)) {
+  if (!(MM_TOKEN_DECIMALS as readonly number[]).includes(intent.decimals) || (r.token !== undefined && r.token !== deployment.token) ||
+    intent.policyHash !== mmPolicyHash(profileHash, intent.binding, r, deployment.token)) {
     mmFail("mm_gasless_state_corrupt");
   }
   mmQuote(intent.quote, r, intent.binding, intent.quote.netAtomic, "mm_gasless_state_corrupt", deployment);

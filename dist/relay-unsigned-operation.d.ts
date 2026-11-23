@@ -1,6 +1,7 @@
 import type { ValidatedRelayQuote } from "./relay/quote.js";
 import type { ValidatedRelayNativeQuote } from "./relay/native-quote.js";
 import type { RelayArbitrumSourceDraft } from "./relay/arbitrum-usdc-source-draft.js";
+import { type ValidatedRelayTokenQuote } from "./relay/token-quote.js";
 import { SecureStateStore } from "./secure-state-store.js";
 import { z } from "zod";
 declare const body: z.ZodObject<{
@@ -12,8 +13,8 @@ declare const body: z.ZodObject<{
     operationId: z.ZodString;
     idempotencyHash: z.ZodString;
     requestHash: z.ZodString;
-    sourceChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
-    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<143>, z.ZodLiteral<4326>, z.ZodLiteral<8453>]>;
+    sourceChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<143>, z.ZodLiteral<4326>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
     sourceAccount: z.ZodString;
     recipient: z.ZodString;
     quoteDigest: z.ZodString;
@@ -24,6 +25,7 @@ declare const body: z.ZodObject<{
     quote: z.ZodOptional<z.ZodCustom<ValidatedRelayQuote, ValidatedRelayQuote>>;
     nativeQuote: z.ZodOptional<z.ZodCustom<ValidatedRelayNativeQuote, ValidatedRelayNativeQuote>>;
     arbitrumDraft: z.ZodOptional<z.ZodCustom<RelayArbitrumSourceDraft, RelayArbitrumSourceDraft>>;
+    tokenQuote: z.ZodOptional<z.ZodCustom<ValidatedRelayTokenQuote, ValidatedRelayTokenQuote>>;
     policyDigest: z.ZodOptional<z.ZodString>;
     policyRevision: z.ZodOptional<z.ZodNumber>;
     policyActivationDigest: z.ZodOptional<z.ZodString>;
@@ -43,8 +45,8 @@ declare const schema: z.ZodObject<{
     operationId: z.ZodString;
     idempotencyHash: z.ZodString;
     requestHash: z.ZodString;
-    sourceChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
-    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<143>, z.ZodLiteral<4326>, z.ZodLiteral<8453>]>;
+    sourceChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<143>, z.ZodLiteral<4326>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
     sourceAccount: z.ZodString;
     recipient: z.ZodString;
     quoteDigest: z.ZodString;
@@ -55,6 +57,7 @@ declare const schema: z.ZodObject<{
     quote: z.ZodOptional<z.ZodCustom<ValidatedRelayQuote, ValidatedRelayQuote>>;
     nativeQuote: z.ZodOptional<z.ZodCustom<ValidatedRelayNativeQuote, ValidatedRelayNativeQuote>>;
     arbitrumDraft: z.ZodOptional<z.ZodCustom<RelayArbitrumSourceDraft, RelayArbitrumSourceDraft>>;
+    tokenQuote: z.ZodOptional<z.ZodCustom<ValidatedRelayTokenQuote, ValidatedRelayTokenQuote>>;
     policyDigest: z.ZodOptional<z.ZodString>;
     policyRevision: z.ZodOptional<z.ZodNumber>;
     policyActivationDigest: z.ZodOptional<z.ZodString>;
@@ -79,8 +82,9 @@ declare const retirementSchema: z.ZodObject<{
 export type RelayRetirement = z.infer<typeof retirementSchema>;
 export declare function validateRelayUnsignedOperation(value: unknown): RelayUnsignedOperation;
 export declare function freezeRelayUnsignedOperation(input: RelayUnsignedOperationInput): RelayUnsignedOperation;
-export type PublicRelayUnsignedOperation = Omit<RelayUnsignedOperation, "integrityHash" | "statusLocator" | "quote" | "nativeQuote" | "arbitrumDraft" | "state" | "terminal"> & {
+export type PublicRelayUnsignedOperation = Omit<RelayUnsignedOperation, "integrityHash" | "statusLocator" | "quote" | "nativeQuote" | "arbitrumDraft" | "tokenQuote" | "state" | "terminal"> & {
     readonly quote?: Omit<ValidatedRelayQuote, "statusLocator">;
+    readonly tokenQuote?: Omit<ValidatedRelayTokenQuote, "statusLocator">;
     readonly nativeQuote?: Omit<ValidatedRelayNativeQuote, "statusLocator">;
     readonly arbitrumSource?: Readonly<{
         readonly orderId: string;
@@ -113,6 +117,8 @@ export declare class RelayRetirementRepository extends SecureStateStore {
 }
 export declare class RelayUnsignedOperationRepository extends SecureStateStore {
     private verifyArbitrumDraft;
+    /** A saved token quote still recomputes its order id and recovers the Relay solver's signature. */
+    private verifyTokenQuote;
     loadOperation(profileHash: string, operationId: string): Promise<RelayUnsignedOperation | null>;
     findOperation(operationId: string): Promise<RelayUnsignedOperation | null>;
     listOperations(profileHash: string): Promise<readonly RelayUnsignedOperation[]>;

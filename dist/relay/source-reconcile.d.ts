@@ -1,3 +1,4 @@
+/** Idempotent reconciliation of a finality-proven Relay ERC-20 deposit (Ethereum USDC or a token route); no signer or sender is reachable. */
 import { type AssetUsageLedger } from "../asset-usage-ledger.js";
 import type { RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";

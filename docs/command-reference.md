@@ -26,7 +26,7 @@ apn x402 merchant approve --operation <operation-id>
 apn x402 merchant observe --operation <operation-id> [--deliver]
 apn x402 merchant retire-unsent --operation <operation-id>
 apn x402 merchant status --operation <operation-id>
-apn relay prepare --profile <profile> --source-chain <caip2> --asset <usdc|native> --destination-chain <caip2> --recipient <address> --amount-atomic <source-atomic> --min-output-atomic <destination-atomic> --max-deposit-network-fee-wei <wei> [--max-approval-network-fee-wei <wei>] [--payer <address> --max-provider-fee-atomic <usdc> --quote-file <absolute-json-path>] --idempotency-key <key>
+apn relay prepare --profile <profile> --source-chain <caip2> --asset <usdc|usdt|native> --destination-chain <caip2> [--destination-asset <usdc|usdt>] --recipient <address> --amount-atomic <source-atomic> --min-output-atomic <destination-atomic> --max-deposit-network-fee-wei <wei> [--max-approval-network-fee-wei <wei>] [--payer <address> --max-provider-fee-atomic <usdc> --quote-file <absolute-json-path>] --idempotency-key <key>
 apn relay execute --profile <profile> --operation <operation-id> --rpc-url <source-rpc>
 apn relay observe --profile <profile> --operation <operation-id> --rpc-url <source-rpc> [--destination-rpc-url <destination-rpc>]
 apn relay retire --profile <profile> --operation <operation-id>
@@ -116,9 +116,9 @@ apn gasless usdt execute --profile-hash <hash> --operation <operation-id>
 apn gasless usdt execution-status --profile-hash <hash> --operation <operation-id>
 apn gasless usdt observe --profile-hash <hash> --operation <operation-id>
 apn gasless capabilities [--profile <profile>]
-apn gasless balance --profile <profile> --chain <chain-id>
+apn gasless balance --profile <profile> --chain <chain-id> [--asset <token-contract>]
 apn gasless transfer quote --profile <profile> --chain 1 --owner <address> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --rpc-url <public-ethereum-rpc> [--rpc-max-batch-items <2-30>]
-apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> (--amount <gross-USDC> --max-fee <USDC> --min-received <USDC> | --net-amount-atomic <net> --max-gross-atomic <gross-cap> --max-fee-atomic <fee-cap>) --idempotency-key <key>
+apn gasless transfer prepare --profile <profile> --chain <chain-id> [--asset <token-contract>] --to <address> (--amount <gross-USDC> --max-fee <USDC> --min-received <USDC> | --net-amount-atomic <net> --max-gross-atomic <gross-cap> --max-fee-atomic <fee-cap>) --idempotency-key <key>
 apn gasless transfer approve --operation <operation-id>
 apn gasless transfer revoke --operation <operation-id>
 apn gasless transfer approve-sealed --operation <operation-id>
@@ -142,6 +142,12 @@ apn swap ethereum uniswap-token status --operation <operation_id>
 apn swap ethereum uniswap-token approve --operation <operation_id>
 apn swap ethereum uniswap-token execute --operation <operation_id>
 apn swap ethereum uniswap-token cleanup --operation <operation_id> [--max-fee-per-gas <wei>] [--max-priority-fee-per-gas <wei>]
+apn swap bnb uniswap inventory
+apn swap bnb uniswap quote --profile <profile> --account <address> --to <address> --output-token <address> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --deadline <string> --max-gas-limit <wei> --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>
+apn swap bnb uniswap prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
+apn swap bnb uniswap status --operation <operation_id>
+apn swap bnb uniswap approve --operation <operation_id>
+apn swap bnb uniswap execute --operation <operation_id>
 apn swap tron sunswap inventory
 apn swap tron sunswap quote --profile <profile> --account <string> --to <string> --amount <sun> --slippage-bps <string> --owner-slippage-cap-bps <string> --fee-limit-sun <sun> --deadline <string>
 apn swap tron sunswap prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>

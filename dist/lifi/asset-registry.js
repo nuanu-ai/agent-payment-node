@@ -1,5 +1,5 @@
 import { getAddress } from "viem";
-import { BRIDGE_CHAIN_IDS, BRIDGE_EXECUTION_CHAIN_IDS, BRIDGE_EXECUTION_SOURCE_CHAIN_IDS } from "./chains.js";
+import { BRIDGE_CHAIN_IDS, BRIDGE_EXECUTION_CHAIN_IDS, BRIDGE_EXECUTION_SOURCE_CHAIN_IDS, BRIDGE_TOKEN_SOURCE_CHAIN_IDS } from "./chains.js";
 import { assertBridgeRegistryListed, bridgeTokenListed } from "./asset-listing.js";
 import { BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeExact, bridgeFailure, bridgeUint } from "./validation.js";
 /**
@@ -56,7 +56,7 @@ const NATIVE_STARGATE_BASE = { assetId: 13,
         "0x12dc9256acc9895b076f6638d628382881e62cee", BRIDGE_ZERO_ADDRESS]) };
 const USDC_ETHEREUM = {
     kind: "erc20", chainId: 1, address: getAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
-    symbol: "USDC", coinKey: "USDC", pairKey: "usdc", decimals: 6, acrossSupported: true, peers: [8453, 42161],
+    symbol: "USDC", coinKey: "USDC", pairKey: "usdc", decimals: 6, acrossSupported: true, peers: [56, 8453, 42161],
     approval: "standard", transferFee: "none", listing: "frozen_list",
     code: { upgradeability: "legacy_proxy", codeHash: "0xd80d4b7c890cb9d6a4893e6b52bc34b56b25335cb13716e0d1d31383e6b41505",
         implementation: getAddress("0x43506849d7c04f9138d1a2050bbf3a0c054402dd"),
@@ -70,7 +70,7 @@ const USDC_ETHEREUM = {
 };
 const USDC_BASE = {
     kind: "erc20", chainId: 8453, address: getAddress("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
-    symbol: "USDC", coinKey: "USDC", pairKey: "usdc", decimals: 6, acrossSupported: true, peers: [1, 42161],
+    symbol: "USDC", coinKey: "USDC", pairKey: "usdc", decimals: 6, acrossSupported: true, peers: [1, 56, 42161],
     approval: "standard", transferFee: "none", listing: "frozen_list",
     code: { upgradeability: "legacy_proxy", codeHash: "0xa6705a10bb756b5dea144591118be77d7af0c3eee3bf2dfe2583dcb0364fefab",
         implementation: getAddress("0x2ce6311ddae708829bc0784c967b7d77d19fd779"),
@@ -84,7 +84,7 @@ const USDC_BASE = {
 };
 const USDC_ARBITRUM = {
     kind: "erc20", chainId: 42161, address: getAddress("0xaf88d065e77c8cC2239327C5EDb3A432268e5831"),
-    symbol: "USDC", coinKey: "USDC", pairKey: "usdc", decimals: 6, acrossSupported: true, peers: [1, 8453],
+    symbol: "USDC", coinKey: "USDC", pairKey: "usdc", decimals: 6, acrossSupported: true, peers: [1, 56, 8453],
     approval: "standard", transferFee: "none", listing: "frozen_list",
     code: { upgradeability: "legacy_proxy", codeHash: "0xad30d819dbc47814b7e6cb837fd7cc57fcb591479a38596ee93de4fc52e8c435",
         implementation: getAddress("0x86e721b43d4ecfa71119dd38c0f938a75fdb57b3"),
@@ -115,20 +115,42 @@ const WBTC_ARBITRUM = {
 };
 /**
  * Tether on Ethereum, the list's only USDT deployment on these chains. The frozen list pins no USDT on Base or
- * Arbitrum One, so the row has no peer and every USDT route is refused until the list names a destination.
+ * Arbitrum One; its one peer is the Binance-Peg USDT of BNB Smart Chain, over Across only.
  * The code hash, a zero `basisPointsRate`, a zero `maximumFee` and `deprecated() == false` were read at a safe block.
  */
 const USDT_ETHEREUM = {
     kind: "erc20", chainId: 1, address: getAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7"),
-    symbol: "USDT", coinKey: "USDT", pairKey: "usdt", decimals: 6, acrossSupported: true, stargate: null, peers: [],
+    symbol: "USDT", coinKey: "USDT", pairKey: "usdt", decimals: 6, acrossSupported: true, stargate: null, peers: [56],
     approval: "zero_first", transferFee: "tether_fee_zero", listing: "frozen_list",
     code: { upgradeability: "immutable", codeHash: "0xb44fb4e949d0f78f87f79ee46428f23a2a5713ce6fc6e0beb3dda78c2ac1ea55" },
+};
+/**
+ * The owner-admitted Binance-Peg USDT and USDC of BNB Smart Chain (2026-11-23), 18 decimals each where their peers
+ * carry 6. Read at BSC block 135272274 (0x22b96d9b…47ab): `decimals() == 18`, the code hashes, and the USDC proxy's
+ * EIP-1967 implementation and admin slots (the admin is an EOA). Sourcify full matches (BEP20USDT, BEP20TokenImplementation)
+ * show exact-amount `_transfer`, an `approve` that overwrites and returns true, and no fee, pause or blacklist.
+ * Across only: no Stargate pool of these tokens is reviewed, so `stargateV2` rows stay `asset_tool_unreviewed`.
+ */
+const USDC_BSC = {
+    kind: "erc20", chainId: 56, address: getAddress("0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"),
+    symbol: "USDC", coinKey: "USDC", pairKey: "usdc", decimals: 18, acrossSupported: true, stargate: null, peers: [1, 8453, 42161],
+    approval: "standard", transferFee: "none", listing: "reviewed_supplement",
+    code: { upgradeability: "eip1967_proxy", codeHash: "0x56069ff2fd59ae482f7984aa894b6d3bc84cb910354dcda9cd6c828d61526914",
+        implementation: getAddress("0xba5fe23f8a3a24bed3236f05f2fcf35fd0bf0b5c"),
+        implementationCodeHash: "0xd2d7cf7504e1cb572af28476d45907fc30bee1297917bed153e6fbba125821a3",
+        admin: getAddress("0xd2f93484f2d319194cba95c5171b18c1d8cfd6c4") },
+};
+const USDT_BSC = {
+    kind: "erc20", chainId: 56, address: getAddress("0x55d398326f99059fF775485246999027B3197955"),
+    symbol: "USDT", coinKey: "USDT", pairKey: "usdt", decimals: 18, acrossSupported: true, stargate: null, peers: [1],
+    approval: "standard", transferFee: "none", listing: "reviewed_supplement",
+    code: { upgradeability: "immutable", codeHash: "0x97a48aa4c129657440dafdacd4c836389734d28cc4a0ca7403e68da660a74a59" },
 };
 export const BRIDGE_ASSET_REGISTRY = {
     1: { chainId: 1, name: "Ethereum", caip2: "eip155:1", rpcEnvironment: "APN_ETHEREUM_RPC_URL",
         nativeCoin: native(1, "ETH", [56, 143, 8453, 42161, 59144], WRAPPED_NATIVE[1]), tokens: [USDC_ETHEREUM, USDT_ETHEREUM, WBTC_ETHEREUM] },
     56: { chainId: 56, name: "BNB Smart Chain", caip2: "eip155:56", rpcEnvironment: "APN_BNB_RPC_URL",
-        nativeCoin: native(56, "BNB", [1], WRAPPED_NATIVE[56]), tokens: [] },
+        nativeCoin: native(56, "BNB", [1], WRAPPED_NATIVE[56]), tokens: [USDC_BSC, USDT_BSC] },
     143: { chainId: 143, name: "Monad", caip2: "eip155:143", rpcEnvironment: "APN_MONAD_RPC_URL",
         nativeCoin: native(143, "MON", [1], WRAPPED_NATIVE[143]), tokens: [] },
     8453: { chainId: 8453, name: "Base", caip2: "eip155:8453", rpcEnvironment: "APN_BASE_RPC_URL",
@@ -178,8 +200,14 @@ export function bridgeExecutionDestination(value) {
 export function bridgeExecutionSource(value) {
     return typeof value === "number" && BRIDGE_EXECUTION_SOURCE_CHAIN_IDS.includes(value);
 }
-export function bridgeExecutionSourceCaip2(value) {
-    return typeof value === "string" && BRIDGE_EXECUTION_SOURCE_CHAIN_IDS.some((chainId) => value === `eip155:${chainId}`);
+/** A source leg with that path: any leg of a full source chain, or a token row of a token-only source chain (BSC). */
+export function bridgeExecutionSourceLeg(chainId, token) {
+    return bridgeExecutionSource(chainId) || (typeof chainId === "number" && token !== BRIDGE_ZERO_ADDRESS &&
+        BRIDGE_TOKEN_SOURCE_CHAIN_IDS.includes(chainId));
+}
+export function bridgeExecutionSourceCaip2(value, kind) {
+    return typeof value === "string" && (BRIDGE_EXECUTION_SOURCE_CHAIN_IDS.some((chainId) => value === `eip155:${chainId}`) ||
+        (kind === "token" && BRIDGE_TOKEN_SOURCE_CHAIN_IDS.some((chainId) => value === `eip155:${chainId}`)));
 }
 export function bridgeChainRow(value, code = "APN_PROVIDER_PROTOCOL") {
     return BRIDGE_ASSET_REGISTRY[bridgeChain(value, code)];
@@ -230,7 +258,10 @@ export function bridgeProviderBoundNativeDestination(request) {
     return request.fromChainId === 1 && (request.toChainId === 56 || request.toChainId === 143 || request.toChainId === 59144) &&
         request.fromToken === BRIDGE_ZERO_ADDRESS && request.toToken === BRIDGE_ZERO_ADDRESS;
 }
-/** Both legs must share a pair key, decimals and each other's chain as a peer: native pairs with native, a token with its own. */
+/**
+ * Both legs must share a pair key, decimals (or form the reviewed scaled pair) and each other's chain as a peer: native
+ * pairs with native, a token with its own.
+ */
 export function bridgeAssetPair(request, code = "APN_PROVIDER_PROTOCOL") {
     const from = bridgeAssetRow(request.fromChainId, request.fromToken, code);
     const to = bridgeAssetRow(request.toChainId, request.toToken, code);
@@ -249,16 +280,39 @@ export function bridgeAssetPair(request, code = "APN_PROVIDER_PROTOCOL") {
     if (from.peers.length === 0)
         bridgeFailure(code, "asset_has_no_listed_peer");
     const conversion = bridgeNativeDenominationConversion(request);
-    if (from.chainId === to.chainId || from.kind !== to.kind || (!conversion && from.pairKey !== to.pairKey) || from.decimals !== to.decimals ||
+    if (from.chainId === to.chainId || from.kind !== to.kind || (!conversion && from.pairKey !== to.pairKey) ||
+        (from.decimals !== to.decimals && !bridgeScaledPair(from, to)) ||
         !from.peers.includes(to.chainId) || !to.peers.includes(from.chainId))
         bridgeFailure(code, "admitted_asset_pair");
     return { from, to };
+}
+/**
+ * The one reviewed pair whose legs carry different decimals: a Binance-Peg row of BNB Smart Chain (18) and the same pair
+ * key's frozen-list row (6) on a peer chain. It is the same value at two precisions, never a conversion between assets.
+ */
+export function bridgeScaledPair(a, b) {
+    const peg = (x, y) => x.kind === "erc20" && y.kind === "erc20" && x.listing === "reviewed_supplement" &&
+        x.chainId === 56 && x.decimals === 18 && y.listing === "frozen_list" && y.chainId !== 56 && y.decimals === 6;
+    return a.pairKey === b.pairKey && (peg(a, b) || peg(b, a));
+}
+/**
+ * The factors that bring each leg's atomic amount to the finer precision of the two: 1 and 1 when the decimals match,
+ * otherwise 10^12 on the 6-decimal leg of a scaled pair. Any other decimals mismatch is refused.
+ */
+export function bridgeLegScale(from, to, code = "APN_PROVIDER_PROTOCOL") {
+    if (from.decimals === to.decimals)
+        return { source: 1n, destination: 1n };
+    if (!bridgeScaledPair(from, to))
+        bridgeFailure(code, "admitted_asset_pair");
+    const finer = Math.max(from.decimals, to.decimals);
+    return { source: 10n ** BigInt(finer - from.decimals), destination: 10n ** BigInt(finer - to.decimals) };
 }
 /** The peer chain's row for the same pair key, which is what a cross-chain tool pin and a route pair must agree on. */
 export function bridgePeerToken(asset, peerChainId, code = "APN_PROVIDER_CAPABILITY_UNAVAILABLE") {
     if (!asset.peers.includes(peerChainId))
         bridgeFailure(code, "finite_chain");
-    const row = bridgeChainRow(peerChainId, code).tokens.find((entry) => entry.pairKey === asset.pairKey && entry.decimals === asset.decimals);
+    const row = bridgeChainRow(peerChainId, code).tokens.find((entry) => entry.pairKey === asset.pairKey &&
+        (entry.decimals === asset.decimals || bridgeScaledPair(asset, entry)));
     if (row === undefined)
         bridgeFailure(code, "asset_peer_not_admitted");
     return row;
@@ -298,7 +352,10 @@ export function validateBridgeRequest(value, code = "APN_INVALID_INPUT") {
     const amount = bridgeUint(r.amountAtomic, true, code), minimum = bridgeUint(r.minOutputAtomic, true, code);
     bridgeUint(r.maxNativeDebitWei, true, code);
     bridgeUint(r.maxRouteFeeAtomic, false, code);
-    if ((!bridgeNativeDenominationConversion(r) && minimum > amount) || typeof r.slippageBps !== "number" || !Number.isInteger(r.slippageBps) ||
+    // The owner floor is in destination units: a scaled pair compares both legs at the finer precision.
+    const scale = bridgeLegScale(pair.from, pair.to, code);
+    if ((!bridgeNativeDenominationConversion(r) && minimum * scale.destination > amount * scale.source) ||
+        typeof r.slippageBps !== "number" || !Number.isInteger(r.slippageBps) ||
         r.slippageBps < 0 || r.slippageBps > 1000)
         bridgeFailure(code, "output_or_slippage");
     return r;

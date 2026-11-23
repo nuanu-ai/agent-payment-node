@@ -1,7 +1,8 @@
 import { hashObject } from "../canonical.js";
 import type { Address, Hex } from "../model.js";
-import type { MetaMaskGaslessBinding, MetaMaskGaslessChainId, MetaMaskGaslessCursor, MetaMaskGaslessIntent,
+import type { MetaMaskGaslessBinding, MetaMaskGaslessChainId, MetaMaskGaslessCursor, MetaMaskGaslessDecimals, MetaMaskGaslessIntent,
   MetaMaskGaslessMutable, MetaMaskGaslessSettlement, MetaMaskGaslessState } from "./model.js";
+import type { MetaMaskGaslessSymbol } from "./registry.js";
 import type { MetaMaskGaslessReason } from "./reasons.js";
 
 export const MM_OPERATION_VERSION = "apn.metamask-gasless-operation.v1" as const;
@@ -65,7 +66,7 @@ export interface MetaMaskGaslessPublicOperation {
   readonly reason: MetaMaskGaslessReason;
   readonly proof_class: "durable_pre_effect" | "effect_observation_pending" | "rpc_safe_correlated" | "rpc_finalized_correlated" | "owner_acknowledgement_only";
   readonly transfer: {
-    readonly chain_id: MetaMaskGaslessChainId; readonly token: Address; readonly symbol: "USDC"; readonly decimals: 6;
+    readonly chain_id: MetaMaskGaslessChainId; readonly token: Address; readonly symbol: MetaMaskGaslessSymbol; readonly decimals: MetaMaskGaslessDecimals;
     readonly sender: Address; readonly recipient: Address; readonly fee_recipient: Address | null;
     readonly fee_mode?: "sponsored";
     readonly requested_fixed_net_atomic?: string; readonly maximum_gross_atomic?: string;

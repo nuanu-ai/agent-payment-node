@@ -1,6 +1,7 @@
 import { ApnError } from "../../../errors.js";
 import { evmRpcBlock, evmRpcHex, evmRpcQuantity, recheckEvmBlock } from "../../../evm-rpc-codec.js";
 import { validateSwapOperation } from "../../model.js";
+import { uniswapNativeLaneOf } from "../../uniswap-v3/native-lane.js";
 /**
  * Pre-signing guard at the current head: pinned code unchanged, no pending transaction from the account (the next
  * nonce is exact), the owner's fee cap covers base fee plus tip, the balance covers value plus the maximum fee, and
@@ -17,8 +18,12 @@ export class UniswapExecutionGuard {
     }
     async inspect(operationValue, envelope) {
         const operation = validateSwapOperation(operationValue), account = operation.quote.account;
-        if (evmRpcQuantity(await this.call("eth_chainId", [])) !== 1n)
-            throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap execution requires exact Ethereum chain 1 RPC.");
+        const lane = uniswapNativeLaneOf(operation.quote.sourceAsset.chain);
+        if (lane === undefined)
+            blocked("Uniswap execution names no native-input lane.", "uniswap_envelope_binding");
+        if (evmRpcQuantity(await this.call("eth_chainId", [])) !== BigInt(lane.chainId)) {
+            throw new ApnError("APN_CHAIN_MISMATCH", `Uniswap execution requires exact ${lane.networkName} chain ${lane.chainId} RPC.`);
+        }
         const head = await evmRpcBlock(this.call, "latest"), baseFee = evmRpcQuantity(head.raw.baseFeePerGas);
         await this.verifyPins(this.call, head.tag);
         const [latest, pending, balance] = await Promise.all([
@@ -41,7 +46,7 @@ export class UniswapExecutionGuard {
             blocked("The exact swap would revert at the current head.", "uniswap_presend_simulation");
         }
         await recheckEvmBlock(this.call, head);
-        return { chainId: 1, account, nonce: nonce.toString(), gasLimit: envelope.gasLimit, maxFeePerGas: maxFee.toString(),
+        return { chainId: lane.chainId, account, nonce: nonce.toString(), gasLimit: envelope.gasLimit, maxFeePerGas: maxFee.toString(),
             maxPriorityFeePerGas: priority.toString(), simulationBlockNumber: operation.quote.simulation.blockNumber,
             simulationBlockHash: operation.quote.simulation.blockHash, headBlockNumber: head.number, headBlockHash: head.hash,
             checkedAt: this.clock.now().toISOString() };

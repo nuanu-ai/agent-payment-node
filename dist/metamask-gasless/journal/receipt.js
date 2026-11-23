@@ -5,7 +5,7 @@ import { mmRequestIdHash } from "../identity.js";
 import { MM_RECEIPT_VERSION } from "../operation-model.js";
 import { mmFail } from "../reasons.js";
 import { MM_CLOSED_PROVIDER_STATUSES } from "../model.js";
-import { mmRegistry } from "../registry.js";
+import { mmChainFacts, mmTokenSymbol } from "../registry.js";
 import { mmExact, mmHash, mmSame } from "../validation.js";
 import { metaMaskGaslessAtTransition } from "./transitions.js";
 import { validateMetaMaskGaslessOperation } from "./validation.js";
@@ -67,7 +67,7 @@ export function metaMaskGaslessProofClass(operation) {
     if (op.state === "abandoned_unknown")
         return "owner_acknowledgement_only";
     if (op.state === "completed" || op.state === "revoked_unused")
-        return mmRegistry(op.intent.request.chainId).row.finalityTag === "finalized"
+        return mmChainFacts(op.intent.request.chainId).finalityTag === "finalized"
             ? "rpc_finalized_correlated" : "rpc_safe_correlated";
     return op.submissionAttempts === 1 ? "effect_observation_pending" : "durable_pre_effect";
 }
@@ -84,7 +84,7 @@ export function publicMetaMaskGaslessOperation(operation, legacyNextActions = fa
         reason: op.failure?.reason ?? (op.state === "completed" ? "mm_gasless_success" :
             op.state === "awaiting_approval" ? "mm_gasless_approval" : "mm_gasless_pending"),
         proof_class: metaMaskGaslessProofClass(op),
-        transfer: { chain_id: intent.request.chainId, token: intent.token, symbol: "USDC", decimals: 6,
+        transfer: { chain_id: intent.request.chainId, token: intent.token, symbol: mmTokenSymbol(intent.token), decimals: intent.decimals,
             sender: intent.binding.address, recipient: intent.request.recipient, fee_recipient: intent.quote.feeRecipient,
             ...(intent.quote.feeMode === "sponsored" ? { fee_mode: intent.quote.feeMode } : {}),
             ...(intent.request.fixedNet ? { requested_fixed_net_atomic: intent.request.fixedNet.netAtomic,

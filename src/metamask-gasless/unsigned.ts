@@ -3,7 +3,7 @@ import type { Hex } from "../model.js";
 import type { MetaMaskGaslessCaveat, MetaMaskGaslessUnsignedResult } from "./model.js";
 import type { MetaMaskGaslessUnsignedInput } from "./ports.js";
 import { MM_SINGLE_ENFORCER } from "./single-protocol.js";
-import { mmRegistry } from "./registry.js";
+import { mmChainFacts } from "./registry.js";
 import { mmFail, type MetaMaskGaslessFailureReason } from "./reasons.js";
 import { mmCanonicalAddress, mmExact, mmHex, mmUint } from "./validation.js";
 
@@ -43,7 +43,7 @@ export function mmValidateUnsigned(value: unknown, input: MetaMaskGaslessUnsigne
   reason: MetaMaskGaslessFailureReason = "mm_gasless_quote_invalid"): MetaMaskGaslessUnsignedResult {
   const result = mmExact(value, ["unsignedDelegation", "delegationHash", "signingDigest", "relayTo", "mode"], reason);
   const d = mmExact(result.unsignedDelegation, ["delegator", "delegate", "authority", "salt", "caveats"], reason);
-  const protocol = (input.deployment ?? mmRegistry(input.chainId).row).protocol;
+  const protocol = (input.deployment ?? mmChainFacts(input.chainId)).protocol;
   const manager = protocol.manager?.address ?? mmFail(reason), limitedCalls = protocol.limitedCalls?.address ?? mmFail(reason);
   const batch = input.feeMode === "sponsored" ? MM_SINGLE_ENFORCER.address : protocol.exactBatch?.address ?? mmFail(reason);
   if (mmCanonicalAddress(d.delegator, reason) !== input.owner || d.delegate !== MM_ANY_BENEFICIARY ||

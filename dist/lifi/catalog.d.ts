@@ -26,7 +26,7 @@ export declare function bridgeCapabilities(profile?: string): {
             tools: string[];
             approval: "standard" | "zero_first";
             transfer_fee: "none" | "tether_fee_zero";
-            listing: "frozen_list" | "legacy_pinned";
+            listing: "frozen_list" | "legacy_pinned" | "reviewed_supplement";
             peers: string[];
         }[];
     }[];
@@ -155,7 +155,7 @@ export declare function bridgeInventory(responses: Readonly<Record<"chains" | "t
                 tools: string[];
                 approval: "standard" | "zero_first";
                 transfer_fee: "none" | "tether_fee_zero";
-                listing: "frozen_list" | "legacy_pinned";
+                listing: "frozen_list" | "legacy_pinned" | "reviewed_supplement";
                 peers: string[];
             }[];
         }[];

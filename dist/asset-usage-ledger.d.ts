@@ -12,6 +12,8 @@ export declare class AssetUsageLedger extends SecureStateStore {
     /** Relay and this ledger hash idempotency keys in separate domains. Hold the
      * exact source asset bucket lock through the caller's retirement write. */
     withNoMatchingRelayReservation<T>(account: string, policyDigest: string | undefined, amountAtomic: string, action: () => Promise<T>, sourceChainId?: 1 | 56 | 8453, allowFailedBeforeEffectReservationId?: string): Promise<T>;
+    /** The same guard over an explicit source bucket (a Relay token route's own chain and source token). */
+    withNoMatchingRelayReservationIn<T>(bucket: AssetUsageIdentity, policyDigest: string | undefined, amountAtomic: string, action: () => Promise<T>, allowFailedBeforeEffectReservationId?: string): Promise<T>;
     reserve(input: AssetUsageReserveInput): Promise<AssetUsageReservation>;
     /** Local x402 runs under its profile x402 policy, not an allowlist registry. That policy's only cap is the
      * per-request one; the reservation makes the spend count in this bucket's shared daily usage for every rail. */

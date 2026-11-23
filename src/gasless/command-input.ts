@@ -2,7 +2,7 @@ import type { GaslessRequest } from "./model.js";
 import { GASLESS_ZERO_ADDRESS, gaslessAddress, gaslessFailure, gaslessUint } from "./validation.js";
 
 /** Shared command surface only; each provider retains its own strict persisted schema. */
-export const GASLESS_COMMAND_CHAINS = [1, 10, 130, 137, 143, 1329, 8453, 42161, 43114, 59144] as const;
+export const GASLESS_COMMAND_CHAINS = [1, 10, 56, 130, 137, 143, 1329, 8453, 42161, 43114, 59144] as const;
 export type GaslessCommandChainId = typeof GASLESS_COMMAND_CHAINS[number];
 export type GaslessCommandRequest = Omit<GaslessRequest, "chainId"> & { readonly chainId: GaslessCommandChainId; readonly fixedNet?: { readonly netAtomic: string; readonly maxGrossAtomic: string } };
 export function gaslessCommandChain(value: number): GaslessCommandChainId {

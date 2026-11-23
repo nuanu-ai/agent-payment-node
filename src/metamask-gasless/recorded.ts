@@ -27,14 +27,15 @@ export function mmRecordedDeployment(intent: MetaMaskGaslessIntent): MmDeploymen
  * The deployment an observation proves against: the token, manager and enforcer addresses this record froze, with the
  * code pins its own prepare snapshot read. A pin change in a later release refuses new prepares only; an operation sent
  * before it is still proven against what it was sent with. Chain facts (finality tag) and the 7702 delegate address,
- * which a record without a designation at prepare does not hold, come from the registry row of the chain.
+ * which a record without a designation at prepare does not hold, come from the registry row of the chain
+ * (`mmRecordRegistry`: on chain 56, the row of the record's own token); the token scale comes from the record.
  */
 export function mmObservedDeployment(intent: MetaMaskGaslessIntent, chain: MetaMaskGaslessDeployment): MetaMaskGaslessDeployment {
   const recorded = mmRecordedDeployment(intent), pins = intent.initialSnapshot.safeState;
   const code = pins.protocolCodeHashes as Readonly<Record<string, `0x${string}`>>;
   const pin = (name: MetaMaskGaslessProtocolName, address: Address) =>
     ({ address, codeHash: code[name] ?? mmFail("mm_gasless_state_corrupt") });
-  return { deploymentEvidenceHash: intent.deploymentEvidenceHash, row: { ...chain.row, token: recorded.token,
+  return { deploymentEvidenceHash: intent.deploymentEvidenceHash, row: { ...chain.row, token: recorded.token, decimals: intent.decimals,
     tokenProxyCodeHash: pins.tokenProxyCodeHash, tokenImplementationAddress: pins.tokenImplementationAddress,
     tokenImplementationCodeHash: pins.tokenImplementationCodeHash,
     protocol: { manager: pin("manager", recorded.protocol.manager!.address),

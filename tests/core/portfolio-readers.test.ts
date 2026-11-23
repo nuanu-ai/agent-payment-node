@@ -145,12 +145,14 @@ async function fakeChains(): Promise<FakeChains> {
   return chains;
 }
 
-test("keyless full read: 11 Multicall3 batches, 1 Solana batch and 4 TRON calls — 18 RPC calls for 28 rows", async () => {
+test("keyless full read: 11 Multicall3 batches, 1 Solana batch and 4 TRON calls — 18 RPC calls for 30 rows", async () => {
   const chains = await fakeChains();
   const { data } = await portfolio(chains);
   assert.equal(data.rpc_calls_total, 18);
   assert.equal(chains.requests.length, 18);
-  assert.deepEqual(data.summary, { networks: 13, rows: 28, ok: 28, unavailable: 0, no_account: 0, rpc_not_configured: 0 });
+  assert.deepEqual(data.summary, { networks: 13, rows: 30, ok: 30, unavailable: 0, no_account: 0, rpc_not_configured: 0 });
+  // The Binance-Peg USDT and USDC of BNB Smart Chain (0.5.113 supplement) are read in the same Multicall3 batch, after BNB.
+  assert.deepEqual(net(data, "eip155:56").rows.map((row) => [row.symbol, row.status]), [["BNB", "ok"], ["USDT", "ok"], ["USDC", "ok"]]);
   for (const row of PORTFOLIO_NETWORK_RPC) {
     const entry = net(data, row.chain);
     assert.deepEqual(entry.endpoint, { source: "default_public", env: row.env, url: row.defaultEndpoint });
@@ -250,7 +252,8 @@ test("a Solana genesis mismatch is unavailable; profiles without Solana or TRON 
   assert.equal(data.rpc_calls_total, 13);
   const withSolana = await portfolio(chains, { rails: ["solana"], evmWallet: false });
   assert.deepEqual(net(withSolana.data, `solana:${SOLANA_GENESIS}`).rows.map((row) => row.reason), Array(3).fill("chain_mismatch"));
-  assert.equal(withSolana.data.summary.no_account, 23 + 2);
+  // 25 EVM rows (23 frozen rows plus the two Binance-Peg rows of BNB Smart Chain) and 2 TRON rows have no account.
+  assert.equal(withSolana.data.summary.no_account, 25 + 2);
 });
 
 test("a chain without a pinned Multicall3 is read with one plain JSON-RPC batch array", async () => {

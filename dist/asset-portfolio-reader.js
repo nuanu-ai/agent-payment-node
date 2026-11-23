@@ -29,13 +29,20 @@ export class AssetPortfolioReader {
     /** Reads every network of the frozen list concurrently; each network is one batch attempt plus bounded retries. */
     async read(input) {
         const accounts = portfolioAccounts(input.accounts);
-        const networks = await Promise.all(input.inventory.networks.map(async (network) => await this.readNetwork(network, input.inventory.assets.filter((asset) => asset.chain === network.chain), accounts[network.family], input.endpoint(network.chain), input)));
+        const networks = await Promise.all(input.inventory.networks.map(async (network) => {
+            const listed = input.inventory.assets.filter((asset) => asset.chain === network.chain);
+            if (listed.length === 0 || listed.length !== network.assetCount)
+                invalid("The frozen list network has no exact asset rows.");
+            const supplement = (input.supplements ?? []).filter((asset) => asset.chain === network.chain);
+            if (supplement.some((asset) => asset.family !== network.family || asset.kind !== "token" ||
+                listed.some((row) => row.kind === "token" && row.identifier === asset.identifier)))
+                invalid("A portfolio supplement row is invalid.");
+            return await this.readNetwork(network, [...listed, ...supplement], accounts[network.family], input.endpoint(network.chain), input);
+        }));
         return { datasetVersion: input.inventory.dataset.version, datasetSha256: input.inventory.dataset.sha256,
             rpcCallsTotal: networks.reduce((total, network) => total + network.rpcCalls, 0), networks };
     }
     async readNetwork(network, assets, account, endpoint, input) {
-        if (assets.length === 0 || assets.length !== network.assetCount)
-            invalid("The frozen list network has no exact asset rows.");
         const base = { chain: network.chain, name: network.name, family: network.family,
             account: account.kind === "account" ? account.address : null, endpoint: publicEndpoint(endpoint),
             mode: null, rpcCalls: 0, attempts: 0, methods: 0, retried: [], block: null, slot: null, observedAt: null };

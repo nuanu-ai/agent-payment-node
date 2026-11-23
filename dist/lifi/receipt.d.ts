@@ -143,6 +143,11 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
     provider_observation: import("./model.js").BridgeProviderObservation | null;
     residual_allowance: import("./model.js").BridgeResidualAllowance | null;
     asset_bounds?: {
+        scaled_precision?: {
+            finer_decimals: number;
+            token_loss_bound_source_atomic: string;
+            rounding: "loss_rounded_up_to_source_atomic";
+        };
         binding: "intent.materialization.request";
         same_denomination: boolean;
         source: {
@@ -400,6 +405,11 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
     provider_observation: import("./model.js").BridgeProviderObservation | null;
     residual_allowance: import("./model.js").BridgeResidualAllowance | null;
     asset_bounds?: {
+        scaled_precision?: {
+            finer_decimals: number;
+            token_loss_bound_source_atomic: string;
+            rounding: "loss_rounded_up_to_source_atomic";
+        };
         binding: "intent.materialization.request";
         same_denomination: boolean;
         source: {
