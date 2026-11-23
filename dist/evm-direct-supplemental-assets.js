@@ -1,5 +1,6 @@
 import { merchantPolicyAsset } from "./x402-merchant/pins.js";
 import { reviewedWbtcPolicyAsset } from "./canonical-wbtc-policy-assets.js";
+import { binancePegPolicyAsset } from "./binance-peg-policy-assets.js";
 import { getAddress } from "viem";
 import { resolveAllowlistAsset } from "./allowlist-inventory.js";
 /** Direct-transfer token identities outside the sealed market-cap inventory. */
@@ -20,7 +21,10 @@ export const DIRECT_EVM_SUPPLEMENTAL_ASSETS = SUPPLEMENTAL.map((entry) => ({
 export function directEvmSupplementalAsset(chain, identifier) {
     return DIRECT_EVM_SUPPLEMENTAL_ASSETS.find((row) => row.chain === chain && row.identifier === identifier);
 }
-/** Only a direct policy admission can resolve a supplemental identity. */
+/**
+ * A policy admission's asset: merchant pins and reviewed WBTC by their exact mechanism, the Binance-Peg USDT and USDC of
+ * BNB Smart Chain on any rail, the direct-only supplements on the direct rail only, and otherwise the frozen inventory.
+ */
 export function resolveDirectPolicyAsset(input, inventory) {
     const merchant = merchantPolicyAsset(input);
     if (merchant !== undefined)
@@ -28,6 +32,10 @@ export function resolveDirectPolicyAsset(input, inventory) {
     const wbtc = reviewedWbtcPolicyAsset(input);
     if (wbtc !== undefined)
         return wbtc;
+    // Binance-Peg USDT and USDC on BNB Smart Chain resolve on every rail; the rail's own checks still apply.
+    const peg = binancePegPolicyAsset(input.chain, input.kind, input.identifier);
+    if (peg !== undefined)
+        return peg;
     if (input.rail === "direct" && input.kind === "token" && input.identifier !== undefined && input.chain.startsWith("eip155:")) {
         let canonical;
         try {

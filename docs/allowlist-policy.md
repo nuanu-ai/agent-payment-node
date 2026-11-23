@@ -24,7 +24,11 @@ apn allowlist resolve --chain <exact-network-identity> --kind <native|token> [--
 ```
 
 `inventory` lists the frozen networks, asset identities, verified deployments, disabled rails, provenance and digests.
-`resolve` resolves one exact native or token identity, with no symbol or address fallback.
+`resolve` resolves one exact native or token identity, with no symbol or address fallback. It also resolves the
+reviewed supplement outside the frozen dataset: since 0.5.113 the Binance-Peg USDT
+(`0x55d398326f99059fF775485246999027B3197955`) and USDC (`0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d`) of BNB Smart
+Chain, 18 decimals, with `evidence.issuer` naming Binance. `inventory` still lists the frozen dataset only, so its
+digests, and every policy bound to them, stay as they were.
 
 `apn allowlist policy prepare` stages the older single-admission (v1) record from flags. Use `stage` for several
 admissions, several account families or swap pins.

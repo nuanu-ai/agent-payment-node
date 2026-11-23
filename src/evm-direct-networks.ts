@@ -1,6 +1,7 @@
 import { loadAllowlistInventory, type CandidateAsset } from "./allowlist-inventory.js";
 import { ApnError } from "./errors.js";
 import { DIRECT_EVM_SUPPLEMENTAL_ASSETS } from "./evm-direct-supplemental-assets.js";
+import { BINANCE_PEG_POLICY_ASSETS } from "./binance-peg-policy-assets.js";
 
 /**
  * How a network charges a direct transfer, beyond `gas limit x max fee per gas`:
@@ -90,7 +91,8 @@ export function directEvmRequiresSafeHead(chainId: DirectEvmChainId): boolean {
 }
 
 /**
- * Direct rows of one network: frozen native/token identities plus the three direct-only token deployments.
+ * Direct rows of one network: frozen native/token identities, the three direct-only token deployments and the
+ * Binance-Peg USDT and USDC of BNB Smart Chain.
  * The registry's native coin must agree with the frozen row, so a list revision cannot silently rename or re-scale it.
  */
 export function directEvmListRows(chainId: DirectEvmChainId): readonly CandidateAsset[] {
@@ -101,5 +103,6 @@ export function directEvmListRows(chainId: DirectEvmChainId): readonly Candidate
       rows.some((row) => row.family !== "evm")) {
     throw new ApnError("APN_STATE_CORRUPT", "The direct EVM network registry disagrees with the frozen allowlist.", { chain: selected.caip2 });
   }
-  return [...rows, ...DIRECT_EVM_SUPPLEMENTAL_ASSETS.filter((row) => row.chain === selected.caip2)];
+  return [...rows, ...DIRECT_EVM_SUPPLEMENTAL_ASSETS.filter((row) => row.chain === selected.caip2),
+    ...BINANCE_PEG_POLICY_ASSETS.filter((row) => row.chain === selected.caip2)];
 }

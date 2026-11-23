@@ -37,6 +37,7 @@ import { SmartAccountGaslessService } from "./smart-account-gasless/service.js";
 import { saRequest } from "./smart-account-gasless/schema.js";
 import { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
 import { loadAllowlistInventory, resolveAllowlistAsset } from "./allowlist-inventory.js";
+import { binancePegPolicyAsset } from "./binance-peg-policy-assets.js";
 import { executeAllowlistPolicyCommand } from "./allowlist-policy-command.js";
 import { executeUniswapCommand } from "./swap/uniswap-command-service.js";import { executeSunSwapCommand } from "./swap/sunswap-tron/command-service.js";import { executeJupiterCommand } from "./swap/jupiter-solana/command-service.js";import { executeOrcaCommand } from "./swap/orca-solana/command-service.js";
 export * from "./core-exports.js";
@@ -207,7 +208,7 @@ export class ApnCore {
       case "allowlist.inventory": return dataOutcome(loadAllowlistInventory(), "frozen_candidate_inventory");
       case "allowlist.resolve": return dataOutcome({
         dataset: loadAllowlistInventory().dataset,
-        asset: resolveAllowlistAsset(request),
+        asset: binancePegPolicyAsset(request.chain, request.kind, request.identifier) ?? resolveAllowlistAsset(request),
       }, "exact_candidate_identity");
       case "allowlist.policy.status": case "allowlist.policy.prepare": case "allowlist.policy.stage":
       case "allowlist.policy.activate": case "allowlist.policy.revoke": return await executeAllowlistPolicyCommand(request, this.context);
