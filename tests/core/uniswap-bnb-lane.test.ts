@@ -9,6 +9,7 @@ import { assetAdmitsSwapMechanism, swapRouteDigest, swapRouteOf } from "../../sr
 import { validateSwapQuote } from "../../src/swap/quote.js";
 import { UNISWAP_ROUTER, UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
 import { BnbUniswapQuoteBuilder } from "../../src/swap/uniswap-bnb/runtime-factory.js";
+import type { UniswapKeylessQuoteRequest } from "../../src/swap/uniswap-v3/builder.js";
 import { assertBnbPairMatchesAsset, BNB_UNISWAP_CODE_PINS, BNB_UNISWAP_MECHANISM_PIN, BNB_UNISWAP_PAIRS, BNB_UNISWAP_PROTOCOL_REGISTRY,
   BNB_UNISWAP_QUOTER_V2, BNB_UNISWAP_SWAP_ROUTER_02, BNB_UNISWAP_USDC_WBNB_500, BNB_UNISWAP_USDT_WBNB_500, BNB_UNISWAP_V3_FACTORY, BNB_USDC,
   BNB_USDT, BNB_WBNB, bnbUniswapPair, verifyBnbUniswapCodePins, verifyBnbUniswapMutablePins } from "../../src/swap/uniswap-bnb/pins.js";
@@ -20,7 +21,7 @@ import { BNB_AMOUNT_IN, BnbRpc } from "./uniswap-bnb-helpers.js";
 import { ACCOUNT, PROFILE } from "./uniswap-keyless-helpers.js";
 
 const NOW = new Date("2026-11-23T12:00:00.000Z"), DEADLINE = Math.floor(NOW.getTime() / 1000) + 900, noPins = async () => [];
-const REQUEST = { profile: PROFILE, account: ACCOUNT, recipient: ACCOUNT, outputToken: BNB_USDT, amountAtomic: BNB_AMOUNT_IN, slippageBps: 50,
+const REQUEST: UniswapKeylessQuoteRequest = { profile: PROFILE, account: ACCOUNT, recipient: ACCOUNT, outputToken: BNB_USDT, amountAtomic: BNB_AMOUNT_IN, slippageBps: 50,
   ownerSlippageCapBps: 100, deadline: DEADLINE, maxGasLimit: "300000", maxFeePerGas: "1000000000", maxPriorityFeePerGas: "100000000" };
 const ROUTER_ABI = parseAbi([
   "function multicall(uint256 deadline, bytes[] data) payable returns (bytes[] results)",
