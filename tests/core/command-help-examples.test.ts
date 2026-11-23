@@ -16,7 +16,7 @@ const FILL: Readonly<Record<string, string>> = {
   "<tron-address>": TRON, "<same-tron-address>": TRON, "<solana-address>": SOLANA, "<solana-recipient-address>": SOLANA,
   "<solana-address-of-the-profile>": SOLANA,
 };
-const FAMILIES = ["circle evm", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap bnb uniswap", "swap tron sunswap", "swap solana jupiter", "swap solana orca"];
+const FAMILIES = ["circle evm", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap bnb uniswap", "swap bnb uniswap-token", "swap tron sunswap", "swap solana jupiter", "swap solana orca"];
 const inFamilies = (path: readonly string[]) => FAMILIES.some(family => path.join(" ").startsWith(`${family} `));
 const filled = (example: string) => example.split(" ").slice(1).map(word => {
   if (!word.startsWith("<")) return word;
@@ -35,9 +35,9 @@ test("every help example is a --help discovery line or names every required opti
   assert.ok(checked >= COMMANDS.length - 2, `${checked} of ${COMMANDS.length}`);
 });
 
-test("Circle, Uniswap, Uniswap token, BNB Uniswap, SunSwap, Jupiter and Orca examples bind once their placeholders are filled", () => {
+test("Circle, Uniswap, Uniswap token, BNB Uniswap, BNB Uniswap token, SunSwap, Jupiter and Orca examples bind once their placeholders are filled", () => {
   const commands = COMMANDS.filter(command => inFamilies(command.path));
-  assert.equal(commands.length, 49, "38 formerly path-only examples, five inventories and the six BNB Uniswap commands");
+  assert.equal(commands.length, 56, "38 formerly path-only examples, five inventories, the six BNB Uniswap and the seven BNB Uniswap token commands");
   for (const command of commands) {
     const [example] = command.examples; assert.ok(example !== undefined);
     assert.doesNotThrow(() => bindArgv(filled(example)), example);
