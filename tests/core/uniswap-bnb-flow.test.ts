@@ -28,10 +28,12 @@ const bindingOf = async (root: string, operation: SwapOperationRecord) => await 
 const txHash = (rpc: BnbRpc): Hex => keccak256(rpc.sends[0]!);
 
 async function flow(root: string, options: { readonly typingMs?: number; readonly mechanism?: SwapAdmissionMechanism } = {}) {
-  let clockMs = Date.parse("2026-11-23T12:00:00.000Z"); const clock = { now: () => new Date(clockMs) }, start = clock.now();
+  // The terminal consent checks the quote deadline against the wall clock, so the test clock starts now.
+  let clockMs = Date.now(); const clock = { now: () => new Date(clockMs) }, start = clock.now();
   const deadline = Math.floor(start.getTime() / 1000) + 900, wrapping = new MemoryWrapping();
   const state = await keylessWallet(root, wrapping, new Date(start.getTime() - 3_600_000));
   const policy = bnbPolicy(start, new Date(deadline * 1000), options.mechanism ?? BNB_UNISWAP_MECHANISM_PIN), rpc = new BnbRpc();
+  rpc.timestamp = BigInt(Math.floor(start.getTime() / 1000));
   let printed = "";
   const terminal: NonNullable<TtyTransferApprovalOptions["openTerminal"]> = async () => ({ fd: 11, write: async (text: string) => { printed += text; },
     read: async function* () { clockMs += options.typingMs ?? 0; const code = /Type ([0-9a-f]{6}) and press Enter/u.exec(printed)?.[1] ?? "";
