@@ -234,9 +234,9 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_gasless_usdt_status", properties: ["profile_hash", "operation"], required: ["profile_hash", "operation"], defaults: {} },
       { name: "apn_gasless_usdt_resume", properties: ["profile_hash", "operation"], required: ["profile_hash", "operation"], defaults: {} },
       { name: "apn_gasless_capabilities", properties: ["profile"], required: [], defaults: {} },
-      { name: "apn_gasless_balance", properties: ["profile", "chain"], required: ["profile", "chain"], defaults: {} },
+      { name: "apn_gasless_balance", properties: ["profile", "chain", "asset"], required: ["profile", "chain"], defaults: {} },
       { name: "apn_gasless_transfer_quote", properties: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url", "rpc_max_batch_items"], required: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url"], defaults: {} },
-      { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "net_amount_atomic", "max_gross_atomic", "max_fee_atomic", "idempotency_key"], required: ["profile", "chain", "to", "idempotency_key"], defaults: {} },
+      { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "asset", "to", "amount", "max_fee", "min_received", "net_amount_atomic", "max_gross_atomic", "max_fee_atomic", "idempotency_key"], required: ["profile", "chain", "to", "idempotency_key"], defaults: {} },
       { name: "apn_oneclick_source_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_foreground_handoff", properties: ["command", "arguments"], required: ["command", "arguments"], defaults: {} },
     ]);

@@ -56,8 +56,10 @@ export interface MetaMaskGaslessRpcPort {
   readonly endpointOrigin: string;
   readonly endpointHash: string;
   readonly rpcUrl: string;
-  balance(owner: Address): Promise<MetaMaskGaslessBalance>;
-  snapshot(input: { readonly owner: Address; readonly delegationHash: Hex; readonly grossAtomic: string; readonly feeMode?: "sponsored" }): Promise<MetaMaskGaslessSnapshot>;
+  /** `token`: the transfer token; needed only on a chain whose registry holds several tokens (chain 56). */
+  balance(owner: Address, token?: Address): Promise<MetaMaskGaslessBalance>;
+  snapshot(input: { readonly owner: Address; readonly token?: Address; readonly delegationHash: Hex; readonly grossAtomic: string;
+    readonly feeMode?: "sponsored" }): Promise<MetaMaskGaslessSnapshot>;
   observe(intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor,
     provider: MetaMaskGaslessProviderObservation | null): Promise<MetaMaskGaslessRpcObservation>;
   /** Chain facts for the owner's disable of this dispatched delegation (absent on observation-only test doubles). */

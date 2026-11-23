@@ -60,7 +60,7 @@ test("gasless capability matrix is static and separates four providers and mainn
     ["local", "metamask-agent-wallet", "metamask-smart-account", "coinbase-agentic-wallet"]);
   assert.deepEqual(c.provider_networks.local, [1, 10, 130, 137, 8453, 42161]);
   assert.equal(c.networks.find(row => row.chain_id === 43114)?.executable_adapter, false);
-  assert.deepEqual(c.provider_networks["metamask-agent-wallet"].map(row => row.chain_id), [1, 10, 137, 143, 1329, 8453, 42161, 59144]);
+  assert.deepEqual(c.provider_networks["metamask-agent-wallet"].map(row => row.chain_id), [1, 10, 56, 56, 137, 143, 1329, 8453, 42161, 59144]);
   assert.deepEqual(c.provider_networks["coinbase-agentic-wallet"].map(row => row.chain_id), [8453]);
   assert.ok(c.profiles.every((p) => p.mainnet_acceptance === "open"));
   assert.equal(c.semantics.x402_support_implied, false);

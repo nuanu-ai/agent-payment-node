@@ -7,7 +7,7 @@ import { mmPrivateHash, mmWalletIdentityHash } from "../../../src/metamask-gasle
 import { mmQuoteHash } from "../../../src/metamask-gasless/economics.js";
 import type { MetaMaskGaslessBinding, MetaMaskGaslessProviderIntent, MetaMaskGaslessQuote,
   MetaMaskGaslessUnsignedResult } from "../../../src/metamask-gasless/model.js";
-import { MM_CHAINS, mmRegistry } from "../../../src/metamask-gasless/registry.js";
+import { MM_CHAINS, mmChainTokens, mmRegistry, mmTokenSymbol } from "../../../src/metamask-gasless/registry.js";
 import type { FetchExchange, FetchExchangeRequest, FetchExchangeResponse } from "../../../src/metamask-gasless/client/network.js";
 
 export const NOW = new Date("2026-09-09T12:00:00.000Z");
@@ -59,7 +59,9 @@ export class SdkExchange implements FetchExchange {
   beforeSends = 0;
   /** The project wallet list's answer; `status` and `malformed` apply to every other read. */
   projectWallets: () => FetchExchangeResponse = listedWallets;
-  constructor(readonly chainId: number, readonly status = 200, readonly malformed: string | null = null) {}
+  /** `token`: the transfer token's row, needed on chain 56 (USDT or USDC); its decimals and symbol answer the reads. */
+  constructor(readonly chainId: number, readonly status = 200, readonly malformed: string | null = null, readonly token?: string) {}
+  get row() { return mmRegistry(this.chainId, this.token).row; }
   async request(request: FetchExchangeRequest): Promise<FetchExchangeResponse> {
     this.requests.push(request); request.beforeSend?.(); if (request.beforeSend) this.beforeSends += 1;
     if (request.method === "GET" && request.url === PROJECT_WALLETS_URL) return this.projectWallets();
@@ -79,11 +81,11 @@ export class SdkExchange implements FetchExchange {
     }]));
     else if (request.url.includes("rpc.example.test")) {
       const rpc = JSON.parse(request.body!) as { id: unknown; params: [{ data: string }] };
-      body = { jsonrpc: "2.0", id: rpc.id, result: rpc.params[0].data === "0x313ce567" ? word(6n) : word(10_000_000_000n) };
+      body = { jsonrpc: "2.0", id: rpc.id, result: rpc.params[0].data === "0x313ce567" ? word(BigInt(this.row.decimals)) : word(10_000_000_000n) };
     } else if (request.method === "POST" && request.url.includes("tx-sentinel-")) {
       body = this.malformed === "quote" ? { jsonrpc: "2.0", id: 10, result: { transactions: [] } } :
         { jsonrpc: "2.0", id: 10, result: { transactions: [{ fees: [{ tokenFees: [{ token: {
-        address: mmRegistry(this.chainId).row.token, symbol: "USDC", decimals: 6 }, balanceNeededToken: "0x3e8",
+        address: this.row.token, symbol: mmTokenSymbol(this.row.token), decimals: this.row.decimals }, balanceNeededToken: "0x3e8",
       feeRecipient: FEE_RECIPIENT }] }] }] } };
     } else if (request.method === "POST" && request.url.endsWith("/transaction-requests")) {
       const posted = JSON.parse(request.body!) as { requestId: string; tx: unknown };
@@ -98,12 +100,12 @@ export class SdkExchange implements FetchExchange {
   }
 }
 
-export function quoteInput(binding: MetaMaskGaslessBinding, chainId: typeof MM_CHAINS[number]) {
-  return { binding, chainId, token: mmRegistry(chainId).row.token, recipient: RECIPIENT, netAtomic: "999000",
+export function quoteInput(binding: MetaMaskGaslessBinding, chainId: typeof MM_CHAINS[number], token?: string) {
+  return { binding, chainId, token: mmRegistry(chainId, token).row.token, recipient: RECIPIENT, netAtomic: "999000",
     rpcUrl: `https://rpc.example.test/${chainId}?api-key=synthetic` };
 }
-export function expectedQuote(chainId: typeof MM_CHAINS[number]): MetaMaskGaslessQuote {
-  const token = mmRegistry(chainId).row.token, feeAtomic = chainId === 1 ? "1050" : "1000";
+export function expectedQuote(chainId: typeof MM_CHAINS[number], selected?: string): MetaMaskGaslessQuote {
+  const token = mmRegistry(chainId, selected).row.token, feeAtomic = chainId === 1 ? "1050" : "1000";
   const executions = [{ target: token, value: "0", callData: encodeFunctionData({ abi: transfer, functionName: "transfer",
     args: [RECIPIENT, 999000n] }) }, { target: token, value: "0", callData: encodeFunctionData({ abi: transfer,
       functionName: "transfer", args: [FEE_RECIPIENT, BigInt(feeAtomic)] }) }] as const;
@@ -111,16 +113,16 @@ export function expectedQuote(chainId: typeof MM_CHAINS[number]): MetaMaskGasles
   return { ...material, hash: mmQuoteHash(material) };
 }
 export function intent(binding: MetaMaskGaslessBinding, chainId: typeof MM_CHAINS[number], quote: MetaMaskGaslessQuote,
-  unsigned: MetaMaskGaslessUnsignedResult): MetaMaskGaslessProviderIntent {
-  const row = mmRegistry(chainId).row;
+  unsigned: MetaMaskGaslessUnsignedResult, token?: string): MetaMaskGaslessProviderIntent {
+  const deployment = mmRegistry(chainId, token), row = deployment.row;
   const state = { protocolCodeHashes: { manager: row.protocol.manager.codeHash, delegate: row.protocol.delegate.codeHash,
     limitedCalls: row.protocol.limitedCalls.codeHash, exactBatch: row.protocol.exactBatch.codeHash },
     tokenProxyCodeHash: row.tokenProxyCodeHash, tokenImplementationAddress: row.tokenImplementationAddress,
-    tokenImplementationCodeHash: row.tokenImplementationCodeHash, tokenDecimals: 6 as const, ownerCodeHash: `0x${"00".repeat(32)}` as const,
+    tokenImplementationCodeHash: row.tokenImplementationCodeHash, tokenDecimals: row.decimals, ownerCodeHash: `0x${"00".repeat(32)}` as const,
     designation: "empty" as const, usdcBalanceAtomic: "10000000", counterAtomic: "0" };
   return { profile: "fixture", request: { chainId, recipient: RECIPIENT, grossAtomic: (999000n + BigInt(quote.feeAtomic)).toString(),
-    maxFeeAtomic: "2000", minReceivedAtomic: "999000" }, binding, token: mmRegistry(chainId).row.token, decimals: 6,
-  deploymentEvidenceHash: mmRegistry(chainId).deploymentEvidenceHash, initialSnapshot: { chainId, endpointHash: "c".repeat(64),
+    maxFeeAtomic: "2000", minReceivedAtomic: "999000", ...(mmChainTokens(chainId).length > 1 ? { token: row.token } : {}) },
+  binding, token: row.token, decimals: row.decimals, deploymentEvidenceHash: deployment.deploymentEvidenceHash, initialSnapshot: { chainId, endpointHash: "c".repeat(64),
     endpointOrigin: "https://rpc.example.test", observedAt: NOW.toISOString(), safeBlock: { numberAtomic: "1", hash: `0x${"11".repeat(32)}`,
       timestampAtomic: "1" }, headBlock: { numberAtomic: "1", hash: `0x${"11".repeat(32)}`, timestampAtomic: "1" }, safeState: state, headState: state },
   quote, requestId: "12345678-1234-4123-8123-123456789abc", preparedAt: NOW.toISOString(),

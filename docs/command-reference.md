@@ -116,9 +116,9 @@ apn gasless usdt execute --profile-hash <hash> --operation <operation-id>
 apn gasless usdt execution-status --profile-hash <hash> --operation <operation-id>
 apn gasless usdt observe --profile-hash <hash> --operation <operation-id>
 apn gasless capabilities [--profile <profile>]
-apn gasless balance --profile <profile> --chain <chain-id>
+apn gasless balance --profile <profile> --chain <chain-id> [--asset <token-contract>]
 apn gasless transfer quote --profile <profile> --chain 1 --owner <address> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --rpc-url <public-ethereum-rpc> [--rpc-max-batch-items <2-30>]
-apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> (--amount <gross-USDC> --max-fee <USDC> --min-received <USDC> | --net-amount-atomic <net> --max-gross-atomic <gross-cap> --max-fee-atomic <fee-cap>) --idempotency-key <key>
+apn gasless transfer prepare --profile <profile> --chain <chain-id> [--asset <token-contract>] --to <address> (--amount <gross-USDC> --max-fee <USDC> --min-received <USDC> | --net-amount-atomic <net> --max-gross-atomic <gross-cap> --max-fee-atomic <fee-cap>) --idempotency-key <key>
 apn gasless transfer approve --operation <operation-id>
 apn gasless transfer revoke --operation <operation-id>
 apn gasless transfer approve-sealed --operation <operation-id>

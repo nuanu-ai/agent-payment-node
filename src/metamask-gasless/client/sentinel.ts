@@ -3,6 +3,7 @@ import { exactKeys, hashObject, isPlainRecord, sha256 } from "../../canonical.js
 import { mmQuoteHash } from "../economics.js";
 import { MM_MAX_UINT, type MetaMaskGaslessQuote } from "../model.js";
 import { mmFail } from "../reasons.js";
+import { mmRegistry } from "../registry.js";
 import type { ModeContext } from "./network.js";
 import type { NativeGasFacts, ReadValidationPredicate, SentinelFeeFacts, TokenFeesKind } from "./read-diagnostic.js";
 
@@ -20,7 +21,7 @@ export function sentinelFailure(error: unknown): SentinelFailure | undefined {
   return { validationPredicate: validationPredicates.get(error)!, ...(shape === undefined ? {} : { tokenFeesShape: shape }),
     ...(facts === undefined ? {} : { feeFacts: facts }) };
 }
-/** The one matching token-fee entry of an answer `validateSentinelResponse` already accepted, in USDC atoms. */
+/** The one matching token-fee entry of an answer `validateSentinelResponse` already accepted, in the transfer token's atoms. */
 export function sentinelQuotedFee(value: Record<string, unknown>, token: string): bigint {
   const transactions = (value.result as Record<string, unknown>).transactions as Record<string, unknown>[];
   const tokenFees = ((transactions.at(-1)!.fees as Record<string, unknown>[])[0]!.tokenFees) as Record<string, unknown>[];
@@ -94,7 +95,9 @@ export function validateSentinelResponse(value: Record<string, unknown>, context
   const entry = matching[0]!, token = entry.token as Record<string, unknown>;
   sentinelRequire(!entry.error, "sentinel_entry_error");
   sentinelRequire(typeof token.symbol === "string" && token.symbol.length >= 1 && token.symbol.length <= 32, "sentinel_symbol");
-  sentinelRequire(token.decimals === 6, "sentinel_decimals");
+  // The fee is paid in the transfer token itself, so its entry must state that token's pinned scale (6 or 18).
+  sentinelRequire(context.mode === "quote" && token.decimals === mmRegistry(context.input.chainId, context.input.token).row.decimals,
+    "sentinel_decimals");
   sentinelRequire(tokenFeeQuantity(entry.balanceNeededToken), "sentinel_fee_quantity");
   sentinelRequire(typeof entry.feeRecipient === "string" && /^0x[0-9a-fA-F]{40}$/u.test(entry.feeRecipient), "sentinel_fee_recipient");
 }

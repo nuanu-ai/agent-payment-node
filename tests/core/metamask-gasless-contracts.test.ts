@@ -76,7 +76,7 @@ test("MM compiled registry retains every independently bound parent row and sour
   const bytes = readFileSync(new URL("../../../tests/core/metamask-gasless-contract-fixtures/deployment-registry-inputs.json", import.meta.url));
   assert.equal(sha256(bytes), MM_DEPLOYMENT_INPUT_SHA);
   const fixture = JSON.parse(bytes.toString("utf8")) as { sourceFiles: unknown; chains: { row: { chainId: number; finalityTag: string }; deploymentEvidenceHash: string }[] };
-  assert.deepEqual(MM_CHAINS, [1, 10, 137, 143, 1329, 8453, 42161, 59144]);
+  assert.deepEqual(MM_CHAINS, [1, 10, 56, 137, 143, 1329, 8453, 42161, 59144]);
   for (const expected of fixture.chains) {
     assert.deepEqual(mmRegistry(expected.row.chainId), expected);
     assert.equal(expected.deploymentEvidenceHash, hashObject({ purpose: "apn.metamask-gasless.deployment-evidence.v1", sourceFiles: fixture.sourceFiles, row: expected.row }));

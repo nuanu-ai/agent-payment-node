@@ -13,11 +13,13 @@ import { liveMetaMaskGaslessOperation } from "./metamask-gasless/journal/receipt
 import { advanceMetaMaskGaslessOperation } from "./metamask-gasless/journal/transitions.js";
 import type { MetaMaskGaslessOperationRecord } from "./metamask-gasless/operation-model.js";
 import { mmFailure } from "./metamask-gasless/reasons.js";
+import { mmTokenSymbol } from "./metamask-gasless/registry.js";
+import { formatAtomic } from "./money.js";
 import type { MetaMaskGaslessService } from "./metamask-gasless/service.js";
 import type { OperationService } from "./operation-service.js";
 import type { RuntimeContext } from "./runtime.js";
 
-const CHAIN_NAMES: Readonly<Record<number, string>> = { 1: "Ethereum", 10: "Optimism", 130: "Unichain", 137: "Polygon",
+const CHAIN_NAMES: Readonly<Record<number, string>> = { 1: "Ethereum", 10: "Optimism", 56: "BNB Smart Chain", 130: "Unichain", 137: "Polygon",
   143: "Monad", 1329: "Sei", 8453: "Base", 42161: "Arbitrum", 43114: "Avalanche", 59144: "Linea" };
 // A reverted relay leaves the delegation unredeemed, so MetaMask may still relay it: the owner may release it too.
 const UNRESOLVED: readonly string[] = ["unknown_finality", "submitted_pending", "failed_effects_pending"];
@@ -58,11 +60,13 @@ export async function abandonMetaMaskGasless(d: Base & { readonly metaMaskGasles
     assertEligible(d, op.terminal, op.state, op.settlement !== null, op.intent.expiresAt);
     // The amount is the gross of the batch actually dispatched; a fixed-net request also shows the approved ceiling.
     const i = op.intent, dispatched = mmActualGross(mmDispatchIntent(op).quote);
+    // The transfer token's own symbol and scale: USDC at 6 decimals, chain 56 USDT or USDC at 18.
+    const symbol = mmTokenSymbol(i.token), decimal = (atoms: string) => formatAtomic(atoms, i.decimals);
     const ceiling = i.request.fixedNet === undefined || i.request.grossAtomic === dispatched ? {} :
-      { budgetCeilingAtomic: i.request.grossAtomic, budgetCeilingDecimal: usdc(i.request.grossAtomic) };
+      { budgetCeilingAtomic: i.request.grossAtomic, budgetCeilingDecimal: decimal(i.request.grossAtomic) };
     await d.context.requireOperationAbandonApproval().approve({ operationId, fingerprint: op.fingerprint, profile: i.profile,
       providerId: "metamask-agent-wallet", walletAddress: i.binding.address, recipient: i.request.recipient, amountAtomic: dispatched,
-      amountDecimal: usdc(dispatched), ...ceiling, chainLabel: chainLabel(i.request.chainId), assetLabel: `USDC (${i.token})`, unit: "USDC",
+      amountDecimal: decimal(dispatched), ...ceiling, chainLabel: chainLabel(i.request.chainId), assetLabel: `${symbol} (${i.token})`, unit: symbol,
       outcomeNote: "Financial outcome: UNKNOWN. MetaMask may still relay this transfer; its delegation has no on-chain expiry." });
     const next = advanceMetaMaskGaslessOperation(op, { state: "abandoned_unknown", failure: mmFailure("mm_gasless_owner_abandoned") },
       d.context.clock.now().toISOString());

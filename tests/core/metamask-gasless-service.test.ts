@@ -10,20 +10,21 @@ import { MetaMaskGaslessOperationRepository } from "../../src/metamask-gasless/j
 import { mmPrivateHash } from "../../src/metamask-gasless/identity.js";
 import { mmError } from "../../src/metamask-gasless/reasons.js";
 import { mmSessionGuidance } from "../../src/metamask-gasless/session-guidance.js";
-import { MM_CHAINS } from "../../src/metamask-gasless/model.js";
+import { MM_DEPLOYMENTS } from "../../src/metamask-gasless/registry.js";
 import { MmTestRpc, mmFixture, mmTestWord, mmWriteOperationFile } from "./metamask-gasless-helpers.js";
 import { fillLegacyHistory } from "./metamask-gasless-journal-fixtures/factory.js";
 
 const sandbox = async () => await mkdtemp(join(await realpath(tmpdir()), "apn-mm-service-test-"));
 
-test("MM eight-chain preparation binds exact economics and reuses stored idempotency before provider reads", async () => {
+test("MM preparation on every registry row binds exact economics and reuses stored idempotency before provider reads", async () => {
   const root = await sandbox();
   try {
-    for (const chainId of MM_CHAINS) {
-      const f = await mmFixture(join(root, String(chainId)), chainId, chainId === 8453 ? "pinned" : "empty");
+    // One row per token: chain 56 prepares its USDT and its USDC, each named by --asset.
+    for (const { row: { chainId, token } } of MM_DEPLOYMENTS) {
+      const f = await mmFixture(join(root, `${chainId}-${token}`), chainId, chainId === 8453 ? "pinned" : "empty", { token });
       const before = await f.state.loadProviderProfile(f.state.profileHash(f.profile));
       const { id, input, operation } = await f.prepare();
-      assert.equal(operation.intent.request.chainId, chainId);
+      assert.equal(operation.intent.request.chainId, chainId); assert.equal(operation.intent.token, token);
       assert.equal(operation.state, "awaiting_approval"); assert.equal(operation.submissionAttempts, 0);
       assert.equal(BigInt(operation.intent.quote.netAtomic) + BigInt(operation.intent.quote.feeAtomic), 10000000n);
       assert.deepEqual(f.provider.calls, ["inspect", "quote", "buildUnsigned"]);

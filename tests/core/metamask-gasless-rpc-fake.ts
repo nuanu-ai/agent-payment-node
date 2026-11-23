@@ -15,6 +15,9 @@ export type Json = Record<string, any>;
 export const RUNTIME_PATH = "tests/core/metamask-gasless-chain-fixtures/runtime-code.json";
 export const VECTOR_PATH = "tests/core/metamask-gasless-chain-fixtures/base-signed-vector.json";
 export const runtimeText = readFileSync(RUNTIME_PATH, "utf8"), runtime = JSON.parse(runtimeText) as Json;
+/** APN's own 2026-11-23 chain 56 reads: the runtime bytes of the four protocol contracts and of both Binance-Peg tokens. */
+export const BSC_EVIDENCE_PATH = "tests/core/metamask-gasless-contract-fixtures/bsc-deployment-evidence-20261123.json";
+export const bscEvidence = JSON.parse(readFileSync(BSC_EVIDENCE_PATH, "utf8")) as Json;
 export const vector = JSON.parse(readFileSync(VECTOR_PATH, "utf8")) as Json;
 export const RPC_URL = "https://rpc.example/private-path";
 export const now = { now: () => new Date("2026-09-09T00:01:00.000Z") };
@@ -47,6 +50,10 @@ export interface FakeOptions {
   readonly ownerCode?: "pinned" | "empty" | "foreign";
   /** Another endpoint of the same chain than the one the operation was prepared through. */
   readonly endpoint?: string;
+  /** The transfer token on a chain with several (56); its row's code, decimals and implementation answer the reads. */
+  readonly token?: Address;
+  /** A decimals() answer other than the row's own. */
+  readonly decimals?: bigint;
 }
 
 export class FakeRpcTransport implements GaslessTransport {
@@ -56,7 +63,14 @@ export class FakeRpcTransport implements GaslessTransport {
   private readonly codes: Json;
   private readonly served = new Map<string, bigint>();
   constructor(chainId: MetaMaskGaslessChainId, private readonly options: FakeOptions = {}) {
-    this.chainId = chainId; this.deployment = mmRegistry(chainId).row;
+    this.chainId = chainId; this.deployment = mmRegistry(chainId, options.token).row;
+    if (chainId === 56) {
+      const token = (bscEvidence.tokens as Json[]).find(item => item.token === this.deployment.token);
+      assert.ok(token); this.codes = { protocol: Object.fromEntries((bscEvidence.protocol as Json[])
+        .filter(item => ["manager", "delegate", "limitedCalls", "exactBatch"].includes(item.role)).map(item => [item.role, item.runtime])),
+      tokenProxyCode: token.runtime, tokenImplementationCode: token.implementationRuntime ?? "0x" };
+      return;
+    }
     const refs = runtime.rows.find((item: Json) => item.chainId === chainId) as Json;
     assert.ok(refs); this.codes = { protocol: Object.fromEntries(Object.entries(refs.protocol)
       .map(([name, ref]) => [name, runtime.codes[String(ref)]])),
@@ -86,7 +100,7 @@ export class FakeRpcTransport implements GaslessTransport {
     if (method === "eth_getStorageAt") return addressWord(this.deployment.tokenImplementationAddress);
     if (method === "eth_call") {
       const call = params[0] as Json, selector = String(call.data).slice(0, 10);
-      if (selector === "0x313ce567") return word(6n);
+      if (selector === "0x313ce567") return word(this.options.decimals ?? BigInt(this.deployment.decimals));
       if (selector === "0x70a08231") return word(1_000_000n);
       if (call.to.toLowerCase() === this.deployment.protocol.limitedCalls.address) {
         return word(this.options.counter?.(this.blockNumber(params.at(-1))) ?? 0n);
