@@ -4,7 +4,8 @@ Relay routes move a profile's funds from one chain to a recipient on another thr
 Five CLI commands cover every route. Relay is not exposed as MCP tools.
 
 ```text
-apn relay prepare --profile <profile> --source-chain <caip2> --asset <usdc|native> --destination-chain <caip2> --recipient <address> \
+apn relay prepare --profile <profile> --source-chain <caip2> --asset <usdc|usdt|native> --destination-chain <caip2> \
+  [--destination-asset <usdc|usdt>] --recipient <address> \
   --amount-atomic <source-atomic> --min-output-atomic <destination-atomic> --max-deposit-network-fee-wei <wei> \
   [--max-approval-network-fee-wei <wei>] [--payer <address> --max-provider-fee-atomic <usdc> --quote-file <absolute-json-path>] \
   --idempotency-key <key>
@@ -40,6 +41,38 @@ reference is what the owner policy must admit on the `bridge` rail.
 A route-only option is required on its route and refused on every other route; no option is ignored. Any other
 combination is refused with reason `relay_route_unknown`. `--amount-atomic` is in the source asset's atomic units and
 `--min-output-atomic` in the destination asset's.
+
+### Binance-Peg token routes
+
+`--destination-asset` selects a token route: an ERC-20 source token to an ERC-20 destination token, with
+`--max-approval-network-fee-wei` required and `--payer`, `--max-provider-fee-atomic` and `--quote-file` refused. The
+Binance-Peg USDT `0x55d398326f99059fF775485246999027B3197955` and USDC `0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d` of
+BNB Smart Chain have 18 decimals; every peer token has 6. Each amount is atomic in its own token: 5 USDT from BNB Smart
+Chain is `--amount-atomic 5000000000000000000`, and a 4.8 USDC minimum on Base is `--min-output-atomic 4800000`.
+
+| Source (`--source-chain`, `--asset`) | Destination (`--destination-chain`, `--destination-asset`) | Mechanism reference |
+| --- | --- | --- |
+| BNB `eip155:56` `usdt` or `usdc` | Ethereum `eip155:1` `usdc` or `usdt` | `bnb-<usdt\|usdc>-ethereum-<usdc\|usdt>-v1` |
+| BNB `eip155:56` `usdt` or `usdc` | Polygon `eip155:137` `usdc` or `usdt` (USDT0) | `bnb-<usdt\|usdc>-polygon-<usdc\|usdt>-v1` |
+| BNB `eip155:56` `usdt` or `usdc` | Base `eip155:8453` `usdc` or `usdt` | `bnb-<usdt\|usdc>-base-<usdc\|usdt>-v1` |
+| BNB `eip155:56` `usdt` or `usdc` | Arbitrum `eip155:42161` `usdc` or `usdt` (USDT0) | `bnb-<usdt\|usdc>-arbitrum-<usdc\|usdt>-v1` |
+| Ethereum `eip155:1` `usdc` or `usdt` | BNB `eip155:56` `usdt` or `usdc` | `ethereum-<usdc\|usdt>-bnb-<usdt\|usdc>-v1` |
+| Polygon `eip155:137` `usdc` | BNB `eip155:56` `usdt` or `usdc` | `polygon-usdc-bnb-<usdt\|usdc>-v1` |
+| Arbitrum `eip155:42161` `usdc` | BNB `eip155:56` `usdt` or `usdc` | `arbitrum-usdc-bnb-<usdt\|usdc>-v1` |
+
+Relay quoted all 32 BNB pairs on 2026-11-23 with one shape: an exact `approve` of the source token to the Relay
+depository `0x4cd00e387622c35bddb9b4c962c136462338bc31` (the same address on all five chains), `depositErc20`, and a
+solver-signed order on the Base hub that pays the destination token directly. Eight of them are not listed as sources:
+Base USDT and the Polygon and Arbitrum USDT0 deployments, which the frozen allowlist dataset cannot admit on the bridge
+rail, and Base USDC, whose OP Stack L1 data fee and operator fee fall outside the gas × max-fee envelope this lane bounds
+by the caller's ceilings. They remain destinations.
+
+Prepare checks the quote's own token decimals on both sides, the solver signature, the order id, the depository, the
+approval and deposit calldata and both refund rows; the owner policy row, caps and daily usage are the source token's
+own. Execute approves exactly the principal and only from a zero allowance (`source_allowance_not_zero` otherwise; Tether
+on Ethereum refuses a nonzero-to-nonzero approve), then deposits. Observe proves the deposit at the source chain's
+finality and one Transfer of the pinned destination token to the operation's recipient at the destination's safe
+checkpoint (Polygon: milestone-finalized), in that token's own decimals.
 
 ## Who pays, who receives, what is admitted
 

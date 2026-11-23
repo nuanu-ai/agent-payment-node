@@ -1,6 +1,7 @@
 import { RelayKeylessStatusService } from "./relay/status.js";
 import { RelayObserveService } from "./relay/observe.js";
 import { RelayNativeObserveService } from "./relay/native-observe.js";
+import { RelayTokenObserveService } from "./relay/token-observe.js";
 import { RelayBaseObserveService } from "./relay/base-observe.js";
 import { RelayArbitrumSourceObserveService } from "./relay/arbitrum-source-observe.js";
 import { RelayArbitrumDestinationObserver } from "./relay/arbitrum-destination.js";
@@ -103,9 +104,14 @@ export function createSpecialApnCore(bound: BoundCommand, options: RuntimeFactor
     const native = new RelayNativeObserveService(state, nativeSource,
       (chainId) => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc, undefined, chainId),
       new RelayKeylessStatusService(state, options.relayStatusFetch), options.clock);
+    // Token routes: the source reader of the saved route's source chain, the destination reader of its destination chain.
+    const token = new RelayTokenObserveService(state,
+      (chainId) => new RelayEthereumFinalityRpc(sourceUrl, state, options.relayObserveSourceRpc, undefined, chainId),
+      (chainId) => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc, undefined, chainId),
+      new RelayKeylessStatusService(state, options.relayStatusFetch));
     return new ApnCore({ state, relayObserve: options.relayObserve ??
       new RelayObserveService(state, source, bnbInvocation,
-        new RelayKeylessStatusService(state, options.relayStatusFetch), native) });
+        new RelayKeylessStatusService(state, options.relayStatusFetch), native, undefined, token) });
   }
   return null;
 }

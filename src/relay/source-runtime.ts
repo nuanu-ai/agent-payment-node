@@ -1,5 +1,6 @@
-/** Explicit, foreground Ethereum source execution for one saved Relay operation. */
-import { getAddress, type Hex } from "viem";
+/** Explicit, foreground ERC-20 source execution (approval, then deposit) for one saved Relay operation: Ethereum USDC, or
+ * a token route on its own source chain. Chain, token, depository, envelopes and policy pin come from the source leg. */
+import type { Hex } from "viem";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../canonical.js";
@@ -24,8 +25,7 @@ import type { StateStore } from "../state.js";
 import { RelayApprovalEffectService, RelayEncryptedApprovalCustody, type RelayApprovalObservation, type RelayApprovalPorts } from "./approval-effect.js";
 import { RelayDepositEffectService, RelayEncryptedDepositCustody, type RelayDepositObservation, type RelayDepositPorts } from "./deposit-effect.js";
 import { RelayEffectJournalRepository, type RelayEffectJournal } from "./effect-journal.js";
-import { relayExecutionRoute } from "./execution-route.js";
-import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
+import { relayErc20Reference, relayErc20SourceLeg, relayErc20UsageIdentity } from "./erc20-source-leg.js";
 import { RelayRpcInvocation, RELAY_EXECUTION_WALL_MS } from "./rpc-budget.js";
 
 /** BRDG-22: the deposit may follow the approval once the approval's receipt is canonical with this many blocks on
@@ -43,8 +43,8 @@ function corrupt(reason: string): never { throw new ApnError("APN_STATE_CORRUPT"
 
 export interface RelayExecutionSummary {
   readonly operationId: string;
-  readonly sourceChainId: 1;
-  readonly destinationChainId: 56 | 8453;
+  readonly sourceChainId: number;
+  readonly destinationChainId: number;
   readonly sourceAccount: string;
   readonly sourceToken: string;
   readonly amountAtomic: string;
@@ -55,6 +55,8 @@ export interface RelayExecutionSummary {
   readonly quoteDigest: string;
   readonly approvalNetworkFeeCeilingWei: string;
   readonly depositNetworkFeeCeilingWei: string;
+  /** Token routes only: the destination token and each side's decimals (amount and minimum are atomic in their own). */
+  readonly tokenRoute?: Readonly<{ destinationToken: string; sourceDecimals: number; destinationDecimals: number }>;
 }
 export interface RelayExecutionAuthorizationPort { confirm(summary: RelayExecutionSummary): Promise<boolean> }
 interface RelayExecutionAdmission {
@@ -124,6 +126,8 @@ export class RelayEthereumSourceRuntime {
   private signingNonce: bigint | null = null;
   /** One chain-id check per execute invocation (P2); approvals proven in this invocation are not re-read. */
   private chainVerified = false;
+  /** The saved operation's source chain, set before the first read of an invocation. */
+  private sourceChainId = 1;
   private readonly provenApprovals = new Map<string, RelayApprovalObservation>();
   constructor(private readonly state: StateStore, private readonly wrapping: WrappingSecretPort, private readonly transport: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">,
     private readonly authorization: RelayExecutionAuthorizationPort, private readonly clock: ClockPort = { now: () => new Date() },
@@ -162,6 +166,7 @@ export class RelayEthereumSourceRuntime {
     const op = await new RelayUnsignedOperationRepository(this.state.root).loadOperation(profileHash, operationId);
     if (op === null) blocked("prepared_operation_missing");
     this.assertPrepared(op);
+    this.sourceChainId = relayErc20SourceLeg(op).chainId;
     const approvalCustody = new RelayEncryptedApprovalCustody(this.state, this.wrapping, profile);
     const depositCustody = new RelayEncryptedDepositCustody(this.state, this.wrapping, profile);
     return this.state.withLocks([`relay-source-execute:${operationId}`, evmAddressLock(op.sourceAccount)], async () => {
@@ -186,9 +191,8 @@ export class RelayEthereumSourceRuntime {
         await this.admissions.admit(op, this.clock.now());
         const active = await this.activePolicy(op, profile);
         if (active === null) blocked("active_policy_missing");
-        const reserveInput = { account: getAddress(op.sourceAccount), chain: "eip155:1",
-          asset: { kind: "token" as const, identifier: ETHEREUM_USDC }, registry: active.registry,
-          rail: "bridge" as const, mechanism: { provider: "relay", reference: relayExecutionRoute(op) }, amountAtomic: op.amountAtomic, idempotencyKey: `relay-execute:${op.operationId}`, now: this.clock.now() };
+        const reserveInput = { ...relayErc20UsageIdentity(op), registry: active.registry,
+          rail: "bridge" as const, mechanism: { provider: "relay", reference: relayErc20Reference(op) }, amountAtomic: op.amountAtomic, idempotencyKey: `relay-execute:${op.operationId}`, now: this.clock.now() };
         // The owner's optional recipient pin (OD-1) is checked against the policy the reservation is taken under.
         const at = reserveInput.now.toISOString();
         assertRecipientAdmitted({ admission: evaluateAssetPolicy(active.registry, { chain: reserveInput.chain, asset: reserveInput.asset,
@@ -212,7 +216,7 @@ export class RelayEthereumSourceRuntime {
         funding: async () => this.funding(op),
         send: async (raw: Hex) => this.rpc.submitRawTransaction(raw),
         unsentOutcome: async (input: Readonly<{ account: string; nonce: bigint; transactionHash: string }>) => {
-          const [count, own] = await this.read([{ method: "eth_getTransactionCount", params: [input.account, "safe"] },
+          const [count, own] = await this.read([{ method: "eth_getTransactionCount", params: [input.account, relayErc20SourceLeg(op).safeTag] },
             { method: "eth_getTransactionByHash", params: [input.transactionHash] }]);
           return evmUnsentOutcome(async method => method === "eth_getTransactionCount" ? count : own, input);
         },
@@ -244,10 +248,7 @@ export class RelayEthereumSourceRuntime {
     });
   }
 
-  private usageIdentity(op: RelayUnsignedOperation) {
-    return { account: getAddress(op.sourceAccount), chain: "eip155:1",
-      asset: { kind: "token" as const, identifier: ETHEREUM_USDC } };
-  }
+  private usageIdentity(op: RelayUnsignedOperation) { return relayErc20UsageIdentity(op); }
   private usageReservationId(op: RelayUnsignedOperation): string {
     return assetUsageReservationId(this.usageIdentity(op), `relay-execute:${op.operationId}`);
   }
@@ -285,19 +286,23 @@ export class RelayEthereumSourceRuntime {
 
   private assertPrepared(op: RelayUnsignedOperation): void {
     validateRelayUnsignedOperation(op);
-    if (op.sourceChainId !== 1 || op.quote === undefined || op.statusLocator === undefined ||
+    const quote = op.tokenQuote ?? op.quote;
+    if (quote === undefined || op.nativeQuote !== undefined || op.arbitrumDraft !== undefined || op.statusLocator === undefined ||
       op.policyDigest === undefined || op.policyRevision === undefined || op.approvalNetworkFeeCeilingWei === undefined ||
-      op.depositNetworkFeeCeilingWei === undefined || op.quote.statusLocator?.requestId !== op.statusLocator.requestId ||
-      op.quote.quoteDigest !== op.quoteDigest) blocked("saved_quote_or_request_id_required");
-    relayExecutionRoute(op);
+      op.depositNetworkFeeCeilingWei === undefined || quote.statusLocator?.requestId !== op.statusLocator.requestId ||
+      quote.quoteDigest !== op.quoteDigest || op.sourceChainId !== relayErc20SourceLeg(op).chainId) blocked("saved_quote_or_request_id_required");
+    relayErc20Reference(op);
   }
   private summary(op: RelayUnsignedOperation): RelayExecutionSummary {
     this.assertPrepared(op);
-    return { operationId: op.operationId, sourceChainId: 1, destinationChainId: op.destinationChainId as 56 | 8453, sourceAccount: op.sourceAccount,
-      sourceToken: ETHEREUM_USDC, amountAtomic: op.amountAtomic, recipient: op.recipient,
+    const leg = relayErc20SourceLeg(op), token = op.tokenQuote;
+    return { operationId: op.operationId, sourceChainId: leg.chainId, destinationChainId: op.destinationChainId, sourceAccount: op.sourceAccount,
+      sourceToken: leg.token, amountAtomic: op.amountAtomic, recipient: op.recipient,
       minOutputAtomic: op.minOutputAtomic, deadline: op.deadline, requestId: op.statusLocator!.requestId,
       quoteDigest: op.quoteDigest, approvalNetworkFeeCeilingWei: op.approvalNetworkFeeCeilingWei!,
-      depositNetworkFeeCeilingWei: op.depositNetworkFeeCeilingWei! };
+      depositNetworkFeeCeilingWei: op.depositNetworkFeeCeilingWei!,
+      ...(token === undefined || leg.destination === null ? {} : { tokenRoute: { destinationToken: leg.destination.address,
+        sourceDecimals: token.sourceDecimals, destinationDecimals: token.destinationDecimals } }) };
   }
   private async assertReady(op: RelayUnsignedOperation, profile: string): Promise<void> {
     this.assertPrepared(op);
@@ -350,7 +355,7 @@ export class RelayEthereumSourceRuntime {
   private async read(calls: readonly { method: string; params: readonly unknown[] }[]): Promise<readonly unknown[]> {
     const checking = !this.chainVerified, rows = await this.rpc.batchCall([...(checking ? [{ method: "eth_chainId", params: [] }] : []), ...calls] as Parameters<HttpsBaseRpc["batchCall"]>[0]);
     if (rows.length !== calls.length + (checking ? 1 : 0)) blocked("ethereum_rpc_batch");
-    if (checking) { if (evmRpcQuantity(rows[0]) !== 1n) blocked("ethereum_rpc_chain"); this.chainVerified = true; }
+    if (checking) { if (evmRpcQuantity(rows[0]) !== BigInt(this.sourceChainId)) blocked("ethereum_rpc_chain"); this.chainVerified = true; }
     return checking ? rows.slice(1) : rows;
   }
   /** Two POSTs: the latest head, then balance, token balance and allowance pinned to its hash (EIP-1898,
@@ -360,13 +365,13 @@ export class RelayEthereumSourceRuntime {
     const [rawHead] = await this.read([{ method: "eth_getBlockByNumber", params: ["latest", false] }]);
     const head = evmRpcRecord(rawHead), blockHash = evmRpcHex(head.hash, 32);
     if (blockHash === `0x${"0".repeat(64)}`) corrupt("zero source block hash");
-    const reference = { blockHash, requireCanonical: true };
+    const reference = { blockHash, requireCanonical: true }, leg = relayErc20SourceLeg(op);
     const balanceData = `0x70a08231${op.sourceAccount.slice(2).toLowerCase().padStart(64, "0")}`;
-    const allowanceData = `0xdd62ed3e${op.sourceAccount.slice(2).toLowerCase().padStart(64, "0")}${ETHEREUM_DEPOSITORY.slice(2).padStart(64, "0")}`;
+    const allowanceData = `0xdd62ed3e${op.sourceAccount.slice(2).toLowerCase().padStart(64, "0")}${leg.depository.slice(2).toLowerCase().padStart(64, "0")}`;
     const rows = await this.read([
       { method: "eth_getBalance", params: [op.sourceAccount, reference] },
-      { method: "eth_call", params: [{ to: ETHEREUM_USDC, data: balanceData }, reference] },
-      { method: "eth_call", params: [{ to: ETHEREUM_USDC, data: allowanceData }, reference] },
+      { method: "eth_call", params: [{ to: leg.token, data: balanceData }, reference] },
+      { method: "eth_call", params: [{ to: leg.token, data: allowanceData }, reference] },
       { method: "eth_getTransactionCount", params: [op.sourceAccount, "pending"] },
       { method: "eth_maxPriorityFeePerGas", params: [] },
     ]);
@@ -374,7 +379,7 @@ export class RelayEthereumSourceRuntime {
     const nonce = evmRpcQuantity(rows[3]);
     this.signingNonce = nonce;
     if (baseFee * 2n + priority === 0n) blocked("source_fee_unavailable");
-    return { chainId: 1, nativeBalanceWei: evmRpcQuantity(rows[0]), tokenBalanceAtomic: evmRpcWord(rows[1]),
+    return { chainId: leg.chainId, nativeBalanceWei: evmRpcQuantity(rows[0]), tokenBalanceAtomic: evmRpcWord(rows[1]),
       allowanceAtomic: evmRpcWord(rows[2]), baseFeePerGasWei: baseFee, nextNonce: nonce };
   }
   private async sign(op: RelayUnsignedOperation, profile: string, role: "approval" | "deposit"): Promise<Hex> {
@@ -388,8 +393,8 @@ export class RelayEthereumSourceRuntime {
       if (!same(wallet.identity.address, op.sourceAccount)) blocked("encrypted_wallet_owner");
       const account = privateKeyToAccount(wallet.secret.privateKey);
       if (!same(account.address, op.sourceAccount)) corrupt("local_signer_owner");
-      const envelope = role === "approval" ? op.quote!.approval : op.quote!.deposit;
-      return await account.signTransaction({ type: "eip1559", chainId: 1, to: envelope.to as Hex,
+      const leg = relayErc20SourceLeg(op), envelope = role === "approval" ? leg.approval : leg.deposit;
+      return await account.signTransaction({ type: "eip1559", chainId: leg.chainId, to: envelope.to as Hex,
         data: envelope.data as Hex, value: 0n, nonce: Number(nonce), gas: BigInt(envelope.gas),
         maxFeePerGas: BigInt(envelope.maxFeePerGas), maxPriorityFeePerGas: BigInt(envelope.maxPriorityFeePerGas), accessList: [] });
     } finally { this.wallets.clear(wallet.secret); }
@@ -398,7 +403,7 @@ export class RelayEthereumSourceRuntime {
     const proven = this.provenApprovals.get(hash.toLowerCase()); if (proven !== undefined) return proven;
     const found = await this.observation(hash, "included");
     if (found === null) return null;
-    const observed = { transaction: { hash, from: found.from, to: found.to, input: found.input, chainId: 1 },
+    const observed = { transaction: { hash, from: found.from, to: found.to, input: found.input, chainId: this.sourceChainId },
       receipt: { transactionHash: hash, status: found.status, blockNumber: found.blockNumber,
         blockHash: found.blockHash, logs: found.logs }, canonicalBlockHash: found.blockHash, finalized: found.finalized };
     if (found.status === "success") this.provenApprovals.set(hash.toLowerCase(), observed);
@@ -407,7 +412,7 @@ export class RelayEthereumSourceRuntime {
   private async observeDeposit(hash: Hex): Promise<RelayDepositObservation | null> {
     const found = await this.observation(hash, "finalized");
     if (found === null) return null;
-    return { transaction: { hash, from: found.from, to: found.to, input: found.input, value: found.value, chainId: 1 },
+    return { transaction: { hash, from: found.from, to: found.to, input: found.input, value: found.value, chainId: this.sourceChainId },
       receipt: { transactionHash: hash, status: found.status, blockNumber: found.blockNumber,
         blockHash: found.blockHash }, canonicalBlockHash: found.blockHash };
   }
@@ -424,7 +429,7 @@ export class RelayEthereumSourceRuntime {
     if (rawTx === null || rawReceipt === null) return null;
     const tx = evmRpcRecord(rawTx), receipt = evmRpcRecord(rawReceipt);
     if (evmRpcHex(tx.hash, 32) !== hash || evmRpcHex(receipt.transactionHash, 32) !== hash ||
-      evmRpcQuantity(tx.chainId) !== 1n || evmRpcQuantity(tx.type) !== 2n ||
+      evmRpcQuantity(tx.chainId) !== BigInt(this.sourceChainId) || evmRpcQuantity(tx.type) !== 2n ||
       evmRpcQuantity(tx.blockNumber) !== evmRpcQuantity(receipt.blockNumber) ||
       evmRpcHex(tx.blockHash, 32) !== evmRpcHex(receipt.blockHash, 32)) corrupt("transaction and receipt identity");
     const number = evmRpcQuantity(receipt.blockNumber);
@@ -458,7 +463,7 @@ export class RelayEthereumSourceRuntime {
       approval === "failed" ? "failed_confirmed_revert" : approval === "abandoned_unsent" ? "failed_before_effect" :
         (approval === "pending" || approval === "signing_started" || approval === "sealed") ? null : "submitted";
     if (state === null) return;
-    const identity = { account: getAddress(op.sourceAccount), chain: "eip155:1", asset: { kind: "token" as const, identifier: ETHEREUM_USDC } };
+    const identity = relayErc20UsageIdentity(op);
     const id = assetUsageReservationId(identity, `relay-execute:${op.operationId}`);
     const existing = await this.usage.load(identity, id);
     if (existing === null) corrupt("usage reservation vanished");

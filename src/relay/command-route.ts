@@ -12,35 +12,52 @@ import { RelayUnsignedOperationRepository, type RelayUnsignedOperation } from ".
 import { StateStore } from "../state.js";
 import { ArbitrumSourceEffectJournalRepository } from "./arbitrum-source-effect-journal.js";
 import { relayNativeRouteFor } from "./native-routes.js";
+import { relayTokenRouteFor } from "./token-routes.js";
 
 type Options = Readonly<Record<string, string>>;
 type RelayRouteRequest = Extract<CommandRequest, { readonly command: "relay.route" }>;
-const ROUTE_OPTIONS = ["--max-approval-network-fee-wei", "--payer", "--max-provider-fee-atomic", "--quote-file"] as const;
+const ROUTE_OPTIONS = ["--max-approval-network-fee-wei", "--payer", "--max-provider-fee-atomic", "--quote-file", "--destination-asset"] as const;
 /** Source chain and asset of each route family; destinations are checked by the family itself. */
 const FAMILIES = { "eip155:1/usdc": "ethereum-usdc", "eip155:56/native": "native", "eip155:8453/native": "native",
   "eip155:42161/usdc": "arbitrum-usdc" } as const;
-const SOURCE_RPC = { 1: "ethereum", 56: "bnb", 8453: "base", 42161: "arbitrum" } as const;
-const DESTINATION_RPC = { 1: "ethereum", 56: "bnb", 137: "polygon", 143: "monad", 4326: "megaeth", 8453: "base" } as const;
+const SOURCE_RPC = { 1: "ethereum", 56: "bnb", 137: "polygon", 8453: "base", 42161: "arbitrum" } as const;
+const DESTINATION_RPC = { 1: "ethereum", 56: "bnb", 137: "polygon", 143: "monad", 4326: "megaeth", 8453: "base", 42161: "arbitrum" } as const;
 
 function routeUnknown(): never {
   throw new ApnError("APN_INVALID_INPUT", "Relay has no route for this source chain, asset and destination chain.", {
     reason: "relay_route_unknown", nextActions: ["apn help relay prepare"] });
 }
 
-/** Binds `relay prepare` to the internal prepare request of its route; route-only options are required or refused. */
-export function bindRelayPrepare(o: Options): CommandRequest {
-  const source = o["--source-chain"]!, destination = o["--destination-chain"]!;
-  const family = (FAMILIES as Readonly<Record<string, string>>)[`${source}/${o["--asset"]}`];
-  const uses = family === "ethereum-usdc" ? ["--max-approval-network-fee-wei"] : family === "arbitrum-usdc" ? [...ROUTE_OPTIONS] : [];
-  if (family === undefined || (family === "ethereum-usdc" && destination !== "eip155:56" && destination !== "eip155:8453") ||
-    (family === "arbitrum-usdc" && destination !== "eip155:1") ||
-    (family === "native" && relayNativeRouteFor(Number(source.slice(7)), Number(destination.slice(7))) === null)) routeUnknown();
+function assertRouteOptions(o: Options, uses: readonly string[]): void {
   for (const name of ROUTE_OPTIONS) {
     if (uses.includes(name) !== (o[name] !== undefined)) {
       throw new ApnError("APN_INVALID_INPUT", `${name} is ${uses.includes(name) ? "required" : "not accepted"} on this Relay route.`,
         { reason: "relay_route_option" });
     }
   }
+}
+
+/** A token route (token-routes.ts) is named by both chains and both token aliases: `--destination-asset` selects it. */
+function bindRelayTokenPrepare(o: Options, source: string, destination: string): CommandRequest {
+  if (relayTokenRouteFor(Number(source.slice(7)), o["--asset"]!, Number(destination.slice(7)), o["--destination-asset"]!) === null ||
+    !source.startsWith("eip155:") || !destination.startsWith("eip155:")) routeUnknown();
+  assertRouteOptions(o, ["--max-approval-network-fee-wei", "--destination-asset"]);
+  return { command: "relay.token.prepare", profile: o["--profile"]!, sourceChain: source, asset: o["--asset"]!, destinationChain: destination,
+    destinationAsset: o["--destination-asset"]!, recipient: o["--recipient"]!, amountAtomic: o["--amount-atomic"]!,
+    minOutputAtomic: o["--min-output-atomic"]!, maxApprovalNetworkFeeWei: o["--max-approval-network-fee-wei"]!,
+    maxDepositNetworkFeeWei: o["--max-deposit-network-fee-wei"]!, idempotencyKey: o["--idempotency-key"]! };
+}
+
+/** Binds `relay prepare` to the internal prepare request of its route; route-only options are required or refused. */
+export function bindRelayPrepare(o: Options): CommandRequest {
+  const source = o["--source-chain"]!, destination = o["--destination-chain"]!;
+  if (o["--destination-asset"] !== undefined) return bindRelayTokenPrepare(o, source, destination);
+  const family = (FAMILIES as Readonly<Record<string, string>>)[`${source}/${o["--asset"]}`];
+  const uses = family === "ethereum-usdc" ? ["--max-approval-network-fee-wei"] : family === "arbitrum-usdc" ? [...ROUTE_OPTIONS] : [];
+  if (family === undefined || (family === "ethereum-usdc" && destination !== "eip155:56" && destination !== "eip155:8453") ||
+    (family === "arbitrum-usdc" && destination !== "eip155:1") ||
+    (family === "native" && relayNativeRouteFor(Number(source.slice(7)), Number(destination.slice(7))) === null)) routeUnknown();
+  assertRouteOptions(o, uses);
   const common = { profile: o["--profile"]!, recipient: o["--recipient"]!, amountAtomic: o["--amount-atomic"]!,
     minOutputAtomic: o["--min-output-atomic"]!, maxDepositNetworkFeeWei: o["--max-deposit-network-fee-wei"]! };
   if (family === "native") return { command: "relay.native.prepare", ...common, sourceChain: source, destinationChain: destination,
@@ -96,7 +113,7 @@ export async function resolveRelayRoute(bound: BoundCommand, stateRoot: string):
     throw new ApnError("APN_INVALID_INPUT", "--destination-rpc-url is required to observe this Relay route.",
       { reason: "relay_destination_rpc_required" });
   }
-  if (op.nativeQuote === undefined && op.destinationChainId === 8453) {
+  if (op.nativeQuote === undefined && op.tokenQuote === undefined && op.destinationChainId === 8453) {
     return { op, resolved: { request: { command: "relay.base.observe", ...target }, rpcUrl: destination, ethereumRpcUrl: bound.rpcUrl! } };
   }
   return { op, resolved: { request: { command: "relay.observe", ...target }, rpcUrl: bound.rpcUrl!, bnbRpcUrl: destination } };

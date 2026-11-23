@@ -26,7 +26,7 @@ apn x402 merchant approve --operation <operation-id>
 apn x402 merchant observe --operation <operation-id> [--deliver]
 apn x402 merchant retire-unsent --operation <operation-id>
 apn x402 merchant status --operation <operation-id>
-apn relay prepare --profile <profile> --source-chain <caip2> --asset <usdc|native> --destination-chain <caip2> --recipient <address> --amount-atomic <source-atomic> --min-output-atomic <destination-atomic> --max-deposit-network-fee-wei <wei> [--max-approval-network-fee-wei <wei>] [--payer <address> --max-provider-fee-atomic <usdc> --quote-file <absolute-json-path>] --idempotency-key <key>
+apn relay prepare --profile <profile> --source-chain <caip2> --asset <usdc|usdt|native> --destination-chain <caip2> [--destination-asset <usdc|usdt>] --recipient <address> --amount-atomic <source-atomic> --min-output-atomic <destination-atomic> --max-deposit-network-fee-wei <wei> [--max-approval-network-fee-wei <wei>] [--payer <address> --max-provider-fee-atomic <usdc> --quote-file <absolute-json-path>] --idempotency-key <key>
 apn relay execute --profile <profile> --operation <operation-id> --rpc-url <source-rpc>
 apn relay observe --profile <profile> --operation <operation-id> --rpc-url <source-rpc> [--destination-rpc-url <destination-rpc>]
 apn relay retire --profile <profile> --operation <operation-id>

@@ -11,8 +11,7 @@ import type { ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { RelayEffectJournalRepository, type RelayEffectJournal } from "./effect-journal.js";
-import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
-import { relayExecutionRoute } from "./execution-route.js";
+import { relayErc20Reference, relayErc20SourceLeg } from "./erc20-source-leg.js";
 import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
 import type { EvmUnsentOutcome } from "../evm-unsent-outcome.js";
 
@@ -23,7 +22,7 @@ function blocked(reason: string): never { throw new ApnError("APN_OPERATION_BLOC
 function corrupt(reason: string): never { throw new ApnError("APN_STATE_CORRUPT", `Relay approval effect is invalid: ${reason}.`); }
 function binding(op: RelayUnsignedOperation): string {
   return domainHash("apn.relay-approval-envelope.v1", canonicalJson({ operationId: op.operationId,
-    quoteDigest: op.quoteDigest, approval: op.quote!.approval }));
+    quoteDigest: op.quoteDigest, approval: op.tokenQuote?.approval ?? op.quote!.approval }));
 }
 function key(op: RelayUnsignedOperation): string {
   return domainHash("apn.relay-approval-custody.v1", canonicalJson({ operationId: op.operationId }));
@@ -232,15 +231,16 @@ export class RelayApprovalEffectService {
   }
   private assertEnvelope(op: RelayUnsignedOperation): void {
     validateRelayUnsignedOperation(op);
-    relayExecutionRoute(op);
-    const quote = op.quote, approval = quote?.approval;
-    if (!quote || !approval || !op.policyDigest || !op.policyRevision || !op.approvalNetworkFeeCeilingWei ||
+    relayErc20Reference(op);
+    // The source leg names chain, token, depository and envelope: Ethereum USDC, or a token route's own source token.
+    const leg = relayErc20SourceLeg(op), quote = op.tokenQuote ?? op.quote, approval = leg.approval;
+    if (!quote || !op.policyDigest || !op.policyRevision || !op.approvalNetworkFeeCeilingWei ||
       !op.depositNetworkFeeCeilingWei || !op.statusLocator || !quote.statusLocator ||
       op.statusLocator.requestId !== quote.statusLocator.requestId ||
-      quote.quoteDigest !== op.quoteDigest || op.sourceChainId !== 1 || approval.chainId !== 1 ||
-      !same(approval.from, op.sourceAccount) || !same(approval.to, ETHEREUM_USDC) ||
-      !same(quote.paymentDetails.depository, ETHEREUM_DEPOSITORY) || approval.value !== "0" ||
-      approval.data !== `0x095ea7b3${ETHEREUM_DEPOSITORY.slice(2).padStart(64, "0")}${BigInt(op.amountAtomic).toString(16).padStart(64, "0")}` ||
+      quote.quoteDigest !== op.quoteDigest || op.sourceChainId !== leg.chainId || approval.chainId !== leg.chainId ||
+      !same(approval.from, op.sourceAccount) || !same(approval.to, leg.token) ||
+      !same(quote.paymentDetails.depository, leg.depository) || approval.value !== "0" ||
+      approval.data !== `0x095ea7b3${leg.depository.slice(2).toLowerCase().padStart(64, "0")}${BigInt(op.amountAtomic).toString(16).padStart(64, "0")}` ||
       BigInt(approval.gas) * BigInt(approval.maxFeePerGas) > BigInt(op.approvalNetworkFeeCeilingWei) ||
       BigInt(approval.maxPriorityFeePerGas) > BigInt(approval.maxFeePerGas)) blocked("saved_approval_envelope");
   }
@@ -253,12 +253,11 @@ export class RelayApprovalEffectService {
       active.revision !== op.policyRevision || !same(active.accounts.evm ?? "", op.sourceAccount) ||
       (active.registry.expiresAt !== undefined && now.toISOString() >= active.registry.expiresAt)) blocked("active_policy_or_owner");
     if (!same(await this.ports.publicAccount(profile) ?? "", op.sourceAccount)) blocked("public_owner");
-    const usage = await this.ports.dailyUsage(op.sourceAccount, now);
-    const admission = evaluateAssetPolicy(active.registry, { chain: "eip155:1",
-      asset: { kind: "token", identifier: ETHEREUM_USDC }, rail: "bridge", amountAtomic: op.amountAtomic,
-      dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString(),
-      mechanism: { provider: "relay", reference: relayExecutionRoute(op) } });
-    const mechanism = { provider: "relay", reference: relayExecutionRoute(op) };
+    const usage = await this.ports.dailyUsage(op.sourceAccount, now), leg = relayErc20SourceLeg(op);
+    const mechanism = { provider: "relay", reference: relayErc20Reference(op) };
+    const admission = evaluateAssetPolicy(active.registry, { chain: leg.chain,
+      asset: { kind: "token", identifier: leg.token }, rail: "bridge", amountAtomic: op.amountAtomic,
+      dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString(), mechanism });
     if (!bridgeMechanismAdmitted(admission, mechanism)) blocked("route_pin");
     assertRecipientAdmitted({ admission, mechanism, recipient: op.recipient });
     const execution = await this.ports.executionAdmission(op);
@@ -267,11 +266,14 @@ export class RelayApprovalEffectService {
       blocked("relay_request_id_execution_admission_required");
     }
     const funding = await this.ports.funding(op);
-    if (funding.chainId !== 1 || funding.nativeBalanceWei < BigInt(op.approvalNetworkFeeCeilingWei!) + BigInt(op.depositNetworkFeeCeilingWei!) ||
+    // A token route approves exactly the principal from zero: a standing allowance is revoked first (Ethereum USDT
+    // reverts a nonzero-to-nonzero approve, and a leftover allowance would outlive this operation).
+    if (leg.zeroAllowanceRequired && funding.allowanceAtomic !== 0n) blocked("source_allowance_not_zero");
+    if (funding.chainId !== leg.chainId || funding.nativeBalanceWei < BigInt(op.approvalNetworkFeeCeilingWei!) + BigInt(op.depositNetworkFeeCeilingWei!) ||
       funding.tokenBalanceAtomic < BigInt(op.amountAtomic) || funding.allowanceAtomic < 0n ||
-      !relayEnvelopeFeeAdmitted(funding.baseFeePerGasWei, op.quote!.approval) ||
+      !relayEnvelopeFeeAdmitted(funding.baseFeePerGasWei, leg.approval) ||
       // The deposit that must follow is admitted now too, so an inadmissible fee never buys a paid approval.
-      !relayEnvelopeFeeAdmitted(funding.baseFeePerGasWei, op.quote!.deposit) ||
+      !relayEnvelopeFeeAdmitted(funding.baseFeePerGasWei, leg.deposit) ||
       funding.nextNonce < 0n) blocked("source_funding_or_fee");
     const after = this.ports.now();
     if (!Number.isFinite(after.getTime()) || after.getTime() + 60_000 >= Date.parse(op.deadline) ||
@@ -288,11 +290,11 @@ export async function verifySigned(op: RelayUnsignedOperation, raw: Hex, claimed
   let tx: ReturnType<typeof parseTransaction>, signer: string;
   try { tx = parseTransaction(raw); signer = await recoverTransactionAddress({ serializedTransaction: raw as Parameters<typeof recoverTransactionAddress>[0]["serializedTransaction"] }); }
   catch { corrupt("signed transaction decode"); }
-  const expected = op.quote!.approval;
-  if (tx.type !== "eip1559" || tx.chainId !== 1 || !same(signer, op.sourceAccount) ||
+  const leg = relayErc20SourceLeg(op), expected = leg.approval;
+  if (tx.type !== "eip1559" || tx.chainId !== leg.chainId || !same(signer, op.sourceAccount) ||
     !same(tx.to ?? "", expected.to) || !same(tx.data ?? "0x", expected.data) || (tx.value ?? 0n) !== 0n ||
     tx.gas !== BigInt(expected.gas) || tx.maxFeePerGas !== BigInt(expected.maxFeePerGas) ||
-    tx.maxPriorityFeePerGas !== BigInt(expected.maxPriorityFeePerGas) ||
+    (tx.maxPriorityFeePerGas ?? 0n) !== BigInt(expected.maxPriorityFeePerGas) ||
     (tx.accessList?.length ?? 0) !== 0 || tx.nonce === undefined ||
     (expectedNonce !== undefined && BigInt(tx.nonce) !== expectedNonce) ||
     tx.gas * tx.maxFeePerGas > BigInt(op.approvalNetworkFeeCeilingWei!)) corrupt("signed envelope drift");
@@ -301,17 +303,17 @@ export async function verifySigned(op: RelayUnsignedOperation, raw: Hex, claimed
 
 export function verifyApprovalObservation(op: RelayUnsignedOperation, hash: Hex,
   value: RelayApprovalObservation): "pending" | "confirmed" | "failed" {
-  const { transaction: tx, receipt, canonicalBlockHash } = value;
-  if (!same(tx.hash, hash) || !same(receipt.transactionHash, hash) || tx.chainId !== 1 ||
-    !same(tx.from, op.sourceAccount) || !same(tx.to ?? "", ETHEREUM_USDC) ||
-    !same(tx.input, op.quote!.approval.data) || receipt.blockNumber < 0n ||
+  const { transaction: tx, receipt, canonicalBlockHash } = value, leg = relayErc20SourceLeg(op);
+  if (!same(tx.hash, hash) || !same(receipt.transactionHash, hash) || tx.chainId !== leg.chainId ||
+    !same(tx.from, op.sourceAccount) || !same(tx.to ?? "", leg.token) ||
+    !same(tx.input, leg.approval.data) || receipt.blockNumber < 0n ||
     !same(receipt.blockHash, canonicalBlockHash) || !/^0x[0-9a-fA-F]{64}$/u.test(canonicalBlockHash)) corrupt("transaction or canonical inclusion");
   // A revert is recorded only once final; a successful approval may gate the deposit while included (BRDG-22).
   if (receipt.status === "reverted") return value.finalized === false ? "pending" : "failed";
   const owner = `0x${op.sourceAccount.slice(2).padStart(64, "0")}`;
-  const spender = `0x${ETHEREUM_DEPOSITORY.slice(2).padStart(64, "0")}`;
+  const spender = `0x${leg.depository.slice(2).padStart(64, "0")}`;
   const amount = `0x${BigInt(op.amountAtomic).toString(16).padStart(64, "0")}`;
-  const matches = receipt.logs.filter(log => same(log.address, ETHEREUM_USDC) &&
+  const matches = receipt.logs.filter(log => same(log.address, leg.token) &&
     same(log.transactionHash, hash) && same(log.blockHash, receipt.blockHash) &&
     log.topics.length === 3 && same(log.topics[0]!, topic) && same(log.topics[1]!, owner) &&
     same(log.topics[2]!, spender) && same(log.data, amount));

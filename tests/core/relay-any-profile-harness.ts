@@ -24,6 +24,8 @@ export const QA_PAYER = privateKeyToAccount(QA_PAYER_KEY).address;
 export const QA_RECIPIENT = privateKeyToAccount(QA_RECIPIENT_KEY).address;
 /** Unix seconds just after the generated quotes were captured; each fixture's signed deadline is seven days later. */
 export const QA_CAPTURED_AT = 1792190430;
+/** The Binance-Peg token-route quotes (`generated-*-quote-20261123.json`) were captured for the same two addresses. */
+export const QA_TOKEN_CAPTURED_AT = 1795437610;
 export const ETHEREUM_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 export const ARBITRUM_USDC = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 const OWNER_ADDRESSES = ["0x0b4dd0c3da001fa146eed3f80b01860bef6b8a14", "0x823a3a5bab1186141b32fc65f8e25ca24c679ce7",
@@ -32,8 +34,12 @@ const OWNER_PROFILES = ["default", "evm-live-buyer", "evm-live-seller", "metamas
 
 export const wrapping: WrappingSecretPort = { load: async () => Buffer.alloc(32, 9), create: async () => Buffer.alloc(32, 9) };
 export type QuoteName = "ethereum-usdc-bnb-native" | "ethereum-usdc-base-eth" | "bnb-native-polygon-native" | "bnb-native-monad-native" |
-  "base-native-megaeth-usdm" | "base-native-polygon-native" | "arbitrum-usdc-ethereum-usdc";
-export const quotePath = (name: QuoteName) => `tests/core/relay-fixtures/generated-${name}-quote-20261017.json`;
+  "base-native-megaeth-usdm" | "base-native-polygon-native" | "arbitrum-usdc-ethereum-usdc" | TokenQuoteName;
+export type TokenQuoteName = "bnb-usdt-base-usdc" | "arbitrum-usdc-bnb-usdc";
+const TOKEN_QUOTES: readonly string[] = ["bnb-usdt-base-usdc", "arbitrum-usdc-bnb-usdc"];
+const capturedAt = (name: QuoteName | null) => name !== null && TOKEN_QUOTES.includes(name) ? QA_TOKEN_CAPTURED_AT : QA_CAPTURED_AT;
+export const quotePath = (name: QuoteName) =>
+  `tests/core/relay-fixtures/generated-${name}-quote-${TOKEN_QUOTES.includes(name) ? "20261123" : "20261017"}.json`;
 export const quoteFixture = async (name: QuoteName): Promise<any> => JSON.parse(await readFile(quotePath(name), "utf8"));
 
 /** The test identities are nobody's: neither address nor profile is one the code ever pinned. */
@@ -56,7 +62,7 @@ export async function qaWorld(t: TestContext, quote: QuoteName | null, status: (
   const directory = await realpath(await mkdtemp(join(tmpdir(), "apn-relay-qa-")));
   t.after(async () => await rm(directory, { recursive: true, force: true }));
   const startedAt = Date.now(), wall = Date.now.bind(Date);
-  const now = () => QA_CAPTURED_AT * 1000 + (wall() - startedAt);
+  const now = () => capturedAt(quote) * 1000 + (wall() - startedAt);
   t.mock.method(Date, "now", now);
   const raw = quote === null ? null : await quoteFixture(quote);
   const quoteRequests: Record<string, unknown>[] = [];
@@ -138,6 +144,11 @@ export class SimChain {
   fund(account: string, wei: bigint, token?: { readonly address: string; readonly atomic: bigint }): this {
     this.balances.set(account.toLowerCase(), wei);
     if (token !== undefined) this.tokenBalances.set(`${token.address}:${account}`.toLowerCase(), token.atomic);
+    return this;
+  }
+  /** A standing ERC20 allowance the account granted before this operation. */
+  allow(token: string, owner: string, spender: string, atomic: bigint): this {
+    this.allowances.set(`${token}:${owner}:${spender}`.toLowerCase(), atomic);
     return this;
   }
   blockHash(number: bigint): Hex { return keccak256(toHex(`apn-relay-qa:${this.chainId}:${number}`)); }

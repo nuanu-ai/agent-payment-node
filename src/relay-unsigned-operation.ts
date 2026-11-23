@@ -6,6 +6,8 @@ import type { ValidatedRelayNativeQuote } from "./relay/native-quote.js";
 import { relayNativeRouteByReference } from "./relay/native-routes.js";
 import { RELAY_ARBITRUM_USDC, validateRelayArbitrumUsdcEthereumUsdcQuote } from "./relay/arbitrum-usdc-ethereum-quote.js";
 import type { RelayArbitrumSourceDraft } from "./relay/arbitrum-usdc-source-draft.js";
+import { assertSavedRelayTokenQuote, verifySavedRelayTokenQuote, type ValidatedRelayTokenQuote } from "./relay/token-quote.js";
+import { relayTokenRouteByReference } from "./relay/token-routes.js";
 import { ApnError } from "./errors.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 import { z } from "zod";
@@ -23,8 +25,8 @@ const body = z.strictObject({
   operationId: hash,
   idempotencyHash: hash,
   requestHash: hash,
-  sourceChainId: z.union([z.literal(1), z.literal(56), z.literal(8453), z.literal(42161)]),
-  destinationChainId: z.union([z.literal(1), z.literal(56), z.literal(137), z.literal(143), z.literal(4326), z.literal(8453)]),
+  sourceChainId: z.union([z.literal(1), z.literal(56), z.literal(137), z.literal(8453), z.literal(42161)]),
+  destinationChainId: z.union([z.literal(1), z.literal(56), z.literal(137), z.literal(143), z.literal(4326), z.literal(8453), z.literal(42161)]),
   sourceAccount: address,
   recipient: address,
   quoteDigest: hash,
@@ -32,6 +34,7 @@ const body = z.strictObject({
   quote: z.custom<ValidatedRelayQuote>((value) => value !== null && typeof value === "object" && !Array.isArray(value)).optional(),
   nativeQuote: z.custom<ValidatedRelayNativeQuote>((value) => value !== null && typeof value === "object" && !Array.isArray(value)).optional(),
   arbitrumDraft: z.custom<RelayArbitrumSourceDraft>((value) => value !== null && typeof value === "object" && !Array.isArray(value)).optional(),
+  tokenQuote: z.custom<ValidatedRelayTokenQuote>((value) => value !== null && typeof value === "object" && !Array.isArray(value)).optional(),
   policyDigest: hash.optional(),
   policyRevision: z.number().int().positive().optional(),
   policyActivationDigest: hash.optional(),
@@ -60,7 +63,7 @@ export function validateRelayUnsignedOperation(value: unknown): RelayUnsignedOpe
   if (hashObject(fields) !== integrityHash || Date.parse(operation.deadline) <= Date.parse(operation.createdAt)) corrupt();
   if ([operation.quote, operation.policyDigest, operation.policyRevision,
     operation.approvalNetworkFeeCeilingWei, operation.depositNetworkFeeCeilingWei].some(value => value !== undefined) &&
-    operation.nativeQuote === undefined && operation.arbitrumDraft === undefined &&
+    operation.nativeQuote === undefined && operation.arbitrumDraft === undefined && operation.tokenQuote === undefined &&
     [operation.quote, operation.policyDigest, operation.policyRevision,
       operation.approvalNetworkFeeCeilingWei, operation.depositNetworkFeeCeilingWei].some(value => value === undefined)) corrupt();
   if (operation.arbitrumDraft !== undefined) {
@@ -69,7 +72,7 @@ export function validateRelayUnsignedOperation(value: unknown): RelayUnsignedOpe
       const { integrityHash: draftHash, ...draftBody } = draft;
       if (hashObject(draftBody) !== draftHash || draft.schemaVersion !== "apn.relay-arbitrum-source-draft.v1" ||
         draft.executionAdmitted !== false || draft.nextActions.length !== 0 ||
-        operation.quote !== undefined || operation.nativeQuote !== undefined ||
+        operation.quote !== undefined || operation.nativeQuote !== undefined || operation.tokenQuote !== undefined ||
         operation.sourceChainId !== 42161 || operation.destinationChainId !== 1 ||
         operation.profileHash !== sha256(`profile\0${draft.profile}`) ||
         operation.sourceAccount !== draft.owner || operation.recipient !== draft.recipient.toLowerCase() ||
@@ -88,7 +91,8 @@ export function validateRelayUnsignedOperation(value: unknown): RelayUnsignedOpe
     // are the operation's own fields, bound below to the stored quote and its hash. No owner address selects a route.
     const route = typeof quote.routeReference === "string" ? relayNativeRouteByReference(quote.routeReference) : null;
     if (route === null) return corrupt();
-    if (operation.quote !== undefined || operation.sourceChainId !== route.sourceChainId || operation.destinationChainId !== route.chainId ||
+    if (operation.quote !== undefined || operation.tokenQuote !== undefined ||
+      operation.sourceChainId !== route.sourceChainId || operation.destinationChainId !== route.chainId ||
       quote.schemaVersion !== "apn.relay-native-quote.v1" ||
       operation.approvalNetworkFeeCeilingWei !== undefined || operation.policyDigest === undefined ||
       operation.policyRevision === undefined || operation.depositNetworkFeeCeilingWei === undefined ||
@@ -102,6 +106,20 @@ export function validateRelayUnsignedOperation(value: unknown): RelayUnsignedOpe
       (operation.statusLocator !== undefined && (quote.statusLocator?.requestId !== operation.statusLocator.requestId ||
         quote.statusLocator?.endpoint !== operation.statusLocator.endpoint ||
         relayStatusLocator(operation.statusLocator.requestId, operation.statusLocator.endpoint).endpoint !== operation.statusLocator.endpoint))) corrupt();
+  } else if (operation.tokenQuote !== undefined) {
+    // A token route is the protocol row its saved quote names; every side binds to the operation's own fields.
+    const quote = operation.tokenQuote, route = relayTokenRouteByReference(quote.routeReference);
+    if (route === null) return corrupt();
+    try { assertSavedRelayTokenQuote(quote, route); } catch { corrupt(); }
+    if (operation.quote !== undefined || operation.sourceChainId !== route.source.chainId ||
+      operation.destinationChainId !== route.destination.chainId || operation.policyDigest === undefined ||
+      operation.policyRevision === undefined || operation.approvalNetworkFeeCeilingWei !== quote.approval.maximumNetworkFeeWei ||
+      operation.depositNetworkFeeCeilingWei !== quote.deposit.maximumNetworkFeeWei ||
+      quote.payer !== operation.sourceAccount.toLowerCase() || quote.recipient !== operation.recipient.toLowerCase() ||
+      quote.principalAtomic !== operation.amountAtomic || quote.minimumOutputAtomic !== operation.minOutputAtomic ||
+      new Date(quote.deadline * 1000).toISOString() !== operation.deadline || quote.quoteDigest !== operation.quoteDigest ||
+      operation.statusLocator?.requestId !== quote.statusLocator.requestId ||
+      operation.statusLocator.endpoint !== quote.statusLocator.endpoint) corrupt();
   } else if (operation.sourceChainId !== 1 || ![56, 8453].includes(operation.destinationChainId) ||
     (operation.destinationChainId === 8453 && operation.quote === undefined)) corrupt();
   if (operation.quote !== undefined) {
@@ -125,7 +143,7 @@ export function validateRelayUnsignedOperation(value: unknown): RelayUnsignedOpe
         operation.depositNetworkFeeCeilingWei !== operation.quote.deposit.maximumNetworkFeeWei) corrupt();
     } catch { corrupt(); }
   } else if (operation.statusLocator !== undefined && operation.nativeQuote === undefined &&
-    operation.arbitrumDraft === undefined) corrupt();
+    operation.arbitrumDraft === undefined && operation.tokenQuote === undefined) corrupt();
   return operation;
 }
 
@@ -136,8 +154,9 @@ export function freezeRelayUnsignedOperation(input: RelayUnsignedOperationInput)
 }
 
 export type PublicRelayUnsignedOperation = Omit<RelayUnsignedOperation,
-  "integrityHash" | "statusLocator" | "quote" | "nativeQuote" | "arbitrumDraft" | "state" | "terminal"> & {
+  "integrityHash" | "statusLocator" | "quote" | "nativeQuote" | "arbitrumDraft" | "tokenQuote" | "state" | "terminal"> & {
   readonly quote?: Omit<ValidatedRelayQuote, "statusLocator">;
+  readonly tokenQuote?: Omit<ValidatedRelayTokenQuote, "statusLocator">;
   readonly nativeQuote?: Omit<ValidatedRelayNativeQuote, "statusLocator">;
   readonly arbitrumSource?: Readonly<{ readonly orderId: string; readonly providerFeeCeilingAtomic: string;
     readonly routeReference: "arbitrum-usdc-ethereum-usdc-source-draft-v1" }>;
@@ -158,13 +177,14 @@ export type PublicRelayUnsignedOperation = Omit<RelayUnsignedOperation,
 export function publicRelayUnsignedOperation(operation: RelayUnsignedOperation,
   retirement: RelayRetirement | null = null,
   sourceCompletion: { readonly state: "source_confirmed" | "failed_confirmed_revert" | "failed_before_effect"; readonly journalIntegrityHash: string } | null = null): PublicRelayUnsignedOperation {
-  const { integrityHash: _integrityHash, statusLocator: _locator, quote, nativeQuote, arbitrumDraft,
+  const { integrityHash: _integrityHash, statusLocator: _locator, quote, nativeQuote, arbitrumDraft, tokenQuote,
     ...publicFields } = validateRelayUnsignedOperation(operation);
   const publicQuote = quote === undefined ? {} : { quote: (({ statusLocator: _hidden, ...fields }) => fields)(quote) };
   const publicNativeQuote = nativeQuote === undefined ? {} : {
     nativeQuote: (({ statusLocator: _hidden, ...fields }) => fields)(nativeQuote),
   };
-  return { ...publicFields, ...publicQuote, ...publicNativeQuote,
+  const publicTokenQuote = tokenQuote === undefined ? {} : { tokenQuote: (({ statusLocator: _hidden, ...fields }) => fields)(tokenQuote) };
+  return { ...publicFields, ...publicQuote, ...publicNativeQuote, ...publicTokenQuote,
     ...(arbitrumDraft === undefined ? {} : { arbitrumSource: { orderId: arbitrumDraft.orderId,
       providerFeeCeilingAtomic: arbitrumDraft.maxProviderFeeAtomic,
       routeReference: "arbitrum-usdc-ethereum-usdc-source-draft-v1" as const } }),
@@ -240,12 +260,19 @@ export class RelayUnsignedOperationRepository extends SecureStateStore {
     } catch { corrupt(); }
   }
 
+  /** A saved token quote still recomputes its order id and recovers the Relay solver's signature. */
+  private async verifyTokenQuote(operation: RelayUnsignedOperation): Promise<void> {
+    if (operation.tokenQuote === undefined) return;
+    try { await verifySavedRelayTokenQuote(operation.tokenQuote); } catch { corrupt(); }
+  }
+
   async loadOperation(profileHash: string, operationId: string): Promise<RelayUnsignedOperation | null> {
     const value = await this.readJson(this.path(profileHash, operationId));
     if (value === null) return null;
     const operation = validateRelayUnsignedOperation(value);
     if (operation.profileHash !== profileHash || operation.operationId !== operationId) corrupt();
     await this.verifyArbitrumDraft(operation);
+    await this.verifyTokenQuote(operation);
     return operation;
   }
 
@@ -282,6 +309,7 @@ export class RelayUnsignedOperationRepository extends SecureStateStore {
   async persistLocked(operation: RelayUnsignedOperation): Promise<void> {
     validateRelayUnsignedOperation(operation);
     await this.verifyArbitrumDraft(operation);
+    await this.verifyTokenQuote(operation);
     const previous = await this.loadOperation(operation.profileHash, operation.operationId);
     if (previous !== null) {
       if (previous.integrityHash !== operation.integrityHash) throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Relay unsigned operation cannot be changed.");
