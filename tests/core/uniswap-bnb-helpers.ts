@@ -31,6 +31,8 @@ export class BnbRpc {
   head = 1000n; balance = 10n ** 18n; nonce = 3n; pendingNonce = 3n; quoted = BNB_QUOTED_OUT; chainId = "0x38"; decimals = 18n;
   pool = BNB_UNISWAP_USDT_WBNB_500 as string; routerReverts = false; sends: Hex[] = []; receipt: "none" | "success" | "revert" = "none";
   minedAt = 0n; credit = BNB_QUOTED_OUT; gasUsed = 120_000n; gasPrice = 100_000_000n; calls: string[] = [];
+  /** Block timestamp: 2026-11-23T12:00:00Z, the tests' start, so a quote deadline 15 minutes later has not passed. */
+  timestamp = 1_795_435_200n;
   /** The USDC proxy implementation slot answer; deployed code is never the pinned bytes, so a real code pin check refuses. */
   implementation: string = BNB_USDC_IMPLEMENTATION_PIN.address;
   readonly call = async (method: string, params: readonly unknown[]): Promise<unknown> => {
@@ -50,7 +52,7 @@ export class BnbRpc {
   private spent(): bigint { return this.receipt === "success" ? BigInt(BNB_AMOUNT_IN) + this.gasUsed * this.gasPrice : this.gasUsed * this.gasPrice; }
   private block(tag: string): unknown {
     const number = tag === "latest" || tag === "safe" || tag === "finalized" ? this.head : BigInt(tag);
-    return { number: quantity(number), hash: `0x${number.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x0", timestamp: quantity(1_795_437_312n) };
+    return { number: quantity(number), hash: `0x${number.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x0", timestamp: quantity(this.timestamp) };
   }
   private ethCall(tx: { to: string; data: Hex }, tag: string): Hex {
     if ((tx.to === BNB_UNISWAP_USDT_WBNB_500 || tx.to === BNB_UNISWAP_USDC_WBNB_500) && tx.data.startsWith("0x3850c7bd")) {

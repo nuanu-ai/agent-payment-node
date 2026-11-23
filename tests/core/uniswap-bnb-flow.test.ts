@@ -134,6 +134,16 @@ test("a finalized status-0 BNB receipt releases the reservation, and a pre-send 
   const stale = await late.runtime.prepare({ profile: PROFILE, quoteHash: late.quoted.quoteHash, idempotencyKey: "bnb-flow-0005" }, late.clock.now());
   await assert.rejects(late.runtime.approveAndExecute(stale.operationId, late.clock.now()), (error: any) => error.details?.reason === "uniswap_execution_drift");
   assert.equal(late.rpc.sends.length, 0);
+
+  // The router deadline passed at a finalized block with no receipt for the signed hash: expired_unlanded, input released.
+  const fourth = await temporaryState(); t.after(fourth.cleanup);
+  const lost = await flow(fourth.root);
+  const lostOp = await lost.runtime.prepare({ profile: PROFILE, quoteHash: lost.quoted.quoteHash, idempotencyKey: "bnb-flow-0008" }, lost.clock.now());
+  const unlanded = await lost.runtime.approveAndExecute(lostOp.operationId, lost.clock.now());
+  assert.equal(unlanded.state, "submitted"); assert.equal(await lost.usage(), BNB_AMOUNT_IN);
+  lost.rpc.timestamp = BigInt(Math.floor(Date.parse(unlanded.quote.expiresAt) / 1000)) + 1n; lost.advance(901_000);
+  const expired = await lost.runtime.status(unlanded.operationId, lost.clock.now());
+  assert.equal(expired.state, "expired_unlanded"); assert.equal(await lost.usage(), "0"); assert.equal(lost.rpc.sends.length, 1);
 });
 
 test("preparation refuses a policy that admits another BNB route, and the BNB observer refuses another chain's swap", async (t) => {
