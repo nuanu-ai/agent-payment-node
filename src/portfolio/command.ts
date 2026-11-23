@@ -1,5 +1,6 @@
 import { hashObject } from "../canonical.js";
 import { loadAllowlistInventory } from "../allowlist-inventory.js";
+import { BINANCE_PEG_POLICY_ASSETS } from "../binance-peg-policy-assets.js";
 import { AssetPortfolioReader, type AssetPortfolio, type PortfolioAccount, type PortfolioRowStatus } from "../asset-portfolio-reader.js";
 import { ApnError } from "../errors.js";
 import type { RuntimeContext } from "../runtime.js";
@@ -37,7 +38,7 @@ export async function readProfilePortfolio(context: RuntimeContext, profileInput
   const snapshot = await context.state.withLocks([`profile:${profileHash}`], async () => await profileAccounts(context, profile, profileHash));
   const reader = new AssetPortfolioReader({ evm: new EvmPortfolioPort(dependencies.http), solana: new SolanaPortfolioPort(dependencies.http),
     tron: new TronPortfolioPort(dependencies.http) }, () => context.clock.now(), dependencies.wait);
-  const portfolio = await reader.read({ inventory, accounts: snapshot.accounts, cache: { state: context.state, profileHash, profileIdentity: snapshot.identity, refresh },
+  const portfolio = await reader.read({ inventory, supplements: BINANCE_PEG_POLICY_ASSETS, accounts: snapshot.accounts, cache: { state: context.state, profileHash, profileIdentity: snapshot.identity, refresh },
     endpoint: (chain) => portfolioEndpoint(chain, dependencies.environment) });
   return publicPortfolio(profile, portfolio);
 }
