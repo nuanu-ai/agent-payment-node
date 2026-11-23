@@ -100,9 +100,11 @@ export class InstalledUniswapTokenLaneRuntime implements UniswapTokenCommandRunt
     private async budgeted<T>(id: string, command: string,
       budget: () => Promise<readonly [number, number, NonNullable<import("./token-rpc-budget.js").TokenRpcBudgetRow["budgetClass"]>]>, work: () => Promise<T>) {
       return await this.journal.withLocks([`uniswap-token-runtime:${id}`], async () => { const [cap, requestSessionCap, budgetClass] = await budget();
-        if (this.rpcBudget === undefined) { await this.ownLane(id); return await work(); }
+        // The lane check comes first, so a record of the other lane gets no budget row and its refusal is never hidden.
+        await this.ownLane(id);
+        if (this.rpcBudget === undefined) return await work();
         await this.rpcBudget.reconcile(id); const reservation = await this.rpcBudget.reserve(id, command, cap, requestSessionCap, budgetClass);
-        try { await this.ownLane(id); return await work(); }
+        try { return await work(); }
         finally { await this.rpcBudget.settle(id, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0,
           this.rpc?.primaryPoolTelemetry?.()); } }); }
     /** An operation of the other lane refuses before any of its reads, naming that lane's own status command. */

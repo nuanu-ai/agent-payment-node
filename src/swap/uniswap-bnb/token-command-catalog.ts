@@ -56,7 +56,7 @@ export function bindUniswapBnbTokenCommand(path: string, o: Readonly<Record<stri
   if (action === "inventory") { exact(o, []); return { command: "swap.uniswap-bnb-token.inventory" }; }
   if (action === "cleanup" && Object.hasOwn(o, "--max-fee-per-gas")) {
     exact(o, ["--operation", "--max-fee-per-gas", "--max-priority-fee-per-gas"]);
-    const maxFeePerGas = wei(o["--max-fee-per-gas"], true), maxPriorityFeePerGas = wei(o["--max-priority-fee-per-gas"], false);
+    const maxFeePerGas = wei(o["--max-fee-per-gas"], true), maxPriorityFeePerGas = wei(o["--max-priority-fee-per-gas"], true);
     if (BigInt(maxPriorityFeePerGas) > BigInt(maxFeePerGas)) invalid();
     return { command: "swap.uniswap-bnb-token.cleanup", operationId: hash(o["--operation"]), cleanupFees: { maxFeePerGas, maxPriorityFeePerGas } };
   }
