@@ -81,6 +81,7 @@ test("the handoff names the exact gasless USDT execute and Permit2 approve comma
     ["gasless usdt execute", { operation: OPERATION }],
     ["x402 permit2 approve", { url: "https://seller.example", rpc_url: "https://rpc.example/", idempotency_key: "permit2-handoff-0001" }],
     ["x402 permit2 approve", { url: "https://seller.example/resource", rpc_url: "https://rpc.example/" }],
+    ["x402 permit2 approve", { url: "https://seller.example/resource", rpc_url: "https://rpc.example/", idempotency_key: "permit2-handoff-0001", method: "HEAD" }],
   ] as const) {
     const refused = decode(await connection.client.callTool({ name: "apn_foreground_handoff", arguments: { command, arguments: args } }));
     assert.equal(refused.error?.code, "APN_INVALID_INPUT", JSON.stringify(args));

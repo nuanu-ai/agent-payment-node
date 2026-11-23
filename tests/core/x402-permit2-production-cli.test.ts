@@ -155,7 +155,7 @@ test("strict CLI flags, legacy status and MCP projection preserve CLI-only paid/
   assert.throws(() => parseArgv([...base, "--yes"]));
   const post = parseArgv([...base, "--method", "POST", "--headers-json", "{}", "--body-base64", "AA=="]).request as { httpRequest?: { method: string; bodyBase64: string | null } };
   assert.deepEqual([post.httpRequest?.method, post.httpRequest?.bodyBase64], ["POST", "AA=="]);
-  for (const flags of [["--method", "CONNECT"], ["--headers-json", '{"authorization":"x"}'], ["--body-base64", "not base64"]]) assert.throws(() => parseArgv([...base, ...flags]));
+  for (const flags of [["--method", "CONNECT"], ["--method", "head"], ["--headers-json", '{"authorization":"x"}'], ["--body-base64", "not base64"]]) assert.throws(() => parseArgv([...base, ...flags]));
   const read = ["x402", "permit2", "observe", "--operation", "a".repeat(64), "--rpc-url", "https://8.8.8.8/"];
   assert.throws(() => parseArgv([...read, "--transaction", `0x${"0".repeat(64)}`]));
   assert.throws(() => parseArgv([...read, "--transaction", `0x${"a".repeat(64)}`, "--expired-unused"]));

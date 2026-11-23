@@ -45,8 +45,6 @@ export async function executePermit2ProductionCli(bound: BoundCommand, options: 
     // A plain GET unless --method, --headers-json or --body-base64 named more; the same request is frozen, approved and paid.
     const exact = optionalX402HttpRequest(request.url, request.httpRequest) ??
       normalizeX402HttpRequest({ schemaVersion: "apn.http-request.v1", url: request.url, method: "GET", headers: {}, bodyBase64: null });
-    // A paid HEAD answer carries no body, so the seller's result could never be read back: refused before anything runs.
-    if (exact.method === "HEAD") throw new ApnError("APN_INVALID_INPUT", "x402 permit2 approve does not pay a HEAD request.");
     const id = permit2ProductionId(profile, key), saved = await records.findOperation(id); operationId = id;
     if (saved !== null) {
       if (canonicalJson(saved.material.checked.request) !== canonicalJson(exact)) throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Permit2 key names a different frozen request.");
