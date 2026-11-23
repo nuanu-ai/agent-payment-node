@@ -252,7 +252,8 @@ test("a Solana genesis mismatch is unavailable; profiles without Solana or TRON 
   assert.equal(data.rpc_calls_total, 13);
   const withSolana = await portfolio(chains, { rails: ["solana"], evmWallet: false });
   assert.deepEqual(net(withSolana.data, `solana:${SOLANA_GENESIS}`).rows.map((row) => row.reason), Array(3).fill("chain_mismatch"));
-  assert.equal(withSolana.data.summary.no_account, 23 + 2);
+  // 25 EVM rows (23 frozen rows plus the two Binance-Peg rows of BNB Smart Chain) and 2 TRON rows have no account.
+  assert.equal(withSolana.data.summary.no_account, 25 + 2);
 });
 
 test("a chain without a pinned Multicall3 is read with one plain JSON-RPC batch array", async () => {
