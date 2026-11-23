@@ -16,7 +16,7 @@ neither keyless sponsor accepts EIP-7702 there.
 | [Local wallet](#local-wallet-circle-paymaster) | Ethereum 1, Optimism 10, Unichain 130, Polygon PoS 137, Base 8453, Arbitrum One 42161 | Circle USDC paymaster, through a bundler | Actual fee `A`, at most the frozen budget `F` |
 | [Local wallet on Avalanche](#local-wallet-on-avalanche-x402-facilitator) | Avalanche C-Chain 43114 | PayAI public x402 facilitator | 0 |
 | [Coinbase Agentic Wallet](#coinbase-agentic-wallet-on-base) | Base 8453 | Coinbase CDP paymaster | 0 |
-| [MetaMask Agent server wallet](#metamask-agent-server-wallet) | Ethereum 1, Optimism 10, Polygon PoS 137, Monad 143, Sei 1329, Base 8453, Arbitrum One 42161, Linea 59144 | MetaMask relay | Quoted fee `F`, inside your caps |
+| [MetaMask Agent server wallet](#metamask-agent-server-wallet) | Ethereum 1, Optimism 10, BNB Smart Chain 56 (USDT and USDC), Polygon PoS 137, Monad 143, Sei 1329, Base 8453, Arbitrum One 42161, Linea 59144 | MetaMask relay | Quoted fee `F`, inside your caps |
 | [MetaMask Smart Account](#metamask-smart-account) | Base 8453 | Public MetaMask facilitator | 0 |
 
 `apn gasless capabilities` lists the exact adapters, networks, pinned deployments, RPC variables and each profile's
@@ -69,11 +69,11 @@ neither keyless sponsor accepts EIP-7702 there.
 
 ```sh
 apn gasless capabilities [--profile <profile>]
-apn gasless balance --profile <profile> --chain <chain-id>
+apn gasless balance --profile <profile> --chain <chain-id> [--asset <token-contract>]
 apn gasless transfer quote --profile <profile> --chain 1 --owner <local-owner-address> \
   --to <recipient-address> --amount 0.005 --max-fee 0.004 --min-received 0.001 \
   --rpc-url <public-ethereum-rpc> [--rpc-max-batch-items <2-30>]
-apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <recipient-address> \
+apn gasless transfer prepare --profile <profile> --chain <chain-id> [--asset <token-contract>] --to <recipient-address> \
   --amount <gross-usdc> --max-fee <usdc> --min-received <usdc> --idempotency-key <unique-key>
 apn gasless transfer approve --operation <operation-id>
 apn gasless transfer approve-sealed --operation <operation-id>   # local wallet only, see below
@@ -86,7 +86,8 @@ apn receipt get --operation <operation-id>
 
 `--chain` takes a numeric mainnet chain ID. `--idempotency-key` is 8 to 200 safe ASCII characters. MetaMask server
 wallets also accept a fixed-net prepare (`--net-amount-atomic`, `--max-gross-atomic`, `--max-fee-atomic`), described
-in their section.
+in their section. `--asset` names the token of a MetaMask server-wallet transfer: it is required on BNB Smart Chain
+(chain 56), which carries two tokens, and elsewhere may only name that chain's USDC. Other profiles refuse it.
 
 ### Ethereum fee quote (read only)
 
@@ -586,6 +587,14 @@ read failed keeps its resume after them.
 | Base | 8453 | `APN_BASE_RPC_URL` | safe |
 | Arbitrum One | 42161 | `APN_ARBITRUM_RPC_URL` | safe |
 | Linea | 59144 | `APN_LINEA_RPC_URL` | safe |
+| BNB Smart Chain | 56 | `APN_BNB_RPC_URL` | safe |
+
+On BNB Smart Chain the server wallet moves Binance-Peg USDT (`--asset 0x55d398326f99059fF775485246999027B3197955`)
+or Binance-Peg USDC (`--asset 0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d`). Both have 18 decimals, so `--amount`,
+`--max-fee` and `--min-received` take up to 18 decimal places there. The relay fee is paid in the same token. APN
+pinned the delegation contracts and both tokens on 2026-11-23 from its own reads. USDT is not a proxy; USDC is an
+EIP-1967 proxy, and APN checks its implementation at every snapshot. MetaMask's list of fee tokens needs a session,
+so APN checks it at each quote and refuses the transfer if MetaMask quotes no fee in that token at 18 decimals.
 
 MetaMask supplies the relay; no bundler configuration is used. The explicit public HTTPS RPC must provide canonical
 block-hash state reads, the listed finality tag, complete transaction/receipt membership and bounded log queries. APN
@@ -607,6 +616,7 @@ another provider.
 | Base (8453) | `https://base-rpc.publicnode.com` | `https://mainnet.base.org` answers "request limit reached" to 2,000-block logs |
 | Arbitrum One (42161) | `https://arb1.arbitrum.io/rpc` | publicnode refuses state at the safe head (about 3,000 blocks behind latest) |
 | Linea (59144) | `https://rpc.linea.build` | publicnode refuses 2,000-block logs |
+| BNB Smart Chain (56) | `https://bsc-rpc.publicnode.com` | `https://bsc-dataseed.bnbchain.org` refuses `eth_getLogs` ("limit exceeded") |
 | Unichain (130, local wallet) | `https://mainnet.unichain.org`, `https://unichain-rpc.publicnode.com` | |
 
 `*.drpc.org` endpoints refuse JSON-RPC batches of more than three requests and do not fit these paths.
