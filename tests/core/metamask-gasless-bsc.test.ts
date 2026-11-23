@@ -171,7 +171,7 @@ test("chain 56 quotes 18-decimal USDT and USDC with the fee in the same token th
     assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: true, result: quoteOf(token, "1500000000000000000", "1000") });
     const sentinel = exchange.requests.filter(request => request.method === "POST" && request.url.includes("tx-sentinel-"));
     assert.deepEqual(sentinel.map(request => request.url), ["https://agentic-proxy.workers.cx.metamask.io/proxy/prd/tx-sentinel-bsc-mainnet"]);
-    assert.equal(JSON.parse(sentinel[0]!.body!).params[0].transactions[0].to, token);
+    assert.equal(String(JSON.parse(sentinel[0]!.body!).params[0].transactions[0].to).toLowerCase(), token);
   }
   for (const [name, edit] of [
     ["fee token at 6 decimals", (request: FetchExchangeRequest, body: any) => {
