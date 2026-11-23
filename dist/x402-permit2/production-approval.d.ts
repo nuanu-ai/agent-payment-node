@@ -23,6 +23,13 @@ export interface Permit2ApprovalDisplay {
     readonly requestHash: string;
     readonly headersHash: string;
     readonly bodyHash: string;
+    /**
+     * Present only for a request other than GET or with a body, so a plain GET displays as before: the method, and the
+     * body's size and the SHA-256 of its bytes. Like the URL path, headers stay private and are shown by hash only.
+     */
+    readonly method?: string;
+    readonly bodyByteLength?: number;
+    readonly bodySha256?: string;
     readonly materialHash: string;
     readonly typedDataDigest: string;
     readonly eip2612Digest: string | null;

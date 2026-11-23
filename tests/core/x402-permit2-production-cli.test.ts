@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { runCli, parseArgv } from "../../src/cli.js";
-import { canonicalJson, domainHash } from "../../src/canonical.js";
+import { canonicalJson, domainHash, sha256 } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
 import { COMMANDS } from "../../src/command-catalog.js";
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
@@ -60,6 +60,8 @@ for (const settlement of [false, true]) test(`actual runCli unpaid GET through e
   // Trusted synthetic consent fixture only; this does not establish actual human approval.
   t.mock.method(TtyPermit2ForegroundApproval.prototype, "approve", async (display: Permit2ApprovalDisplay) => {
     ui++; assert.equal(f.keys(), 0); assert.equal(display.purpose, "sign-and-submit-once"); assert.equal(display.amountAtomic, "10000");
+    // A GET without a body adds no display field, so the display hash of GET records saved before 0.5.112 is unchanged.
+    for (const key of ["method", "bodyByteLength", "bodySha256"]) assert.equal(key in display, false, key);
   });
   const result = await runCli(argv(f), {}, options(f)); assert.equal(result.ok, true); safe(result);
   assert.equal(ui, 1); assert.equal(f.signatures(), 2); assert.ok(f.keys() > 0); assert.equal(wire.paid.length, 1);
@@ -79,6 +81,38 @@ for (const settlement of [false, true]) test(`actual runCli unpaid GET through e
   assert.equal(await readFile(`${f.root}/permit2-production/${f.id}.json`, "utf8"), bytes);
   const conflict = await runCli(argv(f).map(v => v === f.url ? `${f.url}&different=1` : v), {}, options(f));
   assert.equal(conflict.error?.code, "APN_IDEMPOTENCY_CONFLICT"); assert.deepEqual([f.keys(), f.signatures(), wire.calls.length, wire.paid.length], before); safe(conflict);
+});
+test("a POST with a header and a JSON body is the unpaid request, the frozen material, the prompt and the one paid request", async t => {
+  const f = await permit2CliFixture(t), json = '{"chain":"base","interaction":{"type":"permit_signature"}}';
+  const bodyBase64 = Buffer.from(json).toString("base64"), headers = { "content-type": "application/json" };
+  const wire = cliWire(t, f, { request: { method: "POST", body: json, contentType: "application/json" } });
+  let shown: Permit2ApprovalDisplay | undefined;
+  t.mock.method(TtyPermit2ForegroundApproval.prototype, "approve", async (display: Permit2ApprovalDisplay) => {
+    if (shown !== undefined) throw new Error("No replay UI"); shown = display;
+  });
+  const post = [...argv(f), "--method", "post", "--headers-json", JSON.stringify(headers), "--body-base64", bodyBase64];
+  const result = await runCli(post, {}, options(f)); assert.equal(result.ok, true); safe(result);
+  assert.equal(wire.calls.filter(c => c === "unsigned_GET").length, 1, "one unpaid request"); assert.equal(wire.paid.length, 1);
+  assert.deepEqual([wire.paid[0]!.options.method, Buffer.from(wire.paid[0]!.body as Buffer).toString("utf8"), wire.paid[0]!.options.headers["content-type"]],
+    ["POST", json, "application/json"]);
+  const saved = (await f.records.findOperation(f.id))!, request = saved.material.checked.request;
+  assert.deepEqual([request.method, request.headers, request.bodyBase64], ["POST", headers, bodyBase64]);
+  assert.deepEqual([shown?.method, shown?.bodyByteLength, shown?.bodySha256], ["POST", Buffer.byteLength(json), sha256(Buffer.from(json))]);
+  // The same key names the frozen POST: a plain GET or another body is a different request; the exact POST reads status.
+  const before = [f.keys(), f.signatures(), wire.calls.length, wire.paid.length];
+  for (const other of [argv(f), [...argv(f), "--method", "POST", "--headers-json", JSON.stringify(headers), "--body-base64", Buffer.from("{}").toString("base64")]]) {
+    const conflict = await runCli(other, {}, options(f)); assert.equal(conflict.error?.code, "APN_IDEMPOTENCY_CONFLICT"); safe(conflict);
+  }
+  const replay = await runCli(post, {}, options(f)); assert.equal(replay.ok, true); safe(replay);
+  assert.deepEqual([f.keys(), f.signatures(), wire.calls.length, wire.paid.length], before);
+});
+test("a HEAD request is refused before any lookup, HTTP, keychain or prompt: its paid answer would carry no result", async t => {
+  const f = await permit2CliFixture(t), wire = cliWire(t, f); let ui = 0;
+  t.mock.method(TtyPermit2ForegroundApproval.prototype, "approve", async () => { ui++; });
+  const head = await runCli([...argv(f), "--method", "HEAD"], {}, options(f));
+  assert.equal(head.error?.code, "APN_INVALID_INPUT"); safe(head);
+  assert.deepEqual([wire.calls.length, wire.paid.length, f.keys(), ui], [0, 0, 0, 0]);
+  assert.equal(await f.records.findOperation(f.id), null);
 });
 test("new operation refuses nonlocal native before unsigned HTTP or keychain", async t => {
   const f = await permit2CliFixture(t), wire = cliWire(t, f);
@@ -118,7 +152,10 @@ for (const state of ["prepared", "reserved"] as const) test(`matching ${state} r
 test("strict CLI flags, legacy status and MCP projection preserve CLI-only paid/observe boundary", async t => {
   const base = ["x402", "permit2", "approve", "--url", "https://seller.example/", "--rpc-url", "https://8.8.8.8/", "--idempotency-key", "explicit-key-001"];
   assert.equal(parseArgv(base).request.command, "x402.permit2.approve");
-  for (const flags of [["--method", "POST"], ["--yes"], ["--headers-json", "{}"], ["--body-base64", "AA=="]]) assert.throws(() => parseArgv([...base, ...flags]));
+  assert.throws(() => parseArgv([...base, "--yes"]));
+  const post = parseArgv([...base, "--method", "POST", "--headers-json", "{}", "--body-base64", "AA=="]).request as { httpRequest?: { method: string; bodyBase64: string | null } };
+  assert.deepEqual([post.httpRequest?.method, post.httpRequest?.bodyBase64], ["POST", "AA=="]);
+  for (const flags of [["--method", "CONNECT"], ["--method", "head"], ["--headers-json", '{"authorization":"x"}'], ["--body-base64", "not base64"]]) assert.throws(() => parseArgv([...base, ...flags]));
   const read = ["x402", "permit2", "observe", "--operation", "a".repeat(64), "--rpc-url", "https://8.8.8.8/"];
   assert.throws(() => parseArgv([...read, "--transaction", `0x${"0".repeat(64)}`]));
   assert.throws(() => parseArgv([...read, "--transaction", `0x${"a".repeat(64)}`, "--expired-unused"]));

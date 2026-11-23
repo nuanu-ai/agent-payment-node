@@ -9,7 +9,7 @@ import { StateStore } from "../state.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { HttpsX402Http } from "../x402-http.js";
-import { normalizeX402HttpRequest } from "../x402-http-request.js";
+import { normalizeX402HttpRequest, optionalX402HttpRequest } from "../x402-http-request.js";
 import { inspectCheckedPermit2Challenge } from "./checked-inspection.js";
 import { permit2WalletBinding } from "./owner-binding.js";
 import { permit2PublicRpc } from "./preflight.js";
@@ -39,7 +39,9 @@ export async function executePermit2ProductionCli(bound, options, root) {
                 .observe(request.operationId, bound.rpcUrl, request.expiredUnused ? "expired_unused" : "settlement", request.transaction));
         }
         const profile = canonicalProfile(request.profile), key = canonicalIdempotencyKey(request.idempotencyKey);
-        const exact = normalizeX402HttpRequest({ schemaVersion: "apn.http-request.v1", url: request.url, method: "GET", headers: {}, bodyBase64: null });
+        // A plain GET unless --method, --headers-json or --body-base64 named more; the same request is frozen, approved and paid.
+        const exact = optionalX402HttpRequest(request.url, request.httpRequest) ??
+            normalizeX402HttpRequest({ schemaVersion: "apn.http-request.v1", url: request.url, method: "GET", headers: {}, bodyBase64: null });
         const id = permit2ProductionId(profile, key), saved = await records.findOperation(id);
         operationId = id;
         if (saved !== null) {

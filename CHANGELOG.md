@@ -2,6 +2,16 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.112 — 2026-11-23
+
+`x402 permit2 approve` sent only a plain GET, so a seller whose paid endpoint takes a POST with a body could not be paid through Permit2. The only Permit2 seller on Avalanche in the public catalogs on 2026-11-23, `x402check.xyz`, is such a seller.
+
+- **`x402 permit2 approve` takes `--method`, `--headers-json` and `--body-base64`,** the same options and limits as `x402 inspect` and `x402 fetch prepare`: any method except CONNECT, TRACE and HEAD (a paid HEAD answer carries no result), at most 32 headers within 8 KiB, a body of at most 64 KiB. The shared deny-list refuses `host`, `content-length`, `authorization`, `cookie`, `x-api-key`, the payment headers and others; it is a deny-list, so do not put other secrets in headers. Header values and the body are kept in the operation record in the state directory, as `x402 fetch` keeps them. Without the options the request is a plain GET, as before.
+- **One request from the 402 to the payment.** The unpaid request that reads the seller's 402, the frozen operation material, the owner's prompt and the one paid request use the same method, headers and body. The same idempotency key with another method, header or body is refused with `APN_IDEMPOTENCY_CONFLICT`. The exact same request continues the operation: a prepared or reserved one asks for approval again, a held or finished one reads its status.
+- **The prompt shows the method and the body.** `Request method`, and `Body` with its size and the SHA-256 of its bytes (what `shasum -a 256` prints for the same file). Headers are shown by hash only, like the URL path. The display binding adds these fields only for a request other than a plain GET, so a plain GET binds exactly as in 0.5.111; its prompt adds `Request method: GET` and `Body: none`.
+- **MCP.** The `apn_foreground_handoff` command for `x402 permit2 approve` carries the new options. MCP still never pays.
+- **Downgrade.** No record format changes. 0.5.111 and earlier read a POST operation's status and observe it; they cannot approve it again, because their CLI always rebuilds a GET.
+
 ## 0.5.111 — 2026-11-23
 
 QA case `APN-SMART-PERM-CONNECT-INVALID`: `--permission-expires-at` must be future Unix seconds, and a value in another unit must be refused. APN checked only that the value was a positive integer in the future, so a value in Unix milliseconds reached MetaMask consent as a date thousands of years ahead. The owner set the limit on 2026-11-23: a Smart Account permission expires at most 24 hours after the connect that asks for it.

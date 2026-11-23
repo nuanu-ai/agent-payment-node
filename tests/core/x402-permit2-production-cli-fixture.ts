@@ -33,7 +33,9 @@ export async function permit2CliFixture(t: TestContext, sponsor = true, fresh = 
   return { ...f, id, wrapping, native, records, keys: () => keys, signatures: () => signatures,
     url: f.record.material.checked.request.url, key: "cli-production-key-001" };
 }
-export function cliWire(t: TestContext, f: Awaited<ReturnType<typeof permit2CliFixture>>, options: { hint?: boolean; settle?: boolean; network?: `${string}:${string}`; asset?: string } = {}) {
+/** `request` is what the seller must receive on both the unpaid and the paid request; a plain GET without a body by default. */
+export function cliWire(t: TestContext, f: Awaited<ReturnType<typeof permit2CliFixture>>, options: { hint?: boolean; settle?: boolean; network?: `${string}:${string}`; asset?: string;
+  request?: { readonly method: string; readonly body: string; readonly contentType: string } } = {}) {
   const calls: string[] = [], paid: Array<{ endpoint: URL; options: any; body: unknown }> = [];
   let challenge = structuredClone(f.record.material.checked.challenge);
   if (options.network !== undefined) challenge = { ...challenge, accepts: challenge.accepts.map(r => ({ ...r, network: options.network! })) };
@@ -65,7 +67,9 @@ export function cliWire(t: TestContext, f: Awaited<ReturnType<typeof permit2CliF
     req.end = (body: unknown) => {
       queueMicrotask(async () => {
         if (endpoint.hostname === "seller.example") {
-          assert.equal(requestOptions.method, "GET"); assert.equal(body, undefined);
+          assert.equal(requestOptions.method, options.request?.method ?? "GET");
+          assert.equal(body === undefined ? undefined : Buffer.from(body as Buffer).toString("utf8"), options.request?.body);
+          assert.equal(requestOptions.headers?.["content-type"], options.request?.contentType);
           if (requestOptions.headers?.["PAYMENT-SIGNATURE"] !== undefined) {
             paid.push({ endpoint, options: requestOptions, body });
             const record = (await f.records.findOperation(f.id))!; assert.ok(record.exposureJournal?.signed);

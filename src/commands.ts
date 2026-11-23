@@ -20,7 +20,7 @@ export type CommandRequest =
   | { readonly command: "x402.merchant.prepare"; readonly profile: string; readonly url: string; readonly asset?: string; readonly maximumNativeFee: string; readonly nativeFeeReserveWei?: string; readonly idempotencyKey: string }
   | { readonly command: "x402.merchant.approve" | "x402.merchant.status" | "x402.merchant.retire-unsent"; readonly operationId: string }
   | { readonly command: "x402.merchant.observe"; readonly operationId: string; readonly deliver: boolean }
-  | { readonly command: "x402.permit2.approve"; readonly profile: string; readonly url: string; readonly idempotencyKey: string }
+  | { readonly command: "x402.permit2.approve"; readonly profile: string; readonly url: string; readonly idempotencyKey: string; readonly httpRequest?: X402HttpRequestV1 }
   | { readonly command: "x402.permit2.observe"; readonly operationId: string; readonly profile?: string; readonly transaction?: string; readonly expiredUnused: boolean }
   | { readonly command: "x402.permit2.preflight"; readonly profile: string; readonly paymentRequired: string;
       readonly expectedChallengeHash: string; readonly expectedIndex: string; readonly expectedTerms: string }

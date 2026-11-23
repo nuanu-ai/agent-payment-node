@@ -2,7 +2,7 @@
 
 The foreground Permit2 lane pays one x402 v2 `exact` offer with `assetTransferMethod: "permit2"` from the local wallet,
 on any EVM chain and token that the owner's active allowlist policy admits for x402 with the `x402-exact-permit2`
-mechanism pin. It is a CLI-only flow with foreground approval: one exact paid GET, then settlement proven from public
+mechanism pin. It is a CLI-only flow with foreground approval: one exact paid request (GET, or the method and body the caller gives), then settlement proven from public
 chain evidence.
 
 Unattended Permit2 through `x402 fetch`, the Permit2 allowance commands and the admission rules shared by every lane are
@@ -11,7 +11,7 @@ described in [x402 to any seller](x402-any-seller.md).
 | Command | Purpose | MCP |
 | --- | --- | --- |
 | `x402 permit2 preflight` | Check that inspected terms are admissible, without signing or saving anything. | No |
-| `x402 permit2 approve` | Foreground approval, signing and one paid GET. | Handoff only |
+| `x402 permit2 approve` | Foreground approval, signing and one paid request (GET, or the method and body given). | Handoff only |
 | `x402 permit2 observe` | Read-only continuation that proves settlement or unused expiry. | No |
 | `x402 permit2 status` | Read one operation from the local journal. | `apn_x402_permit2_status` |
 
@@ -111,12 +111,22 @@ payment.
    apn x402 permit2 approve --url <verified-merchant-https-url> --rpc-url <verified-public-https-rpc-of-the-offer-chain> --profile <verified-local-profile> --idempotency-key <stable-request-key>
    ```
 
+   For a seller that takes another method or a body, add `--method <method>`, `--headers-json <json>` (for example
+   `'{"content-type":"application/json"}'`) and `--body-base64 <base64>`, as on `x402 inspect` and `x402 fetch prepare`.
+
    Inspect the frozen request, payee and maximum debit at the prompt. Consent authorizes signing and at most one paid
-   GET in that process. There is no sign-only approval. Keep the returned operation id.
+   request in that process. There is no sign-only approval. Keep the returned operation id.
 
 What approve does:
 
-- It permits GET only. There are no caller headers or body, and no approval bypass flag.
+- Without `--method`, `--headers-json` or `--body-base64` it sends a plain GET. With them (since 0.5.112) the unpaid
+  request that reads the 402 and the one paid request use the same method, headers and body: any method except
+  CONNECT, TRACE and HEAD, at most 32 headers within 8 KiB and a body of at most 64 KiB. A deny-list refuses `host`,
+  `content-length`, `authorization`, `cookie`, `x-api-key`, the payment headers and others; header values and the body
+  are kept in the operation record, so do not put other secrets in them.
+- The request is frozen with the operation: the same idempotency key with another method, header or body is refused
+  with `APN_IDEMPOTENCY_CONFLICT`. The prompt shows the method and the body's size and SHA-256; headers, like the URL
+  path, only by hash. There is no approval bypass flag.
 - Before the unsigned merchant request, it validates the local native custody capability and metadata binding. It
   does not decrypt the wallet or open the Keychain before approval.
 - After consent it signs with the guarded native signer and makes one dedicated HTTPS attempt with a 20-second monotonic
