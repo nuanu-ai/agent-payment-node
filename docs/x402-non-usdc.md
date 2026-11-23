@@ -121,10 +121,12 @@ What approve does:
 
 - Without `--method`, `--headers-json` or `--body-base64` it sends a plain GET. With them (since 0.5.112) the unpaid
   request that reads the 402 and the one paid request use the same method, headers and body: any method except
-  CONNECT and TRACE, at most 32 safe headers (no credentials, cookies or payment headers) and a body of at most 64 KiB.
-  The request is frozen with the operation: the same idempotency key with another method, header or body is refused
-  with `APN_IDEMPOTENCY_CONFLICT`. The prompt shows the method and the body size and hash. There is no approval bypass
-  flag.
+  CONNECT, TRACE and HEAD, at most 32 headers within 8 KiB and a body of at most 64 KiB. A deny-list refuses `host`,
+  `content-length`, `authorization`, `cookie`, `x-api-key`, the payment headers and others; header values and the body
+  are kept in the operation record, so do not put other secrets in them.
+- The request is frozen with the operation: the same idempotency key with another method, header or body is refused
+  with `APN_IDEMPOTENCY_CONFLICT`. The prompt shows the method and the body's size and SHA-256; headers, like the URL
+  path, only by hash. There is no approval bypass flag.
 - Before the unsigned merchant request, it validates the local native custody capability and metadata binding. It
   does not decrypt the wallet or open the Keychain before approval.
 - After consent it signs with the guarded native signer and makes one dedicated HTTPS attempt with a 20-second monotonic

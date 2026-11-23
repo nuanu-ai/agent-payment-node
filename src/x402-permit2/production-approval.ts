@@ -20,8 +20,11 @@ export interface Permit2ApprovalDisplay {
   readonly spender: string; readonly proxy: string; readonly tokenPermit: "requested" | "not_requested";
   readonly permit2Deadline: string; readonly eip2612Deadline: string | null;
   readonly origin: string; readonly urlHash: string; readonly requestHash: string; readonly headersHash: string; readonly bodyHash: string;
-  /** Present only for a request other than GET or with a body, so displays of GET records saved earlier keep their hash. */
-  readonly method?: string; readonly bodyByteLength?: number;
+  /**
+   * Present only for a request other than GET or with a body, so a plain GET displays as before: the method, and the
+   * body's size and the SHA-256 of its bytes. Like the URL path, headers stay private and are shown by hash only.
+   */
+  readonly method?: string; readonly bodyByteLength?: number; readonly bodySha256?: string;
   readonly materialHash: string; readonly typedDataDigest: string; readonly eip2612Digest: string | null;
   readonly ownerPolicyDigest: string; readonly policyRevision: number; readonly maximumPerTransferAtomic: string; readonly dailyLimitAtomic: string;
   readonly fingerprint: string; readonly riskBinding: string; readonly displayHash: string;
@@ -40,7 +43,8 @@ export function permit2ApprovalDisplay(record: Permit2ProductionRecord, purpose:
     origin: new URL(r.url).origin, urlHash: sha256(r.url), requestHash: record.material.checked.requestHash,
     headersHash: sha256(canonicalJson(r.headers)), bodyHash: sha256(canonicalJson(r.bodyBase64)),
     ...(r.method === "GET" ? {} : { method: r.method }),
-    ...(r.bodyBase64 === null ? {} : { bodyByteLength: Buffer.from(r.bodyBase64, "base64").byteLength }),
+    ...(r.bodyBase64 === null ? {} : { bodyByteLength: Buffer.from(r.bodyBase64, "base64").byteLength,
+      bodySha256: sha256(Buffer.from(r.bodyBase64, "base64")) }),
     materialHash: record.material.materialHash,
     typedDataDigest: record.material.typedDataDigest, eip2612Digest: record.material.eip2612Digest,
     ownerPolicyDigest: record.material.owner.policyDigest, policyRevision: record.material.checkpoint.policyRevision,
@@ -58,7 +62,9 @@ export class TtyPermit2ForegroundApproval implements Permit2ForegroundApprovalPo
       `Permit2 spender: ${d.spender}`, `Exact proxy: ${d.proxy}`, `Token permit: ${d.tokenPermit}`,
       `Permit2 deadline: ${d.permit2Deadline}`, `Token permit deadline: ${d.eip2612Deadline ?? "none"}`,
       `Merchant origin: ${d.origin}`, `Request method: ${d.method ?? "GET"}`, `Whole URL hash: ${d.urlHash}`, `Request hash: ${d.requestHash}`,
-      `Headers hash: ${d.headersHash}`, `Body: ${d.bodyByteLength === undefined ? "none" : `${d.bodyByteLength} bytes`}; hash ${d.bodyHash}`, `Material hash: ${d.materialHash}`,
+      `Headers hash: ${d.headersHash}`,
+      `Body: ${d.bodyByteLength === undefined ? "none" : `${d.bodyByteLength} bytes, SHA-256 of the bytes ${d.bodySha256}`}; binding hash ${d.bodyHash}`,
+      `Material hash: ${d.materialHash}`,
       `Permit2 typed-data digest: ${d.typedDataDigest}`, `Token typed-data digest: ${d.eip2612Digest ?? "none"}`,
       `Owner policy: ${d.ownerPolicyDigest}; revision ${d.policyRevision}`, `Owner per-operation cap: ${d.maximumPerTransferAtomic}; daily cap ${d.dailyLimitAtomic}`,
       `Fingerprint: ${d.fingerprint}`, `Display hash: ${d.displayHash}`,

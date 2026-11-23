@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { runCli, parseArgv } from "../../src/cli.js";
-import { canonicalJson, domainHash } from "../../src/canonical.js";
+import { canonicalJson, domainHash, sha256 } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
 import { COMMANDS } from "../../src/command-catalog.js";
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
@@ -61,7 +61,7 @@ for (const settlement of [false, true]) test(`actual runCli unpaid GET through e
   t.mock.method(TtyPermit2ForegroundApproval.prototype, "approve", async (display: Permit2ApprovalDisplay) => {
     ui++; assert.equal(f.keys(), 0); assert.equal(display.purpose, "sign-and-submit-once"); assert.equal(display.amountAtomic, "10000");
     // A GET without a body adds no display field, so the display hash of GET records saved before 0.5.112 is unchanged.
-    assert.equal("method" in display, false); assert.equal("bodyByteLength" in display, false);
+    for (const key of ["method", "bodyByteLength", "bodySha256"]) assert.equal(key in display, false, key);
   });
   const result = await runCli(argv(f), {}, options(f)); assert.equal(result.ok, true); safe(result);
   assert.equal(ui, 1); assert.equal(f.signatures(), 2); assert.ok(f.keys() > 0); assert.equal(wire.paid.length, 1);
@@ -97,7 +97,7 @@ test("a POST with a header and a JSON body is the unpaid request, the frozen mat
     ["POST", json, "application/json"]);
   const saved = (await f.records.findOperation(f.id))!, request = saved.material.checked.request;
   assert.deepEqual([request.method, request.headers, request.bodyBase64], ["POST", headers, bodyBase64]);
-  assert.deepEqual([shown?.method, shown?.bodyByteLength], ["POST", Buffer.byteLength(json)]);
+  assert.deepEqual([shown?.method, shown?.bodyByteLength, shown?.bodySha256], ["POST", Buffer.byteLength(json), sha256(Buffer.from(json))]);
   // The same key names the frozen POST: a plain GET or another body is a different request; the exact POST reads status.
   const before = [f.keys(), f.signatures(), wire.calls.length, wire.paid.length];
   for (const other of [argv(f), [...argv(f), "--method", "POST", "--headers-json", JSON.stringify(headers), "--body-base64", Buffer.from("{}").toString("base64")]]) {
@@ -105,6 +105,14 @@ test("a POST with a header and a JSON body is the unpaid request, the frozen mat
   }
   const replay = await runCli(post, {}, options(f)); assert.equal(replay.ok, true); safe(replay);
   assert.deepEqual([f.keys(), f.signatures(), wire.calls.length, wire.paid.length], before);
+});
+test("a HEAD request is refused before any lookup, HTTP, keychain or prompt: its paid answer would carry no result", async t => {
+  const f = await permit2CliFixture(t), wire = cliWire(t, f); let ui = 0;
+  t.mock.method(TtyPermit2ForegroundApproval.prototype, "approve", async () => { ui++; });
+  const head = await runCli([...argv(f), "--method", "HEAD"], {}, options(f));
+  assert.equal(head.error?.code, "APN_INVALID_INPUT"); safe(head);
+  assert.deepEqual([wire.calls.length, wire.paid.length, f.keys(), ui], [0, 0, 0, 0]);
+  assert.equal(await f.records.findOperation(f.id), null);
 });
 test("new operation refuses nonlocal native before unsigned HTTP or keychain", async t => {
   const f = await permit2CliFixture(t), wire = cliWire(t, f);
