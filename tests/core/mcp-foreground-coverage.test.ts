@@ -41,7 +41,7 @@ test("MCP discovery leads from gasless USDT prepare to the foreground execute ha
   assert.match(prepare.description, /\nNext: apn gasless usdt execute \(The owner approves and sends the saved operation in a foreground terminal\.\)$/u);
   const description = projectMcpForegroundHandoff().description;
   assert.ok(description.includes("\n- gasless usdt execute --profile-hash <hash> --operation <operation-id>"));
-  assert.ok(description.includes("\n- x402 permit2 approve --url <https-url> --rpc-url <https-rpc> [--profile <profile>] --idempotency-key <key>"));
+  assert.ok(description.includes("\n- x402 permit2 approve --url <https-url> --rpc-url <https-rpc> [--profile <profile>] --idempotency-key <key> [--method <method>] [--headers-json <json>] [--body-base64 <base64>]"));
 });
 
 test("the handoff names the exact gasless USDT execute and Permit2 approve commands without entering any runtime", async (t) => {
@@ -62,6 +62,9 @@ test("the handoff names the exact gasless USDT execute and Permit2 approve comma
       ["apn", "gasless", "usdt", "execute", "--profile-hash", PROFILE_HASH, "--operation", OPERATION]],
     ["x402 permit2 approve", { profile: "owner", url: "https://seller.example/resource", rpc_url: "https://rpc.example/",
       idempotency_key: "permit2-handoff-0001" }, "x402.permit2.approve", permit2],
+    ["x402 permit2 approve", { profile: "owner", url: "https://seller.example/resource", rpc_url: "https://rpc.example/",
+      idempotency_key: "permit2-handoff-0001", method: "POST", body_base64: "eyJhIjoxfQ==" },
+      "x402.permit2.approve", [...permit2, "--method", "POST", "--body-base64", "eyJhIjoxfQ=="]],
   ] as const) {
     const envelope = decode(await connection.client.callTool({ name: "apn_foreground_handoff", arguments: { command, arguments: args } }));
     assert.equal(envelope.command, request, command);

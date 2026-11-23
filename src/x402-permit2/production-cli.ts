@@ -42,7 +42,8 @@ export async function executePermit2ProductionCli(bound: BoundCommand, options: 
         .observe(request.operationId, bound.rpcUrl, request.expiredUnused ? "expired_unused" : "settlement", request.transaction));
     }
     const profile = canonicalProfile(request.profile), key = canonicalIdempotencyKey(request.idempotencyKey);
-    const exact = normalizeX402HttpRequest({ schemaVersion: "apn.http-request.v1", url: request.url, method: "GET", headers: {}, bodyBase64: null });
+    // A plain GET unless --method, --headers-json or --body-base64 named more; the same request is frozen, approved and paid.
+    const exact = request.httpRequest ?? normalizeX402HttpRequest({ schemaVersion: "apn.http-request.v1", url: request.url, method: "GET", headers: {}, bodyBase64: null });
     const id = permit2ProductionId(profile, key), saved = await records.findOperation(id); operationId = id;
     if (saved !== null) {
       if (canonicalJson(saved.material.checked.request) !== canonicalJson(exact)) throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Permit2 key names a different frozen request.");

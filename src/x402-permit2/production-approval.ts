@@ -20,6 +20,8 @@ export interface Permit2ApprovalDisplay {
   readonly spender: string; readonly proxy: string; readonly tokenPermit: "requested" | "not_requested";
   readonly permit2Deadline: string; readonly eip2612Deadline: string | null;
   readonly origin: string; readonly urlHash: string; readonly requestHash: string; readonly headersHash: string; readonly bodyHash: string;
+  /** Present only for a request other than GET or with a body, so displays of GET records saved earlier keep their hash. */
+  readonly method?: string; readonly bodyByteLength?: number;
   readonly materialHash: string; readonly typedDataDigest: string; readonly eip2612Digest: string | null;
   readonly ownerPolicyDigest: string; readonly policyRevision: number; readonly maximumPerTransferAtomic: string; readonly dailyLimitAtomic: string;
   readonly fingerprint: string; readonly riskBinding: string; readonly displayHash: string;
@@ -36,7 +38,10 @@ export function permit2ApprovalDisplay(record: Permit2ProductionRecord, purpose:
     tokenPermit: p.plan.eip2612 === null ? "not_requested" as const : "requested" as const,
     permit2Deadline: p.plan.authorization.deadline, eip2612Deadline: p.plan.eip2612?.info.deadline ?? null,
     origin: new URL(r.url).origin, urlHash: sha256(r.url), requestHash: record.material.checked.requestHash,
-    headersHash: sha256(canonicalJson(r.headers)), bodyHash: sha256(canonicalJson(r.bodyBase64)), materialHash: record.material.materialHash,
+    headersHash: sha256(canonicalJson(r.headers)), bodyHash: sha256(canonicalJson(r.bodyBase64)),
+    ...(r.method === "GET" ? {} : { method: r.method }),
+    ...(r.bodyBase64 === null ? {} : { bodyByteLength: Buffer.from(r.bodyBase64, "base64").byteLength }),
+    materialHash: record.material.materialHash,
     typedDataDigest: record.material.typedDataDigest, eip2612Digest: record.material.eip2612Digest,
     ownerPolicyDigest: record.material.owner.policyDigest, policyRevision: record.material.checkpoint.policyRevision,
     maximumPerTransferAtomic: record.material.owner.maximumPerTransferAtomic, dailyLimitAtomic: record.material.owner.dailyLimitAtomic,
@@ -52,8 +57,8 @@ export class TtyPermit2ForegroundApproval implements Permit2ForegroundApprovalPo
       `Chain: ${d.chain}`, `Local payer: ${d.payer}`, `Token: ${d.token}${d.tokenUnit === undefined ? " (USDT, 6 decimals)" : ` (${d.tokenUnit})`}`, `Payee: ${d.payTo}`, `Maximum token debit: ${d.amountAtomic} atomic units`,
       `Permit2 spender: ${d.spender}`, `Exact proxy: ${d.proxy}`, `Token permit: ${d.tokenPermit}`,
       `Permit2 deadline: ${d.permit2Deadline}`, `Token permit deadline: ${d.eip2612Deadline ?? "none"}`,
-      `Merchant origin: ${d.origin}`, `Whole URL hash: ${d.urlHash}`, `Request hash: ${d.requestHash}`,
-      `Headers hash: ${d.headersHash}`, `Body hash: ${d.bodyHash}`, `Material hash: ${d.materialHash}`,
+      `Merchant origin: ${d.origin}`, `Request method: ${d.method ?? "GET"}`, `Whole URL hash: ${d.urlHash}`, `Request hash: ${d.requestHash}`,
+      `Headers hash: ${d.headersHash}`, `Body: ${d.bodyByteLength === undefined ? "none" : `${d.bodyByteLength} bytes`}; hash ${d.bodyHash}`, `Material hash: ${d.materialHash}`,
       `Permit2 typed-data digest: ${d.typedDataDigest}`, `Token typed-data digest: ${d.eip2612Digest ?? "none"}`,
       `Owner policy: ${d.ownerPolicyDigest}; revision ${d.policyRevision}`, `Owner per-operation cap: ${d.maximumPerTransferAtomic}; daily cap ${d.dailyLimitAtomic}`,
       `Fingerprint: ${d.fingerprint}`, `Display hash: ${d.displayHash}`,

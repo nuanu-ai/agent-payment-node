@@ -7,6 +7,7 @@ import { PERMIT2_ALLOWANCE_COMMANDS, PERMIT2_ALLOWANCE_GROUPS } from "./x402-per
 import { WALLET_ALLOWANCE_COMMANDS, WALLET_ALLOWANCE_GROUPS } from "./wallet-allowance/catalog.js";
 import { RELAY_COMMANDS, RELAY_COMMAND_GROUPS } from "./relay/command-catalog.js";
 import { command, option } from "./command-catalog-builders.js";
+import { X402_HTTP_OPTIONS, X402_HTTP_SYNOPSIS } from "./x402-http-catalog-options.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { EVM_COMMANDS } from "./evm-command-catalog.js";import { BRIDGE_COMMANDS, includeBridgeRecovery } from "./lifi/command-catalog.js";import { ONECLICK_COMMANDS } from "./lifi/near-oneclick-command-catalog.js";import { CIRCLE_COMMANDS } from "./lifi/circle-command-catalog.js";import { GASLESS_COMMANDS, includeGaslessRecovery } from "./gasless/command-catalog.js";import { ALLOWLIST_COMMANDS, ALLOWLIST_COMMAND_GROUPS } from "./allowlist-command-catalog.js";import { UNISWAP_COMMANDS, UNISWAP_COMMAND_GROUPS } from "./swap/uniswap-command-catalog.js";import { SUNSWAP_COMMANDS, SUNSWAP_COMMAND_GROUPS } from "./swap/sunswap-tron/command-catalog.js";import { JUPITER_COMMANDS, JUPITER_COMMAND_GROUPS } from "./swap/jupiter-solana/command-catalog.js";import { ORCA_COMMANDS, ORCA_COMMAND_GROUPS } from "./swap/orca-solana/command-catalog.js";import { CHAIN_COMMANDS, includeRailRecovery } from "./chain-command-catalog.js";import { PORTFOLIO_COMMANDS } from "./portfolio/command-catalog.js";
 import { removedV1Commands } from "./command-manifest-migration.js";
 import { UNISWAP_TOKEN_COMMANDS, UNISWAP_TOKEN_COMMAND_GROUPS } from "./swap/uniswap-token-command-catalog.js";
@@ -67,12 +68,8 @@ const policyChainOptional = option("--chain", "string", false, noDefault, ["eip1
   "rpc_chain_id_must_match", "omitted_means_eip155:8453"], "operator_input");
 const policyAssetOptional = option("--asset", "string", false, noDefault, ["exact_erc20_contract_address_or_solana_spl_mint",
   "admitted_by_owner_x402_policy_for_this_chain", "omitted_means_usdc_on_eip155:8453_eip155:1_eip155:42161_only", "required_for_solana"], "operator_input");
-const httpOptions = [
-  option("--method", "string", false, noDefault, ["http_token_except_connect_and_trace", "default_GET"], "operator_input"),
-  option("--headers-json", "string", false, noDefault, ["bounded_safe_header_object", "no_credentials_or_payment_headers"], "operator_input"),
-  option("--body-base64", "base64", false, noDefault, ["maximum_65536_decoded_bytes", "empty_is_present_zero_bytes", "omission_is_absent"], "operator_input"),
-];
-const httpSynopsis = " [--method <method>] [--headers-json <json>] [--body-base64 <base64>]";
+const httpOptions = X402_HTTP_OPTIONS;
+const httpSynopsis = X402_HTTP_SYNOPSIS;
 export const COMMAND_GROUPS: readonly CommandGroup[] = [
   ...ALLOWLIST_COMMAND_GROUPS, ...UNISWAP_COMMAND_GROUPS, ...UNISWAP_TOKEN_COMMAND_GROUPS,
   ...SUNSWAP_COMMAND_GROUPS, ...JUPITER_COMMAND_GROUPS, ...ORCA_COMMAND_GROUPS,
