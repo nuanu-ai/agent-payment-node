@@ -29,7 +29,7 @@ export function metaMaskProviderRefusal(reason: MetaMaskGaslessFailureReason, d:
   chainId: MetaMaskGaslessChainId | undefined, binding: MetaMaskGaslessBinding | undefined, token?: string): MetaMaskProviderRefusal | undefined {
   if (chainId === undefined) return undefined;
   // The quoted transfer token's symbol (USDC, or chain 56's USDT or USDC); the quote input named that token.
-  const quoted: MetaMaskGaslessChainId = chainId, symbol = () => mmTokenSymbol(mmRegistry(quoted, token).row.token);
+  const quoted: MetaMaskGaslessChainId = chainId, tokenSymbol = () => mmTokenSymbol(mmRegistry(quoted, token).row.token);
   if ((reason === "mm_gasless_project_has_no_wallets" || reason === "mm_gasless_wallet_not_in_project") && binding !== undefined &&
     d.stage === "project_wallets") return projectWalletRefusal(reason, d, binding);
   const network = directEvmNetwork(chainId).name, where = `on ${network} (chain ${chainId})`;
@@ -38,15 +38,15 @@ export function metaMaskProviderRefusal(reason: MetaMaskGaslessFailureReason, d:
     const read = { provider_read: "metamask-tx-sentinel fee quote", provider_endpoint: mmSentinelQuoteEndpoint(chainId),
       provider_method: "infura_simulateTransactions", provider_missing_field: "result.transactions[-1].fees[0].tokenFees",
       chain_id: chainId, network };
-    const answer = `MetaMask quoted no ${symbol()} relay fee for this transfer ${where}: its fee quote answered HTTP ${String(d.httpStatus)} with ${field}`;
+    const answer = `MetaMask quoted no ${tokenSymbol()} relay fee for this transfer ${where}: its fee quote answered HTTP ${String(d.httpStatus)} with ${field}`;
     if (d.nativeRequiredWei === undefined || d.nativeCurrentWei === undefined) {
-      return { message: `${answer} and named no cause APN can verify. APN does not read a missing relay fee as a ${symbol()} or native gas shortfall.`,
+      return { message: `${answer} and named no cause APN can verify. APN does not read a missing relay fee as a ${tokenSymbol()} or native gas shortfall.`,
         details: { ...read, provider_cause: "unverified" } };
     }
     const symbol = directEvmNetwork(chainId).nativeSymbol, native = (wei: string) => `${wei} wei (${formatAtomic(wei, 18)} ${symbol})`;
     return { message: `${answer}. Its simulation of the transfer needs native ${symbol} for gas: required ${native(d.nativeRequiredWei)} = ` +
       `${d.nativeGasUnits!} gas x ${d.nativeMaxFeePerGasWei!} wei per gas, current server-wallet balance ${native(d.nativeCurrentWei)}. ` +
-      `MetaMask reported a native gas shortfall, not a ${symbol()} one.`,
+      `MetaMask reported a native gas shortfall, not a ${tokenSymbol()} one.`,
     details: { ...read, provider_cause: "native_gas_below_required", native_symbol: symbol } };
   }
   if (reason === "mm_gasless_balance" && d.usdcCurrentAtomic !== undefined && d.usdcRequiredAtomic !== undefined) {
