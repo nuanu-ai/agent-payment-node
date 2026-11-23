@@ -38,7 +38,7 @@ export class RelayEthereumFinalityRpc implements RelaySourceFinalityPorts {
   private readonly rpc: HttpsBaseRpc;
   constructor(private readonly url: string, state: StateStore, rpc?: HttpsBaseRpc,
     private readonly guardFactory: () => EvmDirectRpcGuard = () => new EvmDirectRpcGuard(state, RELAY_SOURCE_FINALITY_POSTS),
-    private readonly expectedChainId: 1 | 56 | 8453 = 1) {
+    private readonly expectedChainId: 1 | 56 | 137 | 8453 | 42161 = 1) {
     this.rpc = rpc ?? new HttpsBaseRpc(url);
   }
   private async read(guard: EvmDirectRpcGuard, calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]> {
@@ -49,7 +49,9 @@ export class RelayEthereumFinalityRpc implements RelaySourceFinalityPorts {
   /** P2: the finality head is read with the receipt, before the inclusion block; a canonical inclusion block at or
    * below that head is final, so neither header is re-read. */
   async finalizedDeposit(hash: Hex): Promise<RelayDepositObservation | null> {
-    const guard = this.guardFactory(), finalityTag = this.expectedChainId === 1 ? "finalized" : this.expectedChainId === 8453 ? "safe" : "latest";
+    // Ethereum and Polygon at finalized, Base and Arbitrum at safe, BNB at 15 blocks under the latest head.
+    const guard = this.guardFactory(), finalityTag = this.expectedChainId === 1 || this.expectedChainId === 137 ? "finalized"
+      : this.expectedChainId === 8453 || this.expectedChainId === 42161 ? "safe" : "latest";
     const [chain, rawTx, rawReceipt, rawFinalized] = await this.read(guard, [
       { method: "eth_chainId", params: [] },
       { method: "eth_getTransactionByHash", params: [hash] },
@@ -84,7 +86,7 @@ export class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
   private queued: QueuedRead[] = [];
   private chain: Promise<number> | null = null;
   constructor(private readonly url: string, state: StateStore, rpc?: HttpsBaseRpc,
-    guard = new EvmDirectRpcGuard(state, RELAY_DESTINATION_PROOF_POSTS), private readonly expectedChainId: 56 | 137 | 143 | 8453 | 4326 = 56) {
+    guard = new EvmDirectRpcGuard(state, RELAY_DESTINATION_PROOF_POSTS), private readonly expectedChainId: 1 | 56 | 137 | 143 | 8453 | 4326 | 42161 = 56) {
     this.rpc = rpc ?? new HttpsBaseRpc(url);
     this.guard = guard;
   }
@@ -139,7 +141,8 @@ export class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
     return block(await this.read("eth_getBlockByNumber", [tag, false]), tag);
   }
   async finalityCheckpoint(): Promise<RelayBnbBlock | null> {
-    if (this.expectedChainId === 56 || this.expectedChainId === 8453 || this.expectedChainId === 4326)
+    if (this.expectedChainId === 1 || this.expectedChainId === 56 || this.expectedChainId === 8453 || this.expectedChainId === 4326 ||
+      this.expectedChainId === 42161)
       return block(await this.read("eth_getBlockByNumber", ["safe", false]), "safe");
     if (this.expectedChainId === 137) return this.polygonFinalizedCheckpoint();
     // Monad: a 15-block canonical depth checkpoint.

@@ -60,8 +60,8 @@ import type { CircleSolanaDeliveryReader } from "./lifi/circle-v2-solana-deliver
 
 export interface RelayExecutionConfirmationSummary {
   readonly operationId: string;
-  readonly sourceChainId: 1;
-  readonly destinationChainId: 56 | 8453;
+  readonly sourceChainId: number;
+  readonly destinationChainId: number;
   readonly sourceAccount: string;
   readonly sourceToken: string;
   readonly amountAtomic: string;
@@ -72,6 +72,8 @@ export interface RelayExecutionConfirmationSummary {
   readonly quoteDigest: string;
   readonly approvalNetworkFeeCeilingWei: string;
   readonly depositNetworkFeeCeilingWei: string;
+  /** Token routes only: the destination token and each side's decimals. */
+  readonly tokenRoute?: Readonly<{ destinationToken: string; sourceDecimals: number; destinationDecimals: number }>;
 }
 export type RelayExecuteConfirmation = (summary: RelayExecutionConfirmationSummary) => Promise<boolean>;
 export interface RelayExecuteHandler { execute(profile: string, operationId: string): Promise<RelayEffectJournal> }

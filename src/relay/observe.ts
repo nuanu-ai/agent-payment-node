@@ -13,6 +13,7 @@ import { RelayKeylessStatusService } from "./status.js";
 import { BNB_NATIVE, ETHEREUM_USDC } from "./quote.js";
 import { RelayNativeObserveService } from "./native-observe.js";
 import { reconcileRelayFinalizedSource } from "./source-reconcile.js";
+import type { RelayTokenObserveService } from "./token-observe.js";
 
 const OPERATION = /^[a-f0-9]{64}$/u;
 export interface RelaySourceFinalityPorts {
@@ -44,7 +45,8 @@ export class RelayObserveService {
   private readonly bnbInvocation: () => RelayBnbProofPorts;
   constructor(private readonly state: StateStore, private readonly source: RelaySourceFinalityPorts, bnbInvocation: () => RelayBnbProofPorts,
     private readonly status = new RelayKeylessStatusService(state), private readonly native?: RelayNativeObserveService,
-    private readonly usage: Pick<AssetUsageLedger, "load" | "transition"> = new AssetUsageLedger(state.root)) {
+    private readonly usage: Pick<AssetUsageLedger, "load" | "transition"> = new AssetUsageLedger(state.root),
+    private readonly token?: RelayTokenObserveService) {
     this.bnbInvocation = bnbInvocation;
   }
 
@@ -59,6 +61,10 @@ export class RelayObserveService {
     if (op.nativeQuote !== undefined) {
       if (this.native === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay native observer is unavailable.");
       return this.native.observe(op);
+    }
+    if (op.tokenQuote !== undefined) {
+      if (this.token === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay token-route observer is unavailable.");
+      return this.token.observe(op);
     }
     const quote = op.quote;
     if (op.sourceChainId !== 1 || op.destinationChainId !== 56 || quote === undefined ||

@@ -3,7 +3,7 @@ import { hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
-import type { RelayQuoteTransaction } from "./quote.js";
+import type { RelayErc20Envelope } from "./erc20-source-leg.js";
 
 export type RelayEffectRole = "approval" | "deposit";
 export type RelayEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "confirmed" | "failed" | "abandoned_unsent";
@@ -25,8 +25,8 @@ export interface RelayEffectJournal {
   readonly sourceOwner: string;
   readonly quoteDigest: string;
   readonly orderId: string;
-  readonly approvalEnvelope: RelayQuoteTransaction;
-  readonly depositEnvelope: RelayQuoteTransaction;
+  readonly approvalEnvelope: RelayErc20Envelope;
+  readonly depositEnvelope: RelayErc20Envelope;
   readonly effects: readonly [RelayEffect, RelayEffect];
   readonly createdAt: string;
   readonly integrityHash: string;
@@ -49,9 +49,12 @@ function body(journal: RelayEffectJournal): Omit<RelayEffectJournal, "integrityH
   const { integrityHash: _, ...rest } = journal;
   return rest;
 }
-function prepared(op: RelayUnsignedOperation): asserts op is RelayUnsignedOperation & { quote: NonNullable<RelayUnsignedOperation["quote"]> } {
+/** The saved quote whose two envelopes the journal binds: Ethereum USDC, or a token route's own (token-quote.ts). */
+function prepared(op: RelayUnsignedOperation): Readonly<{ orderId: string; approval: RelayErc20Envelope; deposit: RelayErc20Envelope }> {
   validateRelayUnsignedOperation(op);
-  if (op.quote === undefined || op.quote.quoteDigest !== op.quoteDigest) blocked("prepared quote required");
+  const quote = op.tokenQuote ?? op.quote;
+  if (quote === undefined || quote.quoteDigest !== op.quoteDigest) blocked("prepared quote required");
+  return quote;
 }
 function validateEffect(effect: RelayEffect, role: RelayEffectRole): void {
   if (effect.role !== role || !RELAY_EFFECT_PHASES.includes(effect.phase)) corrupt("effect role or phase");
@@ -71,16 +74,16 @@ function validateEffect(effect: RelayEffect, role: RelayEffectRole): void {
   if (effect.phase === "abandoned_unsent" && (effect.attempt.transactionHash === null || effect.attempt.attemptNumber !== 1)) corrupt("never landed attempt");
 }
 export function validateRelayEffectJournal(value: unknown, op: RelayUnsignedOperation): RelayEffectJournal {
-  prepared(op);
+  const quote = prepared(op);
   if (value === null || typeof value !== "object" || Array.isArray(value)) corrupt("shape");
   const j = value as RelayEffectJournal;
   if (Object.keys(j).sort().join(",") !== ["schemaVersion", "profileHash", "operationId", "preparedIntegrityHash",
     "sourceOwner", "quoteDigest", "orderId", "approvalEnvelope", "depositEnvelope", "effects", "createdAt", "integrityHash"].sort().join(",") ||
     j.schemaVersion !== "apn.relay-effect-journal.v1" || j.profileHash !== op.profileHash ||
     j.operationId !== op.operationId || j.preparedIntegrityHash !== op.integrityHash ||
-    j.sourceOwner !== op.sourceAccount || j.quoteDigest !== op.quoteDigest || j.orderId !== op.quote.orderId ||
-    hashObject(j.approvalEnvelope) !== hashObject(op.quote.approval) ||
-    hashObject(j.depositEnvelope) !== hashObject(op.quote.deposit) || !iso(j.createdAt) ||
+    j.sourceOwner !== op.sourceAccount || j.quoteDigest !== op.quoteDigest || j.orderId !== quote.orderId ||
+    hashObject(j.approvalEnvelope) !== hashObject(quote.approval) ||
+    hashObject(j.depositEnvelope) !== hashObject(quote.deposit) || !iso(j.createdAt) ||
     !Array.isArray(j.effects) || j.effects.length !== 2 || !hexHash(j.integrityHash)) corrupt("binding");
   validateEffect(j.effects[0]!, "approval"); validateEffect(j.effects[1]!, "deposit");
   if (j.effects[1]!.phase !== "pending" && j.effects[0]!.phase !== "confirmed") corrupt("deposit order");
@@ -88,13 +91,13 @@ export function validateRelayEffectJournal(value: unknown, op: RelayUnsignedOper
   return j;
 }
 export function createRelayEffectJournal(op: RelayUnsignedOperation, createdAt: string): RelayEffectJournal {
-  prepared(op);
+  const quote = prepared(op);
   if (!iso(createdAt)) blocked("invalid creation time");
   const pending = (role: RelayEffectRole): RelayEffect => ({ role, phase: "pending", attempt: null, observedAt: null });
   const fields: Omit<RelayEffectJournal, "integrityHash"> = {
     schemaVersion: "apn.relay-effect-journal.v1", profileHash: op.profileHash, operationId: op.operationId,
     preparedIntegrityHash: op.integrityHash, sourceOwner: op.sourceAccount, quoteDigest: op.quoteDigest,
-    orderId: op.quote.orderId, approvalEnvelope: op.quote.approval, depositEnvelope: op.quote.deposit,
+    orderId: quote.orderId, approvalEnvelope: quote.approval, depositEnvelope: quote.deposit,
     effects: [pending("approval"), pending("deposit")], createdAt,
   };
   return validateRelayEffectJournal({ ...fields, integrityHash: hashObject(fields) }, op);
