@@ -148,6 +148,13 @@ apn swap bnb uniswap prepare --profile <profile> --quote <string> --idempotency-
 apn swap bnb uniswap status --operation <operation_id>
 apn swap bnb uniswap approve --operation <operation_id>
 apn swap bnb uniswap execute --operation <operation_id>
+apn swap bnb uniswap-token inventory
+apn swap bnb uniswap-token quote --profile <profile> --account <address> --to <address> --source-token <address> --output-token <string> --amount <string> --minimum-output <string> --approval-cap <string> --deadline <string> --max-approval-gas-limit <wei> --max-swap-gas-limit <wei> --max-cleanup-gas-limit <wei> --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei> --max-native-debit <wei>
+apn swap bnb uniswap-token prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
+apn swap bnb uniswap-token status --operation <operation_id>
+apn swap bnb uniswap-token approve --operation <operation_id>
+apn swap bnb uniswap-token execute --operation <operation_id>
+apn swap bnb uniswap-token cleanup --operation <operation_id> [--max-fee-per-gas <wei>] [--max-priority-fee-per-gas <wei>]
 apn swap tron sunswap inventory
 apn swap tron sunswap quote --profile <profile> --account <string> --to <string> --amount <sun> --slippage-bps <string> --owner-slippage-cap-bps <string> --fee-limit-sun <sun> --deadline <string>
 apn swap tron sunswap prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>

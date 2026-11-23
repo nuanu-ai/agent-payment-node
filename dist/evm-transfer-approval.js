@@ -1,7 +1,7 @@
 import { ApnError } from "./errors.js";
 import { requireDirectEvmReads, requireEvmFunding, evmTransaction } from "./evm-direct.js";
 import { validateEconomics } from "./transfer-policy.js";
-import { occupiedUniswapTokenNonces } from "./swap/uniswap-v3/token-nonce-ownership.js";
+import { occupiedBnbUniswapTokenNonces, occupiedUniswapTokenNonces } from "./swap/uniswap-v3/token-nonce-ownership.js";
 /** The frozen signed envelope still lands: same nonce, gas within the signed limit, and today's base fee within the signed max fee. */
 export function frozenEconomicsRemainExecutable(current, frozen) {
     const freshMaximumFee = BigInt(current.maxFeePerGasAtomic);
@@ -35,6 +35,12 @@ export async function checkEvmTransferFunding(rpcPort, operation, stateRoot) {
     let executableNonce = BigInt(nonce);
     if (operation.chainId === 1 && stateRoot !== undefined) {
         const owned = new Set((await occupiedUniswapTokenNonces(stateRoot, operation.walletAddress)).map(String));
+        while (owned.has(executableNonce.toString()))
+            executableNonce += 1n;
+    }
+    else if (operation.chainId === 56 && stateRoot !== undefined) {
+        // The BNB Smart Chain token lane's reservations, as Ethereum's above: a nonce a token effect holds is never reused.
+        const owned = new Set((await occupiedBnbUniswapTokenNonces(stateRoot, operation.walletAddress)).map(String));
         while (owned.has(executableNonce.toString()))
             executableNonce += 1n;
     }

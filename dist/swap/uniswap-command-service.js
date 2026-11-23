@@ -6,7 +6,7 @@ import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "./
 import { UNISWAP_WBTC_MECHANISM_PIN, UNISWAP_WBTC_PROTOCOL_REGISTRY, UNISWAP_WBTC_PAIR, UNISWAP_WBTC_CODE_PINS, UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, UNISWAP_V3_PAIRS, USDC_IMPLEMENTATION_PIN } from "./uniswap-v3/pins.js";
 import { swapActualEconomics, swapStatusReceipt } from "./receipt-facts.js";
 import { walletAllowanceRevokeCommand } from "../wallet-allowance/view.js";
-import { UNISWAP_TOKEN_CHAIN_ID } from "../operation-index/adapters/uniswap-token.js";
+import { tokenLaneOf } from "./uniswap-v3/token-lane.js";
 export async function executeUniswapCommand(request, context) {
     if (request.command === "swap.uniswap-token.prepare" || request.command === "swap.uniswap-token.approve" ||
         request.command === "swap.uniswap-token.execute" || request.command === "swap.uniswap-token.cleanup" || request.command === "swap.uniswap-token.status" || request.command === "swap.uniswap-token.inventory" || request.command === "swap.uniswap-token.quote") {
@@ -75,7 +75,7 @@ export async function executeUniswapCommand(request, context) {
  * The token lane's observed receipt already holds what the swap proved; `actualEconomics` gives it the shared swap shape:
  * the exact input debit, the output credit, every gas the operation paid (approval, swap, cleanup) and the ETH that left.
  */
-function tokenOutcome(value, residual = null, after) {
+export function tokenOutcome(value, residual = null, after) {
     const receipt = value.receipt, actualEconomics = receipt === null ? null : { inputAtomic: receipt.inputDebitAtomic,
         outputAtomic: receipt.outputCreditAtomic, networkFeeAtomic: (BigInt(receipt.approvalGasWei) + BigInt(receipt.swapGasWei) + BigInt(receipt.cleanupGasWei)).toString(),
         nativeDebitAtomic: receipt.nativeDebitWei };
@@ -85,7 +85,7 @@ function tokenOutcome(value, residual = null, after) {
         return outcome;
     // A terminal swap with its approval standing (cleaned by the earlier expired-approval exit, or abandoned by the owner, whose
     // own cleanup can no longer reopen): the live residual and the generic exact revoke.
-    const target = { profile: value.profile, chainId: UNISWAP_TOKEN_CHAIN_ID, token: value.route.inputToken, spender: value.route.router };
+    const target = { profile: value.profile, chainId: tokenLaneOf(value.route).chainId, token: value.route.inputToken, spender: value.route.router };
     return { ...outcome, data: { residualAllowance: { chain: `eip155:${target.chainId}`, token: target.token, owner: value.account, spender: target.spender,
                 allowanceAtomic: residual, readAt: "latest" } }, nextActions: [...outcome.nextActions, walletAllowanceRevokeCommand(target)] };
 }
@@ -98,13 +98,15 @@ function tokenOutcome(value, residual = null, after) {
  * reads that proof once finality reaches it.
  */
 export function uniswapTokenNextActions(op, after) {
+    // The lane is read only when an action is named, so a record with no next action needs no route.
+    const prefix = () => tokenLaneOf(op.route).commandPrefix;
     if (abandonedPrincipalCandidate(op) !== null)
-        return after === "execute" ? [] : [`apn swap ethereum uniswap-token execute --operation ${op.operationId}`];
+        return after === "execute" ? [] : [`${prefix()} execute --operation ${op.operationId}`];
     if (principalReleaseCandidate(op) !== null)
-        return [`apn swap ethereum uniswap-token status --operation ${op.operationId}`];
+        return [`${prefix()} status --operation ${op.operationId}`];
     if (op.phase !== "cleanup_required")
         return [];
-    const cleanup = `apn swap ethereum uniswap-token cleanup --operation ${op.operationId}`;
+    const cleanup = `${prefix()} cleanup --operation ${op.operationId}`;
     return op.preSignFailure?.reason === "uniswap_token_fee_cap" ? [cleanup, `${cleanup} --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>`] : [cleanup];
 }
 function data(value, proofClass) {

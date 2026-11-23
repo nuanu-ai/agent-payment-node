@@ -3,6 +3,7 @@ import { ApnError } from "../../errors.js";
 import { assertOwnClaimsAvailable } from "../../operation-index/admission.js";
 import { abandonedPrincipalCandidate, principalReleaseCandidate, proveSwapNoncesUnusable } from "./token-principal.js";
 import { sanitizeUniswapTokenFailureField, swapMarkerNonces, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation } from "./token-operation.js";
+import { tokenLaneOf } from "./token-lane.js";
 export class UniswapTokenExecution {
     journal;
     ports;
@@ -131,7 +132,7 @@ export class UniswapTokenExecution {
         // (execute; cleanup for a cleanup) opens custody under the account lock and settles the marker (resumeUnsigned).
         if (recovered === null)
             throw new ApnError("APN_OPERATION_BLOCKED", "Started token effect has no public transaction evidence.", {
-                reason: "uniswap_token_public_effect_missing", nextActions: [`apn swap ethereum uniswap-token ${kind === "cleanup" ? "cleanup" : "execute"} --operation ${op.operationId}`]
+                reason: "uniswap_token_public_effect_missing", nextActions: [`${tokenLaneOf(op.route).commandPrefix} ${kind === "cleanup" ? "cleanup" : "execute"} --operation ${op.operationId}`]
             });
         // A sealed transaction may or may not have reached the provider. Recovery observes it only.
         const usage = kind === "swap" ? await this.ports.followUsage(op, "unknown_finality") : null;

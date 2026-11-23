@@ -98,6 +98,7 @@ export interface CoreDependencies {
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
   readonly uniswapBnbRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap-bnb.quote" }>>;
   readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
+  readonly uniswapBnbTokenRuntime?: UniswapTokenCommandRuntime;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly orcaRuntime?: OrcaRuntimeSelector;
   /** Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10). */
@@ -172,6 +173,7 @@ export class RuntimeContext {
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
   readonly uniswapBnbRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap-bnb.quote" }>>;
   readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
+  readonly uniswapBnbTokenRuntime?: UniswapTokenCommandRuntime;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly orcaRuntime?: OrcaRuntimeSelector;
   /** Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10). */
@@ -245,6 +247,7 @@ export class RuntimeContext {
     if (dependencies.uniswapRuntime !== undefined) this.uniswapRuntime = dependencies.uniswapRuntime;
     if (dependencies.uniswapBnbRuntime !== undefined) this.uniswapBnbRuntime = dependencies.uniswapBnbRuntime;
     if (dependencies.uniswapTokenRuntime !== undefined) this.uniswapTokenRuntime = dependencies.uniswapTokenRuntime;
+    if (dependencies.uniswapBnbTokenRuntime !== undefined) this.uniswapBnbTokenRuntime = dependencies.uniswapBnbTokenRuntime;
     if (dependencies.sunswapRuntime !== undefined) this.sunswapRuntime = dependencies.sunswapRuntime;
     if (dependencies.orcaRuntime !== undefined) this.orcaRuntime = dependencies.orcaRuntime;
     if (dependencies.orcaStableLegacy !== undefined) this.orcaStableLegacy = dependencies.orcaStableLegacy;

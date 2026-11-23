@@ -38,7 +38,7 @@ import type { NativePort, NativeRequest } from "./ports.js";
 import type { StateStore } from "./state.js";
 import { TtyTransferApproval, type TransferApprovalPort } from "./tty-approval.js";
 import { publicDirectEffect, publicWalletIdentity as publicIdentity, publicX402Effect } from "./local-wallet-native-public.js";
-import { uniswapTokenNonceOwned } from "./swap/uniswap-v3/token-nonce-ownership.js";
+import { bnbUniswapTokenNonceOwned, uniswapTokenNonceOwned } from "./swap/uniswap-v3/token-nonce-ownership.js";
 
 export class LocalWalletNative implements NativePort {
   private readonly wallets: EncryptedWalletStore;
@@ -259,6 +259,9 @@ export class LocalWalletNative implements NativePort {
       if (existing !== undefined) throw protocol("Existing encrypted direct effect requires public observation; signing cannot recover it.");
       if ((intent.evm?.asset.chainId ?? CHAIN_ID) === 1 && await uniswapTokenNonceOwned(this.state.root, identity.address, intent.nonceAtomic)) {
         throw new ApnError("APN_REPREPARE_REQUIRED", "A guarded token effect already owns the approved Ethereum nonce; prepare a fresh transfer.");
+      }
+      if ((intent.evm?.asset.chainId ?? CHAIN_ID) === 56 && await bnbUniswapTokenNonceOwned(this.state.root, identity.address, intent.nonceAtomic)) {
+        throw new ApnError("APN_REPREPARE_REQUIRED", "A guarded token effect already owns the approved BNB Smart Chain nonce; prepare a fresh transfer.");
       }
       const latest = await this.state.findOperation(intent.operationId);
       if (latest === null || latest.state !== "started" || hashObject(directCustodyPayload(latest)) !== hashObject(payload)) throw protocol("Fresh direct operation changed before signing.");

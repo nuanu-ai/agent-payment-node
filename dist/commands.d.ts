@@ -332,6 +332,42 @@ export type CommandRequest = {
         readonly maxFeePerGas: string;
         readonly maxPriorityFeePerGas: string;
     };
+}
+/** BNB Smart Chain token input; `outputToken` is a Binance-Peg token address or `native` (BNB). */
+ | {
+    readonly command: "swap.uniswap-bnb-token.inventory";
+} | {
+    readonly command: "swap.uniswap-bnb-token.quote";
+    readonly profile: string;
+    readonly account: string;
+    readonly recipient: string;
+    readonly sourceToken: string;
+    readonly outputToken: string;
+    readonly amountAtomic: string;
+    readonly minimumOutputAtomic: string;
+    readonly approvalCapAtomic: string;
+    readonly deadline: number;
+    readonly maxApprovalGasLimit: string;
+    readonly maxSwapGasLimit: string;
+    readonly maxCleanupGasLimit: string;
+    readonly maxFeePerGas: string;
+    readonly maxPriorityFeePerGas: string;
+    readonly maxNativeDebitWei: string;
+} | {
+    readonly command: "swap.uniswap-bnb-token.prepare";
+    readonly profile: string;
+    readonly quoteHash: string;
+    readonly idempotencyKey: string;
+} | {
+    readonly command: "swap.uniswap-bnb-token.status" | "swap.uniswap-bnb-token.approve" | "swap.uniswap-bnb-token.execute";
+    readonly operationId: string;
+} | {
+    readonly command: "swap.uniswap-bnb-token.cleanup";
+    readonly operationId: string;
+    readonly cleanupFees?: {
+        readonly maxFeePerGas: string;
+        readonly maxPriorityFeePerGas: string;
+    };
 } | {
     readonly command: "swap.sunswap.inventory";
 } | {

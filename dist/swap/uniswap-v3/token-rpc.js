@@ -18,12 +18,20 @@ export function tokenChain(value) {
         throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token RPC route requires Ethereum chain 1.");
     return value;
 }
+/** The BNB Smart Chain token lane's chain identity decoder (the same check as `tokenChain`, for chain 56). */
+export function bnbTokenChain(value) {
+    if (evmRpcQuantity(value) !== 56n)
+        throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token RPC route requires BNB Smart Chain chain 56.");
+    return value;
+}
+const ETHEREUM_TOKEN_RPC_CHAIN = { chainId: 1, decoder: tokenChain };
+const BNB_TOKEN_RPC_CHAIN = { chainId: 56, decoder: bnbTokenChain };
 export function tokenQuantity(value) { evmRpcQuantity(value); return value; }
 export function tokenHex(bytes) { return (value) => { evmRpcHex(value, bytes); return value; }; }
 export function tokenBlock(value) { const record = evmRpcRecord(value); evmRpcQuantity(record.number); evmRpcHex(record.hash, 32); return value; }
 export function createTokenRpc(input) {
     if (input.environment.APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS === undefined || input.environment.APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS === "") {
-        return createLegacyTokenRpc(input);
+        return createLegacyTokenRpc(input, ETHEREUM_TOKEN_RPC_CHAIN);
     }
     let candidateRows;
     const candidates = () => candidateRows ??= tokenPrimaryCandidates(input.environment);
@@ -173,7 +181,13 @@ export function createTokenRpc(input) {
     }
     function probeLock(index) { return `uniswap-token-primary-probe:${candidates()[index].familyHash}`; }
 }
-function createLegacyTokenRpc(input) {
+/**
+ * The BNB Smart Chain token lane's transport: the scalar single-primary transport over APN_BNB_RPC_URL, with
+ * APN_BNB_ARCHIVE_RPC_URL and APN_BNB_RECEIPT_RPC_URL when set. The primary pool (APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS)
+ * is the Ethereum lane's setting and is not read here.
+ */
+export function createBnbTokenRpc(input) { return createLegacyTokenRpc(input, BNB_TOKEN_RPC_CHAIN); }
+function createLegacyTokenRpc(input, chain) {
     const scheduler = new RpcProviderScheduler({ coordinate: async (family, work) => {
             const familyHash = sha256(`rpc-provider-family\0${family}`);
             await input.state.initialize();
@@ -184,9 +198,9 @@ function createLegacyTokenRpc(input) {
         const session = new RpcReadSession({ maxLogicalItems: input.maxLogicalItems ?? 96,
             maxHttpRequests: input.maxHttpRequests, maxHttpAttempts: input.maxHttpRequests, maxReadAttempts: 1, deadlineMs: input.deadlineMs,
             now: input.now, ...(input.wait === undefined ? {} : { wait: input.wait }), providerScheduler: scheduler });
-        const descriptor = bridgeRpcCall(1, input.environment, { transport: input.transport ?? new BridgeHttps(undefined, undefined, 2_500) });
+        const descriptor = bridgeRpcCall(chain.chainId, input.environment, { transport: input.transport ?? new BridgeHttps(undefined, undefined, 2_500) });
         return { session, descriptor, read: descriptor.sessionCall(session), batch: descriptor.sessionBatchCall(session),
-            archive: bridgeArchiveEndpoint(1, input.environment) !== null };
+            archive: bridgeArchiveEndpoint(chain.chainId, input.environment) !== null };
     })();
     let effects = 0, archiveVerified = false;
     const primaryBlocks = new PrimaryBlockHashes();
@@ -207,11 +221,11 @@ function createLegacyTokenRpc(input) {
                     const identity = items.findIndex((item) => item.method === "eth_chainId");
                     if (identity >= 0) {
                         const values = await resolve().batch(items, route);
-                        tokenChain(values[identity]);
+                        chain.decoder(values[identity]);
                         archiveVerified = true;
                         return values;
                     }
-                    await resolve().batch([{ method: "eth_chainId", params: [], cachePolicy: "none", decoder: tokenChain }], route);
+                    await resolve().batch([{ method: "eth_chainId", params: [], cachePolicy: "none", decoder: chain.decoder }], route);
                     archiveVerified = true;
                 }
                 return await resolve().batch(items, route);
@@ -371,13 +385,15 @@ function capabilityResponse(body) {
  * no chain id, so it fits the three-item bound), the receipt on its route, as the observer reads it (the receipt route's
  * shape is exactly chain id + receipt).
  */
-export function tokenFinalizedBatch(call) {
+export function tokenFinalizedBatch(call) { return tokenFinalizedBatchFor(call, tokenChain); }
+/** `tokenFinalizedBatch` of one lane: its receipt route proves the lane's own chain with `chainDecoder`. */
+export function tokenFinalizedBatchFor(call, chainDecoder) {
     const item = (read) => ({ method: read.method, params: read.params,
         cachePolicy: read.method === "eth_chainId" ? "immutable" : "none", decoder: (row) => row });
     return async (calls) => {
         const receipt = calls.find((read) => read.method === "eth_getTransactionReceipt"), primary = calls.filter((read) => read !== receipt);
         const [rows, receiptRows] = await Promise.all([tokenBatch(call, "primary", primary.map(item)), receipt === undefined ? [] :
-                tokenBatch(call, "receipt", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain }, item(receipt)])]);
+                tokenBatch(call, "receipt", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: chainDecoder }, item(receipt)])]);
         let next = 0;
         return calls.map((read) => read === receipt ? receiptRows[1] : rows[next++]);
     };

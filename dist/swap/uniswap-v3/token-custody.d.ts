@@ -5,8 +5,9 @@ import type { StateStore } from "../../state.js";
 import { UniswapTokenEffectJournal } from "./token-effects.js";
 import type { TokenEffectKind, TokenSealedEffect } from "./token-execution.js";
 import { type UniswapTokenOperation } from "./token-operation.js";
+/** The signed fields of one effect; `chainId` is the lane's (an Ethereum envelope and its hash are unchanged). */
 export interface TokenTransactionEnvelope {
-    readonly chainId: 1;
+    readonly chainId: 1 | 56;
     readonly from: string;
     readonly to: string;
     readonly data: Hex;
@@ -23,9 +24,11 @@ export declare class UniswapTokenCustody {
     private readonly now;
     private readonly effects;
     private readonly wallets;
-    private readonly nonces;
+    private readonly nonceStores;
     private readonly operations;
     constructor(state: StateStore, wrapping: WrappingSecretPort, call: EvmRpcCall, now: () => Date, effects?: UniswapTokenEffectJournal);
+    /** The nonce reservations of the operation's own lane: a chain's nonces never exclude another chain's. */
+    private nonces;
     withAccountLock<T>(op: UniswapTokenOperation, work: () => Promise<T>): Promise<T>;
     private assertOwner;
     allocateNonce(op: UniswapTokenOperation, kind: TokenEffectKind): Promise<string>;
@@ -35,6 +38,7 @@ export declare class UniswapTokenCustody {
      */
     releaseNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<boolean>;
     commitNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
+    /** The account's open reservations in the operation's own lane: each is settled by its operation's marker and custody. */
     private reconcileNonceReservations;
     /**
      * The allowance at the latest block. With `landed` (a transaction of this account that landed, e.g. the approval), one node

@@ -1,6 +1,7 @@
 import { ApnError } from "../../errors.js";
 import { abandonTokenOperation } from "../../operation-abandon-token.js";
 import { transitionUniswapToken, UNISWAP_TOKEN_TERMINAL_PHASES, UniswapTokenJournal } from "./token-operation.js";
+import { tokenLaneOf } from "./token-lane.js";
 /**
  * R4 exit 3 of a token swap (the shared token abandon): its deadline is the route deadline, after which the router
  * refuses the swap; a swap whose outcome a proof already decided (cleanup evidence) is not abandoned. Its consent names
@@ -14,7 +15,7 @@ export async function abandonUniswapToken(root, operationId, approve, now) {
         load: async () => await journal.read(operationId),
         terminal: op => UNISWAP_TOKEN_TERMINAL_PHASES.includes(op.phase),
         refusal: op => now().getTime() < op.route.deadline * 1000 || (op.cleanupEvidence ?? null) !== null ? new ApnError("APN_OPERATION_BLOCKED", "Only a token swap past its route deadline whose outcome no proof decided can be abandoned.", { reason: "uniswap_token_abandon_not_eligible", deadline: new Date(op.route.deadline * 1000).toISOString() }) : null,
-        facts: op => ({ walletAddress: op.account, recipient: op.route.recipient, amountAtomic: op.route.amountIn, chainLabel: "eip155:1",
+        facts: op => ({ walletAddress: op.account, recipient: op.route.recipient, amountAtomic: op.route.amountIn, chainLabel: tokenLaneOf(op.route).chain,
             assetLabel: `token ${op.route.inputToken}`, allowanceTo: op.route.router,
             pending: [op.approvalAttempt, op.swapAttempt, op.cleanupAttempt].flatMap(row => row?.transactionHash ?? []) }),
         withLock: async (_op, work) => await journal.withLocks([`uniswap-token-runtime:${operationId}`], work),

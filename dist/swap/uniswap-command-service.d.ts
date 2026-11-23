@@ -6,6 +6,11 @@ type Request = Extract<CommandRequest, {
 }>;
 export declare function executeUniswapCommand(request: Request, context: RuntimeContext): Promise<CommandOutcome>;
 /**
+ * The token lane's observed receipt already holds what the swap proved; `actualEconomics` gives it the shared swap shape:
+ * the exact input debit, the output credit, every gas the operation paid (approval, swap, cleanup) and the ETH that left.
+ */
+export declare function tokenOutcome(value: Awaited<ReturnType<NonNullable<RuntimeContext["uniswapTokenRuntime"]>["status"]>>, residual?: string | null, after?: "execute"): CommandOutcome;
+/**
  * A swap that requires cleanup names its one exit, the owner's consented cleanup; when the fee cap refused it before
  * signing, the same cleanup may instead re-quote its own caps under fresh consent. An owner-abandoned swap still holding a
  * principal no proof released names execute, which opens custody to prove its swap never signed; execute itself, having

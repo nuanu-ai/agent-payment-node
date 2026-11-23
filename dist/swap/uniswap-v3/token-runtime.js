@@ -3,11 +3,10 @@ import { ApnError } from "../../errors.js";
 import { swapMechanismDigest } from "../pin.js";
 import { UniswapTokenExecution } from "./token-execution.js";
 import { newUniswapTokenOperation, UniswapTokenJournal } from "./token-operation.js";
-import { UNISWAP_TOKEN_MECHANISM_PIN } from "./token-route.js";
+import { ETHEREUM_UNISWAP_TOKEN_LANE, tokenLaneOf } from "./token-lane.js";
 import { UniswapTokenRpcBudgetJournal } from "./token-rpc-budget.js";
 import { admitOperation } from "../../operation-index/admission.js";
 import { evmClaim, namedProfileHash } from "../../operation-index/adapters/family-claims.js";
-import { UNISWAP_TOKEN_CHAIN_ID } from "../../operation-index/adapters/uniswap-token.js";
 /**
  * Execute's request plan in HTTP POSTs, counted from its code path (up to three reads per batch, one POST each, no retries).
  * An effect reads the pending nonce (1), the signing block (1), the code pins at it (4: four batches with the archive chain id
@@ -20,7 +19,13 @@ import { UNISWAP_TOKEN_CHAIN_ID } from "../../operation-index/adapters/uniswap-t
 export const UNISWAP_TOKEN_EXECUTE_PLAN = 15;
 /** The plan's cap for a command whose first primary batch may probe each candidate of a pooled primary once. */
 export function uniswapTokenProbedCap(plan, poolCandidates) { return plan + Math.max(0, poolCandidates - 1); }
-export class InstalledUniswapTokenRuntime {
+/**
+ * One lane's token-input commands over the shared journal: its quotes, prepares and operations only. A quote, a saved
+ * quote or an operation of the other lane refuses (`uniswap_token_quote_binding`, `uniswap_token_lane_mismatch`) and
+ * names that lane's own command, so an RPC of one chain never reads or signs for another.
+ */
+export class InstalledUniswapTokenLaneRuntime {
+    lane;
     builder;
     materials;
     journal;
@@ -28,7 +33,8 @@ export class InstalledUniswapTokenRuntime {
     rpcBudget;
     rpc;
     execution;
-    constructor(builder, materials, journal, ports, rpcBudget, rpc) {
+    constructor(lane, builder, materials, journal, ports, rpcBudget, rpc) {
+        this.lane = lane;
         this.builder = builder;
         this.materials = materials;
         this.journal = journal;
@@ -58,7 +64,9 @@ export class InstalledUniswapTokenRuntime {
         const material = await this.materials.load(request.quoteHash);
         if (material === null)
             throw new ApnError("APN_OPERATION_NOT_FOUND", "Prepared Uniswap token quote was not found.");
-        if (material.profile !== request.profile || material.mechanismDigest !== swapMechanismDigest(UNISWAP_TOKEN_MECHANISM_PIN))
+        // The saved quote's mechanism digest is its lane's (a quote of the other lane carries the other pin's digest).
+        if (material.profile !== request.profile || material.mechanismDigest !== swapMechanismDigest(this.lane.mechanismPin) ||
+            request.command !== `${this.lane.requestFamily}.prepare`)
             blocked("Token quote binding changed.", "uniswap_token_quote_binding");
         if (this.ports.now().getTime() >= material.route.deadline * 1000)
             blocked("Token quote expired.", "uniswap_token_quote_expired");
@@ -68,7 +76,7 @@ export class InstalledUniswapTokenRuntime {
         if (await this.journal.read(operationId) !== null)
             return await this.prepareBody(request, material, operationId);
         return await admitOperation(this.journal, { family: "uniswap_token", profileHash: namedProfileHash(material.profile), operationId,
-            idempotencyHash: null, requestHash: null }, [evmClaim(UNISWAP_TOKEN_CHAIN_ID, material.account)], async () => await this.prepareBody(request, material, operationId));
+            idempotencyHash: null, requestHash: null }, [evmClaim(this.lane.chainId, material.account)], async () => await this.prepareBody(request, material, operationId));
     }
     async prepareBody(request, material, operationId) {
         const cap = this.probedCap(9), reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, cap, cap, "prepare");
@@ -94,31 +102,33 @@ export class InstalledUniswapTokenRuntime {
         return saved;
     }
     async approve(id) {
-        return await this.budgeted(id, "swap.uniswap-token.approve", async () => {
+        return await this.budgeted(id, `${this.lane.requestFamily}.approve`, async () => {
             const cap = this.poolCap(14);
             return [cap, cap, "approval_effect"];
         }, async () => await this.execution.approve(id));
     }
     async execute(id) {
-        return await this.budgeted(id, "swap.uniswap-token.execute", async () => {
+        return await this.budgeted(id, `${this.lane.requestFamily}.execute`, async () => {
             const phase = (await this.journal.load(id))?.phase;
             const cap = this.probedCap(UNISWAP_TOKEN_EXECUTE_PLAN);
             return phase === "approved" || phase === "approval_observed" ? [cap, cap, "swap_effect"] : [0, cap, "recovery"];
         }, async () => await this.execution.execute(id));
     }
-    async status(id) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, this.poolCap(11), "recovery"], async () => await this.execution.status(id)); }
+    async status(id) { return await this.budgeted(id, `${this.lane.requestFamily}.status`, async () => [0, this.poolCap(11), "recovery"], async () => await this.execution.status(id)); }
     /** The live allowance where one may still stand on a terminal record: an expired approval cleaned without a swap, or an owner abandon. */
     async residualAllowance(op) {
         const standing = op.phase === "cleaned" && op.cleanupEvidence?.kind === "expired_approval_no_swap" ||
             op.phase === "abandoned_unknown" && (op.approvalAttempt?.transactionHash != null || op.allowanceAtPrepare !== "0");
         if (!standing)
             return null;
-        return await this.budgeted(op.operationId, "swap.uniswap-token.status", async () => [0, this.poolCap(11), "recovery"], async () => await this.ports.currentAllowance(op));
+        return await this.budgeted(op.operationId, `${this.lane.requestFamily}.status`, async () => [0, this.poolCap(11), "recovery"], async () => await this.ports.currentAllowance(op));
     }
-    async cleanup(id, fees) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, this.poolCap(14), "recovery"], async () => await this.execution.cleanup(id, fees)); }
+    async cleanup(id, fees) { return await this.budgeted(id, `${this.lane.requestFamily}.cleanup`, async () => [0, this.poolCap(14), "recovery"], async () => await this.execution.cleanup(id, fees)); }
     async budgeted(id, command, budget, work) {
         return await this.journal.withLocks([`uniswap-token-runtime:${id}`], async () => {
             const [cap, requestSessionCap, budgetClass] = await budget();
+            // The lane check comes first, so a record of the other lane gets no budget row and its refusal is never hidden.
+            await this.ownLane(id);
             if (this.rpcBudget === undefined)
                 return await work();
             await this.rpcBudget.reconcile(id);
@@ -131,8 +141,18 @@ export class InstalledUniswapTokenRuntime {
             }
         });
     }
+    /** An operation of the other lane refuses before any of its reads, naming that lane's own status command. */
+    async ownLane(id) {
+        const op = await this.journal.load(id), lane = op === null ? null : tokenLaneOf(op.route);
+        if (lane !== null && lane !== this.lane)
+            throw new ApnError("APN_OPERATION_BLOCKED", `This token swap belongs to ${lane.commandPrefix}.`, { reason: "uniswap_token_lane_mismatch", nextActions: [`${lane.commandPrefix} status --operation ${id}`] });
+    }
     poolCap(base) { return base + (this.rpc?.primaryPoolEnabled?.() === true ? this.rpc.primaryPoolSize?.() ?? 3 : 0); }
     probedCap(plan) { return uniswapTokenProbedCap(plan, this.rpc?.primaryPoolEnabled?.() === true ? this.rpc.primaryPoolSize?.() ?? 3 : 0); }
+}
+/** The Ethereum token lane's runtime: canonical USDC and USDT through the original SwapRouter. */
+export class InstalledUniswapTokenRuntime extends InstalledUniswapTokenLaneRuntime {
+    constructor(builder, materials, journal, ports, rpcBudget, rpc) { super(ETHEREUM_UNISWAP_TOKEN_LANE, builder, materials, journal, ports, rpcBudget, rpc); }
 }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=token-runtime.js.map

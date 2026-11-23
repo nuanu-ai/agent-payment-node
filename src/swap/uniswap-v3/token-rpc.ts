@@ -23,7 +23,7 @@ export type TokenRpcCall = EvmRpcCall & {
   readonly primaryPoolSize?: () => number;
   readonly selectedPrimaryProviderId?: () => string | null;
   readonly bindPrimaryProvider?: (providerId: string | null) => Promise<void>;
-  /** Whether APN_ETHEREUM_ARCHIVE_RPC_URL names an archive; without one the primary serves the block-pinned reads. */
+  /** Whether the lane's archive setting (APN_ETHEREUM_ARCHIVE_RPC_URL, APN_BNB_ARCHIVE_RPC_URL) names an archive; without one the primary serves the block-pinned reads. */
   readonly archiveConfigured?: () => boolean;
 };
 
@@ -34,6 +34,13 @@ export async function tokenBatch(call: TokenRpcCall, route: TokenRpcRoute, items
 }
 export function tokenChain(value: unknown): unknown { if (evmRpcQuantity(value) !== 1n)
   throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token RPC route requires Ethereum chain 1."); return value; }
+/** The BNB Smart Chain token lane's chain identity decoder (the same check as `tokenChain`, for chain 56). */
+export function bnbTokenChain(value: unknown): unknown { if (evmRpcQuantity(value) !== 56n)
+  throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token RPC route requires BNB Smart Chain chain 56."); return value; }
+/** One chain of the token lane's scalar transport: its chain id, the `APN_<CHAIN>_*` settings it reads and its chain decoder. */
+interface TokenRpcChain { readonly chainId: 1 | 56; readonly decoder: (value: unknown) => unknown }
+const ETHEREUM_TOKEN_RPC_CHAIN: TokenRpcChain = { chainId: 1, decoder: tokenChain };
+const BNB_TOKEN_RPC_CHAIN: TokenRpcChain = { chainId: 56, decoder: bnbTokenChain };
 export function tokenQuantity(value: unknown): unknown { evmRpcQuantity(value); return value; }
 export function tokenHex(bytes?: number): (value: unknown) => unknown { return (value) => { evmRpcHex(value, bytes); return value; }; }
 export function tokenBlock(value: unknown): unknown { const record = evmRpcRecord(value); evmRpcQuantity(record.number); evmRpcHex(record.hash, 32); return value; }
@@ -44,7 +51,7 @@ export function createTokenRpc(input: { readonly environment: Readonly<Record<st
   readonly transport?: Pick<BridgeHttps, "request">; readonly wait?: (milliseconds: number) => Promise<void>;
   readonly pacingNow?: () => number }): TokenRpcCall {
   if (input.environment.APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS === undefined || input.environment.APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS === "") {
-    return createLegacyTokenRpc(input);
+    return createLegacyTokenRpc(input, ETHEREUM_TOKEN_RPC_CHAIN);
   }
   let candidateRows: ReturnType<typeof tokenPrimaryCandidates> | undefined;
   const candidates = () => candidateRows ??= tokenPrimaryCandidates(input.environment);
@@ -173,9 +180,16 @@ export function createTokenRpc(input: { readonly environment: Readonly<Record<st
   function probeLock(index: number) { return `uniswap-token-primary-probe:${candidates()[index]!.familyHash}`; }
 }
 
-function createLegacyTokenRpc(input: { readonly environment: Readonly<Record<string, string | undefined>>; readonly state: StateStore;
+/**
+ * The BNB Smart Chain token lane's transport: the scalar single-primary transport over APN_BNB_RPC_URL, with
+ * APN_BNB_ARCHIVE_RPC_URL and APN_BNB_RECEIPT_RPC_URL when set. The primary pool (APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS)
+ * is the Ethereum lane's setting and is not read here.
+ */
+export function createBnbTokenRpc(input: TokenRpcInput): TokenRpcCall { return createLegacyTokenRpc(input, BNB_TOKEN_RPC_CHAIN); }
+type TokenRpcInput = { readonly environment: Readonly<Record<string, string | undefined>>; readonly state: StateStore;
   readonly now: () => number; readonly maxHttpRequests: number; readonly deadlineMs: number; readonly maxLogicalItems?: number;
-  readonly transport?: Pick<BridgeHttps, "request">; readonly wait?: (milliseconds: number) => Promise<void>; readonly pacingNow?: () => number }): TokenRpcCall {
+  readonly transport?: Pick<BridgeHttps, "request">; readonly wait?: (milliseconds: number) => Promise<void>; readonly pacingNow?: () => number };
+function createLegacyTokenRpc(input: TokenRpcInput, chain: TokenRpcChain): TokenRpcCall {
   const scheduler = new RpcProviderScheduler({ coordinate: async <T>(family: string, work: (lastStart: number | null,
     saveStart: (value: number) => Promise<void>, cooldownUntil: number | null, saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) => {
     const familyHash = sha256(`rpc-provider-family\0${family}`); await input.state.initialize();
@@ -188,9 +202,9 @@ function createLegacyTokenRpc(input: { readonly environment: Readonly<Record<str
   const resolve = () => initialized ??= (() => { const session = new RpcReadSession({ maxLogicalItems: input.maxLogicalItems ?? 96,
     maxHttpRequests: input.maxHttpRequests, maxHttpAttempts: input.maxHttpRequests, maxReadAttempts: 1, deadlineMs: input.deadlineMs,
     now: input.now, ...(input.wait === undefined ? {} : { wait: input.wait }), providerScheduler: scheduler });
-    const descriptor = bridgeRpcCall(1, input.environment, { transport: input.transport ?? new BridgeHttps(undefined, undefined, 2_500) });
+    const descriptor = bridgeRpcCall(chain.chainId, input.environment, { transport: input.transport ?? new BridgeHttps(undefined, undefined, 2_500) });
     return { session, descriptor, read: descriptor.sessionCall(session), batch: descriptor.sessionBatchCall(session),
-      archive: bridgeArchiveEndpoint(1, input.environment) !== null }; })();
+      archive: bridgeArchiveEndpoint(chain.chainId, input.environment) !== null }; })();
   let effects = 0, archiveVerified = false;
   const primaryBlocks = new PrimaryBlockHashes();
   const call = (async (method, params) => { if (method === "eth_sendRawTransaction") return await submitDirect(method, params, async () => await resolve().session.externalAttempt(
@@ -201,8 +215,8 @@ function createLegacyTokenRpc(input: { readonly environment: Readonly<Record<str
     const route = servedTokenRoute(requested, resolve().descriptor, resolve().archive);
     if (route === "primary") { const values = await resolve().batch(pinnedItems(items, primaryBlocks), route); primaryBlocks.remember(items, values); return values; }
     if (route === "archive" && !archiveVerified) { const identity = items.findIndex((item) => item.method === "eth_chainId");
-      if (identity >= 0) { const values = await resolve().batch(items, route); tokenChain(values[identity]); archiveVerified = true; return values; }
-      await resolve().batch([{ method: "eth_chainId", params: [], cachePolicy: "none", decoder: tokenChain }], route); archiveVerified = true; }
+      if (identity >= 0) { const values = await resolve().batch(items, route); chain.decoder(values[identity]); archiveVerified = true; return values; }
+      await resolve().batch([{ method: "eth_chainId", params: [], cachePolicy: "none", decoder: chain.decoder }], route); archiveVerified = true; }
     return await resolve().batch(items, route); } }, telemetry: { value: () => initialized?.session.telemetry() ?? null },
     effectAttempts: { value: () => effects }, reserveEffectSlot: { value: () => resolve().session.reserveExternalAttempt() },
     primaryPoolEnabled: { value: () => false }, primaryPoolSize: { value: () => 1 },
@@ -314,13 +328,15 @@ function capabilityResponse(body: string): boolean { if (body.length < 2 || body
  * no chain id, so it fits the three-item bound), the receipt on its route, as the observer reads it (the receipt route's
  * shape is exactly chain id + receipt).
  */
-export function tokenFinalizedBatch(call: TokenRpcCall): FinalizedBatchRead {
+export function tokenFinalizedBatch(call: TokenRpcCall): FinalizedBatchRead { return tokenFinalizedBatchFor(call, tokenChain); }
+/** `tokenFinalizedBatch` of one lane: its receipt route proves the lane's own chain with `chainDecoder`. */
+export function tokenFinalizedBatchFor(call: TokenRpcCall, chainDecoder: (value: unknown) => unknown): FinalizedBatchRead {
   const item = (read: FinalizedReadCall): TokenRpcItem => ({ method: read.method, params: read.params,
     cachePolicy: read.method === "eth_chainId" ? "immutable" : "none", decoder: (row) => row });
   return async (calls) => {
     const receipt = calls.find((read) => read.method === "eth_getTransactionReceipt"), primary = calls.filter((read) => read !== receipt);
     const [rows, receiptRows] = await Promise.all([tokenBatch(call, "primary", primary.map(item)), receipt === undefined ? [] :
-      tokenBatch(call, "receipt", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain }, item(receipt)])]);
+      tokenBatch(call, "receipt", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: chainDecoder }, item(receipt)])]);
     let next = 0;
     return calls.map((read) => read === receipt ? receiptRows[1] : rows[next++]);
   };

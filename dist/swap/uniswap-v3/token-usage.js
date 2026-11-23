@@ -6,7 +6,7 @@ import { AssetUsageLedger, assetUsageReservationId } from "../../asset-usage-led
 import { ApnError } from "../../errors.js";
 import { assetAdmitsSwapMechanism } from "../route-admission.js";
 import { evaluateSwapAssetAdmission, swapOwnerAdmissionRequired, swapPolicyStatusCommand, swapReservationRefusal } from "../owner-admission.js";
-import { UNISWAP_TOKEN_MECHANISM_PIN } from "./token-route.js";
+import { tokenLaneOf, tokenLaneOfCommand } from "./token-lane.js";
 export class UniswapTokenUsage {
     state;
     clock;
@@ -17,16 +17,20 @@ export class UniswapTokenUsage {
         this.ledger = ledger;
     }
     async admitQuote(request, now) {
-        const active = await this.active(request.profile, request.account), identity = usageIdentity(request.account, request.sourceToken);
+        const lane = tokenLaneOfCommand(request.command), active = await this.active(request.profile, request.account), identity = usageIdentity(lane, request.account, request.sourceToken);
         const current = await this.ledger.usage(identity, now), at = now.toISOString();
         // A token the active policy does not list, admit for the swap rail or admit with this route refuses as
         // swap_owner_admission_required and names the token, like the other guarded swap lanes at prepare; a cap names the cap.
-        const subject = (side, token) => tokenSubject(request.profile, side, token);
-        const source = evaluateSwapAssetAdmission(active.registry, subject("source", request.sourceToken), { amountAtomic: request.amountAtomic, dailyUsageAtomic: current.amountAtomic }, at);
-        const destination = evaluateSwapAssetAdmission(active.registry, subject("destination", request.outputToken), { amountAtomic: request.minimumOutputAtomic, dailyUsageAtomic: "0" }, at);
-        for (const [side, token, admission] of [["source", request.sourceToken, source], ["destination", request.outputToken, destination]]) {
-            if (!assetAdmitsSwapMechanism(admission.asset, UNISWAP_TOKEN_MECHANISM_PIN))
-                throw swapOwnerAdmissionRequired(subject(side, token), "swap_route_not_admitted");
+        // The BNB lane's `native` output is native BNB.
+        const output = lane.chainId !== 1 && request.outputToken === "native" ? { kind: "native", identifier: null }
+            : { kind: "token", identifier: request.outputToken };
+        const subject = (side, asset) => tokenSubject(lane, request.profile, side, asset);
+        const input = { kind: "token", identifier: request.sourceToken };
+        const source = evaluateSwapAssetAdmission(active.registry, subject("source", input), { amountAtomic: request.amountAtomic, dailyUsageAtomic: current.amountAtomic }, at);
+        const destination = evaluateSwapAssetAdmission(active.registry, subject("destination", output), { amountAtomic: request.minimumOutputAtomic, dailyUsageAtomic: "0" }, at);
+        for (const [side, asset, admission] of [["source", input, source], ["destination", output, destination]]) {
+            if (!assetAdmitsSwapMechanism(admission.asset, lane.mechanismPin))
+                throw swapOwnerAdmissionRequired(subject(side, asset), "swap_route_not_admitted");
         }
         assertRecipientAdmitted({ admission: source, recipient: request.recipient });
         assertRecipientAdmitted({ admission: destination, recipient: request.recipient });
@@ -44,19 +48,20 @@ export class UniswapTokenUsage {
         }
         catch (error) {
             // The shared daily usage decides at approval: a cap the reservation exceeds is named, nothing else changes.
-            throw await swapReservationRefusal(error, this.ledger, { policy: active.registry, subject: tokenSubject(op.profile, "source", op.route.inputToken),
+            throw await swapReservationRefusal(error, this.ledger, { policy: active.registry,
+                subject: tokenSubject(tokenLaneOf(op.route), op.profile, "source", { kind: "token", identifier: op.route.inputToken }),
                 account: op.account, amountAtomic: op.route.amountIn, idempotencyKey, now });
         }
         this.assert(op, lease.reservationId, lease.policyDigest, lease.amountAtomic, lease.rail);
         return { reservationId: lease.reservationId, state: lease.state };
     }
     async confirmMaterial(material) {
-        const active = await this.active(material.profile, material.account), now = this.clock.now(), identity = usageIdentity(material.account, material.route.inputToken);
+        const lane = tokenLaneOf(material.route), active = await this.active(material.profile, material.account), now = this.clock.now(), identity = usageIdentity(lane, material.account, material.route.inputToken);
         if (active.digest !== material.policyDigest)
             blocked("The active token swap policy changed.", "uniswap_token_policy_changed");
         const current = await this.ledger.usage(identity, now);
         // At prepare today's usage may have grown since the quote: a cap the input now exceeds is named.
-        evaluateSwapAssetAdmission(active.registry, tokenSubject(material.profile, "source", material.route.inputToken), { amountAtomic: material.route.amountIn, dailyUsageAtomic: current.amountAtomic }, now.toISOString());
+        evaluateSwapAssetAdmission(active.registry, tokenSubject(lane, material.profile, "source", { kind: "token", identifier: material.route.inputToken }), { amountAtomic: material.route.amountIn, dailyUsageAtomic: current.amountAtomic }, now.toISOString());
         pinned(active.registry, material.route, now);
     }
     async confirmReserved(op) {
@@ -146,17 +151,22 @@ export class UniswapTokenUsage {
  * Only the pins are the point here (the callers check the spent asset's caps against its usage), so usage is zero.
  */
 function pinned(registry, route, now) {
-    for (const [token, amountAtomic] of [[route.inputToken, route.amountIn], [route.outputToken, route.amountOutMinimum]]) {
-        const admission = evaluateAssetPolicy(registry, { chain: "eip155:1", asset: { kind: "token", identifier: token }, rail: "swap",
+    const lane = tokenLaneOf(route);
+    for (const [asset, amountAtomic] of [[{ kind: "token", identifier: route.inputToken }, route.amountIn],
+        [lane.outputAsset(route), route.amountOutMinimum]]) {
+        const admission = evaluateAssetPolicy(registry, { chain: lane.chain, asset, rail: "swap",
             amountAtomic, dailyUsageAtomic: "0", asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
         assertRecipientAdmitted({ admission, recipient: route.recipient });
     }
 }
-function tokenSubject(profile, side, token) {
-    return { profile, side, inventory: "apn swap ethereum uniswap-token inventory", asset: { chain: "eip155:1", kind: "token", identifier: token } };
+/** One asset of the swap on the lane's chain, and the lane's inventory that prints the route to admit. */
+function tokenSubject(lane, profile, side, asset) {
+    return { profile, side, inventory: `${lane.commandPrefix} inventory`, asset: { chain: lane.chain, ...asset } };
 }
-function usageIdentity(account, token) { return { account, chain: "eip155:1", asset: { kind: "token", identifier: token } }; }
-function identityOf(op) { return usageIdentity(op.account, op.route.inputToken); }
+function usageIdentity(lane, account, token) {
+    return { account, chain: lane.chain, asset: { kind: "token", identifier: token } };
+}
+function identityOf(op) { return usageIdentity(tokenLaneOf(op.route), op.account, op.route.inputToken); }
 function usageKey(operationId) { return `apn.uniswap-token-usage:${operationId}`; }
 function corrupt(message) { throw new ApnError("APN_STATE_CORRUPT", message); }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }

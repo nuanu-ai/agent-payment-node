@@ -2,7 +2,8 @@ import { decodeFunctionResult, encodeFunctionData, parseAbi } from "viem";
 import { ApnError } from "../../errors.js";
 import { evmRpcAddress, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../../evm-rpc-codec.js";
 import { envelopeOf } from "./token-custody.js";
-import { tokenBatch, tokenBlock, tokenChain } from "./token-rpc.js";
+import { tokenLaneOf } from "./token-lane.js";
+import { tokenBatch, tokenBlock } from "./token-rpc.js";
 const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)", "function balanceOf(address owner) view returns (uint256)"]);
 export class UniswapTokenObserver {
     call;
@@ -10,15 +11,16 @@ export class UniswapTokenObserver {
         this.call = call;
     }
     async observe(op, kind, transactionHash) {
-        const rpc = this.call;
+        const rpc = this.call, lane = tokenLaneOf(op.route);
         const [primary, receiptRows] = await Promise.all([
-            tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+            tokenBatch(rpc, "primary", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: lane.chainDecoder },
                 { method: "eth_getTransactionByHash", params: [transactionHash], cachePolicy: "none", decoder: transactionDecoder }]),
-            tokenBatch(rpc, "receipt", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+            tokenBatch(rpc, "receipt", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: lane.chainDecoder },
                 { method: "eth_getTransactionReceipt", params: [transactionHash], cachePolicy: "none", decoder: receiptDecoder }]),
         ]);
-        if (evmRpcQuantity(primary[0]) !== 1n || evmRpcQuantity(receiptRows[0]) !== 1n)
-            throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token observer requires Ethereum chain 1.");
+        if (evmRpcQuantity(primary[0]) !== BigInt(lane.chainId) || evmRpcQuantity(receiptRows[0]) !== BigInt(lane.chainId)) {
+            throw new ApnError("APN_CHAIN_MISMATCH", `Uniswap token observer requires ${lane.chainLabel}.`);
+        }
         const rawTx = primary[1], rawReceipt = receiptRows[1];
         // Null means the node knows neither the transaction nor a receipt (the only case an R4 never-lands check reads on);
         // a known transaction that is not yet in a safe block is pending.
@@ -59,7 +61,7 @@ export class UniswapTokenObserver {
                 return await tokenBatch(rpc, "archive", items);
             }
             catch (error) {
-                throw statusStateRefused(error, rpc, op, blockNumber, BigInt(safe.number));
+                throw statusStateRefused(error, rpc, lane, op, blockNumber, BigInt(safe.number));
             }
         };
         if (status === 0n || kind !== "swap") {
@@ -74,6 +76,20 @@ export class UniswapTokenObserver {
         if (status !== 1n)
             blocked("Receipt status is invalid.", "uniswap_token_receipt_conflict");
         const before = `0x${(blockNumber - 1n).toString(16)}`;
+        if (lane.outputAsset(op.route).kind === "native") {
+            // A native output has no token balance to read: the router unwrapped exactly what it sent the recipient (its
+            // unwrapWETH9 withdraws its whole WBNB balance and transfers that amount, or the transaction reverts), so the credit
+            // is the one WBNB Withdrawal the pinned router made in this receipt. The input debit and the allowance are read as
+            // for a token output.
+            const [allowanceRow, inputBeforeRow, inputAfterRow] = await atEffect([allowanceRequest(op, tag), balanceRequest(op.route.inputToken, op.account, before),
+                balanceRequest(op.route.inputToken, op.account, tag)]);
+            await recheck(rpc, block, safe);
+            const inputBefore = BigInt(evmRpcHex(inputBeforeRow, 32)), inputAfter = BigInt(evmRpcHex(inputAfterRow, 32));
+            if (inputAfter > inputBefore)
+                blocked("Token balance evidence is inconsistent.", "uniswap_token_balance_conflict");
+            return { status: "success", transactionHash: hash, gasDebitWei, allowanceAtomic: BigInt(evmRpcHex(allowanceRow, 32)).toString(),
+                inputDebitAtomic: (inputBefore - inputAfter).toString(), outputCreditAtomic: unwrappedNativeCredit(receipt, op.route.outputToken, op.route.router, hash) };
+        }
         const [first, second] = await Promise.all([
             atEffect([allowanceRequest(op, tag), balanceRequest(op.route.inputToken, op.account, before), balanceRequest(op.route.inputToken, op.account, tag)]),
             atEffect([balanceRequest(op.route.outputToken, op.route.recipient, before), balanceRequest(op.route.outputToken, op.route.recipient, tag)]),
@@ -87,26 +103,45 @@ export class UniswapTokenObserver {
 }
 /** How many recent blocks of state a pruning full node keeps (geth's default; public endpoints serve about as many). */
 const PRUNED_STATE_DEPTH = 128n;
+/** WETH9's `Withdrawal(address indexed src, uint256 wad)`; WBNB is a WETH9. */
+const WITHDRAWAL_TOPIC = "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65";
 /**
- * Without APN_ETHEREUM_ARCHIVE_RPC_URL the primary serves the reads pinned to the effect's block. When it answers one of
- * them with a JSON-RPC error (not a rate limit, a revert or a transport failure) and the block is provably older than a
- * pruning node keeps (the safe head, at or below the latest head, is more than 128 blocks past it), status names the
- * archive setting and the command to run again. A nearer block's refusal (a load-balanced backend behind, a provider
- * reporting a revert as -32000) and any failure of a configured archive are returned unchanged.
+ * The native output of an unwrapping swap: exactly one Withdrawal log of the pinned wrapped-native contract in this
+ * receipt, by the pinned router, not removed, of this transaction. Any other shape refuses.
  */
-function statusStateRefused(error, rpc, op, block, safeHead) {
+function unwrappedNativeCredit(receipt, wrapped, router, hash) {
+    if (!Array.isArray(receipt.logs))
+        blocked("Receipt logs are missing.", "uniswap_token_receipt_conflict");
+    const withdrawals = receipt.logs.map((value) => evmRpcRecord(value)).filter((log) => evmRpcAddress(log.address) === wrapped && Array.isArray(log.topics) && log.topics.length > 0 && evmRpcHex(log.topics[0], 32) === WITHDRAWAL_TOPIC);
+    if (withdrawals.length !== 1)
+        blocked("The swap's receipt does not hold exactly one unwrap.", "uniswap_token_unwrap_conflict");
+    const log = withdrawals[0], topics = log.topics;
+    if (topics.length !== 2 || evmRpcHex(topics[1], 32) !== `0x${router.slice(2).toLowerCase().padStart(64, "0")}` || log.removed === true ||
+        log.transactionHash !== undefined && evmRpcHex(log.transactionHash, 32) !== hash)
+        blocked("The unwrap was not the pinned router's.", "uniswap_token_unwrap_conflict");
+    return BigInt(evmRpcHex(log.data, 32)).toString();
+}
+/**
+ * Without the lane's archive setting (APN_ETHEREUM_ARCHIVE_RPC_URL, APN_BNB_ARCHIVE_RPC_URL) the primary serves the reads
+ * pinned to the effect's block. When it answers one of them with a JSON-RPC error (not a rate limit, a revert or a
+ * transport failure) and the block is provably older than a pruning node keeps (the safe head, at or below the latest
+ * head, is more than 128 blocks past it), status names the archive setting and the command to run again. A nearer
+ * block's refusal (a load-balanced backend behind, a provider reporting a revert as -32000) and any failure of a
+ * configured archive are returned unchanged.
+ */
+function statusStateRefused(error, rpc, lane, op, block, safeHead) {
     const details = error instanceof ApnError && error.code === "APN_RPC_PROTOCOL" ? error.details : undefined;
     if (rpc.archiveConfigured?.() !== false || details === undefined || details.rpcSubcallId === undefined || details.providerCode === 3 ||
         safeHead - block <= PRUNED_STATE_DEPTH)
         return error;
     return new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", `Uniswap token status needs the token state at the effect's block ${block}, ` +
-        "and the primary RPC refused that read. Without APN_ETHEREUM_ARCHIVE_RPC_URL the primary serves it, and a pruning node keeps a block's " +
+        `and the primary RPC refused that read. Without ${lane.archiveEnvironment} the primary serves it, and a pruning node keeps a block's ` +
         "state for about 128 blocks.", { reason: "uniswap_token_status_archive_required", endpointRole: "primary", blockNumber: block.toString(),
         safeBlockNumber: safeHead.toString(),
         ...(typeof details.rpcMethod === "string" ? { rpcMethod: details.rpcMethod } : {}),
         ...(typeof details.providerCode === "number" ? { providerCode: details.providerCode } : {}),
-        nextActions: ["Set APN_ETHEREUM_ARCHIVE_RPC_URL to a public HTTPS Ethereum archive endpoint, then run status again.",
-            `apn swap ethereum uniswap-token status --operation ${op.operationId}`] });
+        nextActions: [`Set ${lane.archiveEnvironment} to a public HTTPS ${lane.networkName} archive endpoint, then run status again.`,
+            `${lane.commandPrefix} status --operation ${op.operationId}`] });
 }
 function pending(transactionHash) {
     return { status: "pending", transactionHash: evmRpcHex(transactionHash, 32), gasDebitWei: "0", allowanceAtomic: "0" };
@@ -161,7 +196,7 @@ function receiptDecoder(value) {
     return value;
 }
 function assertEnvelope(tx, envelope) {
-    if (evmRpcQuantity(tx.chainId) !== 1n || evmRpcAddress(tx.from) !== envelope.from || evmRpcAddress(tx.to) !== envelope.to ||
+    if (evmRpcQuantity(tx.chainId) !== BigInt(envelope.chainId) || evmRpcAddress(tx.from) !== envelope.from || evmRpcAddress(tx.to) !== envelope.to ||
         evmRpcHex(tx.input) !== envelope.data.toLowerCase() || evmRpcQuantity(tx.value) !== 0n || evmRpcQuantity(tx.nonce).toString() !== envelope.nonce ||
         evmRpcQuantity(tx.gas).toString() !== envelope.gasLimit || evmRpcQuantity(tx.maxFeePerGas).toString() !== envelope.maxFeePerGas ||
         evmRpcQuantity(tx.maxPriorityFeePerGas).toString() !== envelope.maxPriorityFeePerGas || evmRpcQuantity(tx.type) !== 2n) {

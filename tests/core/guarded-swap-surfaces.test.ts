@@ -22,6 +22,7 @@ const FAMILIES = [
   { path: "swap ethereum uniswap", command: "swap.uniswap", cleanup: false },
   { path: "swap ethereum uniswap-token", command: "swap.uniswap-token", cleanup: true },
   { path: "swap bnb uniswap", command: "swap.uniswap-bnb", cleanup: false },
+  { path: "swap bnb uniswap-token", command: "swap.uniswap-bnb-token", cleanup: true },
   { path: "swap tron sunswap", command: "swap.sunswap", cleanup: false },
   { path: "swap solana jupiter", command: "swap.jupiter", cleanup: false },
   { path: "swap solana orca", command: "swap.orca", cleanup: false, stableReads: true },
@@ -36,7 +37,7 @@ test("guarded swap families expose six parity actions plus explicit token cleanu
       .map((action) => `${family.path} ${action}`)));
   const tools = MCP_TOOLS.filter((row) => row.command.path[0] === "swap");
   const foreground = MCP_FOREGROUND_HANDOFF.commands.filter((row) => row.path[0] === "swap");
-  assert.equal(tools.length, 27); assert.equal(foreground.length, 14);
+  assert.equal(tools.length, 31); assert.equal(foreground.length, 17);
   assert.equal(MCP_TOOLS.some((row) => row.name === "apn_swap_solana_orca_stable_recover_no_send"), false);
   assert.equal(foreground.some((row) => row.path.join(" ") === "swap solana orca stable-recover-no-send"), true);
   assert.equal(bindArgv(["swap", "solana", "orca", "stable-observe", "--operation", H("a")]).request.command,

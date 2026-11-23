@@ -9,6 +9,7 @@ import { ETHEREUM_USDT, UNISWAP_V3_FACTORY, UNISWAP_V3_CODE_PINS, USDC_IMPLEMENT
 import { UNISWAP_USDC } from "../uniswap-pin.js";
 import { SWAP_MECHANISM_PIN_SCHEMA, validateSwapMechanismPin } from "../pin.js";
 import { tokenBatch, tokenChain, tokenHex, type TokenRpcCall } from "./token-rpc.js";
+import { BNB_UNISWAP_TOKEN_ROUTE_SCHEMA, validateBnbUniswapTokenRoute, type BnbUniswapTokenRoute } from "../uniswap-bnb/token-route.js";
 export const UNISWAP_V3_SWAP_ROUTER = "0xE592427A0AEce92De3Edee1F18E0157C05861564" as const;
 export const UNISWAP_V3_USDC_USDT_100 = "0x3416cF6C708Da44DB2624D63ea0AAef7113527C6" as const;
 export const UNISWAP_V3_SWAP_ROUTER_CODE_HASH = "0xbb90113d2f9a5e9b7feb15a1d1fff06c1ee1575b3f9b1181778ffd0cf633e7ea" as const;
@@ -24,7 +25,9 @@ export const UNISWAP_TOKEN_MECHANISM_PIN = validateSwapMechanismPin({ schemaVers
     routerProgramIdentity: UNISWAP_V3_SWAP_ROUTER, auxiliaryContractProgramIdentities: [UNISWAP_V3_FACTORY, UNISWAP_V3_USDC_USDT_100],
     quoteSchemaVersion: "quoter-v2.quote-exact-input-single.1", transactionSchemaVersion: UNISWAP_TOKEN_ROUTE_SCHEMA,
     validationPolicyIdentity: "apn.uniswap.ethereum-token-v3-exact", validationPolicyVersion: "1.0.0" });
-export interface UniswapTokenRoute {
+/** A token-input route of either lane, told apart by its schema: Ethereum's original SwapRouter or BNB Smart Chain's SwapRouter02. */
+export type UniswapTokenRoute = EthereumUniswapTokenRoute | BnbUniswapTokenRoute;
+export interface EthereumUniswapTokenRoute {
     readonly schemaVersion: typeof UNISWAP_TOKEN_ROUTE_SCHEMA;
     readonly inputToken: string;
     readonly outputToken: string;
@@ -45,7 +48,7 @@ export function createUniswapTokenRoute(input: {
     readonly amountIn: string;
     readonly amountOutMinimum: string;
     readonly deadline: number;
-}): UniswapTokenRoute {
+}): EthereumUniswapTokenRoute {
     const tokenIn = token(input.inputToken), tokenOut = token(input.outputToken), recipient = address(input.recipient), amountIn = uint(input.amountIn), amountOutMinimum = uint(input.amountOutMinimum);
     if (tokenIn === tokenOut || !Number.isSafeInteger(input.deadline) || input.deadline <= 0)
         invalid("Uniswap token route is invalid.");
@@ -54,20 +57,25 @@ export function createUniswapTokenRoute(input: {
     const body = { schemaVersion: UNISWAP_TOKEN_ROUTE_SCHEMA, inputToken: tokenIn, outputToken: tokenOut, recipient,
         amountIn: amountIn.toString(), amountOutMinimum: amountOutMinimum.toString(), deadline: input.deadline,
         router: UNISWAP_V3_SWAP_ROUTER, pool: UNISWAP_V3_USDC_USDT_100, fee: 100 as const, calldata };
-    return validateUniswapTokenRoute({ ...body, routeHash: domainHash(UNISWAP_TOKEN_ROUTE_SCHEMA, canonicalJson(body)) });
+    return validateEthereumUniswapTokenRoute({ ...body, routeHash: domainHash(UNISWAP_TOKEN_ROUTE_SCHEMA, canonicalJson(body)) });
 }
+/** A route of either lane: a value carrying the BNB schema is the BNB lane's; every other value is checked as Ethereum's. */
 export function validateUniswapTokenRoute(value: unknown): UniswapTokenRoute {
+    if (isPlainRecord(value) && value.schemaVersion === BNB_UNISWAP_TOKEN_ROUTE_SCHEMA) return validateBnbUniswapTokenRoute(value);
+    return validateEthereumUniswapTokenRoute(value);
+}
+function validateEthereumUniswapTokenRoute(value: unknown): EthereumUniswapTokenRoute {
     if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "inputToken", "outputToken", "recipient", "amountIn",
         "amountOutMinimum", "deadline", "router", "pool", "fee", "calldata", "routeHash"]))
         invalid("Uniswap token route is invalid.");
-    const route = value as unknown as UniswapTokenRoute;
+    const route = value as unknown as EthereumUniswapTokenRoute;
     const expected = createDecoded(route.calldata);
     const { routeHash, ...body } = route;
     if (canonicalJson(expected) !== canonicalJson(body) || routeHash !== domainHash(UNISWAP_TOKEN_ROUTE_SCHEMA, canonicalJson(body)))
         invalid("Uniswap token route binding changed.");
     return route;
 }
-function createDecoded(data: Hex): Omit<UniswapTokenRoute, "routeHash"> {
+function createDecoded(data: Hex): Omit<EthereumUniswapTokenRoute, "routeHash"> {
     try {
         const decoded = decodeFunctionData({ abi: ROUTER, data });
         if (decoded.functionName !== "exactInputSingle")

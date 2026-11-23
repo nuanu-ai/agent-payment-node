@@ -6,14 +6,18 @@ import type { TokenEffectKind } from "./token-execution.js";
 import type { UniswapTokenMaterial } from "./token-material.js";
 import type { UniswapTokenOperation } from "./token-operation.js";
 import type { UniswapTokenUsage } from "./token-usage.js";
+/**
+ * Every pre-sign check of one effect at one fresh block of its lane's chain, the lane chosen by the record's own route:
+ * its chain, its pins (an injected verifier replaces the lane's own), its router, quoter and approval encoding.
+ */
 export declare class UniswapTokenSigningGuard {
     private readonly state;
     private readonly call;
     private readonly usage;
     private readonly now;
-    private readonly verifyPins;
+    private readonly verifyPins?;
     private readonly wallets;
-    constructor(state: StateStore, wrapping: WrappingSecretPort, call: EvmRpcCall, usage: UniswapTokenUsage, now: () => Date, verifyPins?: (call: EvmRpcCall, tag: Hex) => Promise<void>);
+    constructor(state: StateStore, wrapping: WrappingSecretPort, call: EvmRpcCall, usage: UniswapTokenUsage, now: () => Date, verifyPins?: ((call: EvmRpcCall, tag: Hex) => Promise<void>) | undefined);
     confirm(material: UniswapTokenMaterial): Promise<void>;
     inspect(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     private common;

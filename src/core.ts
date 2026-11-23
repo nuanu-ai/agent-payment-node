@@ -40,7 +40,7 @@ import { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
 import { loadAllowlistInventory, resolveAllowlistAsset } from "./allowlist-inventory.js";
 import { binancePegPolicyAsset } from "./binance-peg-policy-assets.js";
 import { executeAllowlistPolicyCommand } from "./allowlist-policy-command.js";
-import { executeUniswapCommand } from "./swap/uniswap-command-service.js";import { executeUniswapBnbCommand } from "./swap/uniswap-bnb/command-service.js";import { executeSunSwapCommand } from "./swap/sunswap-tron/command-service.js";import { executeJupiterCommand } from "./swap/jupiter-solana/command-service.js";import { executeOrcaCommand } from "./swap/orca-solana/command-service.js";
+import { executeUniswapCommand } from "./swap/uniswap-command-service.js";import { executeUniswapBnbCommand } from "./swap/uniswap-bnb/command-service.js";import { executeUniswapBnbTokenCommand } from "./swap/uniswap-bnb/token-command-service.js";import { executeSunSwapCommand } from "./swap/sunswap-tron/command-service.js";import { executeJupiterCommand } from "./swap/jupiter-solana/command-service.js";import { executeOrcaCommand } from "./swap/orca-solana/command-service.js";
 export * from "./core-exports.js";
 export class ApnCore {
   readonly context: RuntimeContext;
@@ -210,6 +210,8 @@ export class ApnCore {
       case "swap.uniswap-token.approve": case "swap.uniswap-token.execute": case "swap.uniswap-token.cleanup": return await executeUniswapCommand(request, this.context);
       case "swap.uniswap-bnb.inventory": case "swap.uniswap-bnb.quote": case "swap.uniswap-bnb.prepare": case "swap.uniswap-bnb.status":
       case "swap.uniswap-bnb.approve": case "swap.uniswap-bnb.execute": return await executeUniswapBnbCommand(request, this.context);
+      case "swap.uniswap-bnb-token.inventory": case "swap.uniswap-bnb-token.quote": case "swap.uniswap-bnb-token.prepare": case "swap.uniswap-bnb-token.status":
+      case "swap.uniswap-bnb-token.approve": case "swap.uniswap-bnb-token.execute": case "swap.uniswap-bnb-token.cleanup": return await executeUniswapBnbTokenCommand(request, this.context);
       case "swap.sunswap.inventory": case "swap.sunswap.quote": case "swap.sunswap.prepare": case "swap.sunswap.status": case "swap.sunswap.approve": case "swap.sunswap.execute": return await executeSunSwapCommand(request, this.context);
       case "swap.jupiter.inventory": case "swap.jupiter.quote": case "swap.jupiter.prepare": case "swap.jupiter.status": case "swap.jupiter.approve": case "swap.jupiter.execute": return await executeJupiterCommand(request, this.context);
       case "swap.orca.inventory": case "swap.orca.stable-status": case "swap.orca.stable-release": case "swap.orca.stable-recover-no-send": case "swap.orca.stable-observe": case "swap.orca.quote": case "swap.orca.prepare": case "swap.orca.status": case "swap.orca.approve": case "swap.orca.execute": return await executeOrcaCommand(request, this.context);

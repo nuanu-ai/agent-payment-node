@@ -8,7 +8,7 @@ import type { ClockPort } from "../../ports.js";
 import type { StateStore } from "../../state.js";
 import { exactChainConsent } from "../../tty-approval.js";
 import type { TtyTransferApprovalOptions } from "../../tty-approval.js";
-import { UniswapTokenQuoteBuilder } from "./token-builder.js";
+import { UniswapTokenLaneQuoteBuilder } from "./token-builder.js";
 import { UniswapTokenCustody } from "./token-custody.js";
 import type { UniswapTokenCommandRuntime, UniswapTokenExecutionPorts } from "./token-execution.js";
 import { SavedUniswapTokenMaterialStore } from "./token-material.js";
@@ -17,15 +17,25 @@ import { UniswapTokenObserver } from "./token-observer.js";
 import { readSwapNonceConsumption, readSwapNonceUnused } from "./token-principal.js";
 import { UniswapTokenSigningGuard } from "./token-guard.js";
 import { UniswapTokenUsage } from "./token-usage.js";
-import { InstalledUniswapTokenRuntime } from "./token-runtime.js";
+import { InstalledUniswapTokenLaneRuntime } from "./token-runtime.js";
 import { UniswapTokenRpcBudgetJournal } from "./token-rpc-budget.js";
-import { tokenBatch, tokenBlock, tokenChain, tokenFinalizedBatch, tokenQuantity, type TokenRpcCall } from "./token-rpc.js";
+import { tokenBatch, tokenBlock, tokenFinalizedBatchFor, tokenQuantity, type TokenRpcCall } from "./token-rpc.js";
+import { ETHEREUM_UNISWAP_TOKEN_LANE, tokenLaneOf, type UniswapTokenLane } from "./token-lane.js";
 import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../../evm-rpc-codec.js";
 import { checkNeverLands } from "../../evm-finalized-proof.js";
 
-export function createUniswapTokenRuntime(input: { readonly state: StateStore; readonly wrapping: WrappingSecretPort;
+export interface UniswapTokenRuntimeInput { readonly state: StateStore; readonly wrapping: WrappingSecretPort;
   readonly clock: ClockPort; readonly call: EvmRpcCall; readonly foreground: "approve" | "cleanup" | "refuse";
-  readonly tty?: TtyTransferApprovalOptions; readonly verifyPins?: (call: EvmRpcCall, tag: import("viem").Hex) => Promise<void> }): UniswapTokenCommandRuntime {
+  readonly tty?: TtyTransferApprovalOptions; readonly verifyPins?: (call: EvmRpcCall, tag: import("viem").Hex) => Promise<void> }
+/** The Ethereum token lane's runtime (canonical USDC and USDT through the original SwapRouter). */
+export function createUniswapTokenRuntime(input: UniswapTokenRuntimeInput): UniswapTokenCommandRuntime {
+  return createUniswapTokenLaneRuntime(ETHEREUM_UNISWAP_TOKEN_LANE, input);
+}
+/**
+ * One lane's token-input runtime over that lane's RPC: its builder, signing guard (the lane's pins unless `verifyPins`
+ * replaces them), custody, observer, never-lands proof and screens. Records and quotes of the other lane refuse.
+ */
+export function createUniswapTokenLaneRuntime(lane: UniswapTokenLane, input: UniswapTokenRuntimeInput): UniswapTokenCommandRuntime {
   const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()),
     observer = new UniswapTokenObserver(call), ledger = new AssetUsageLedger(state.root),
     usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now(), input.verifyPins);
@@ -46,15 +56,17 @@ export function createUniswapTokenRuntime(input: { readonly state: StateStore; r
       await custody.bindEffectProvider(op, kind, hash); return await observer.observe(op, kind, hash); },
     // The quote block was read before any of the swap's effects was signed; a record without one never proves never-lands.
     neverLands: async (op, kind, attempt) => { await custody.bindEffectProvider(op, kind, attempt.transactionHash!);
-      return await checkNeverLands({ chainId: 1, account: op.account, nonce: BigInt(attempt.nonce), transactionHash: attempt.transactionHash!,
+      const effectLane = tokenLaneOf(op.route);
+      return await checkNeverLands({ chainId: effectLane.chainId, account: op.account, nonce: BigInt(attempt.nonce), transactionHash: attempt.transactionHash!,
         ...(op.quoteBlock === undefined ? {} : { before: { hash: op.quoteBlock.hash, number: BigInt(op.quoteBlock.number) } }) },
-        tokenFinalizedBatch(call as TokenRpcCall)); },
-    cleanupFeeQuote: async () => {
+        tokenFinalizedBatchFor(call as TokenRpcCall, effectLane.chainDecoder)); },
+    cleanupFeeQuote: async (op) => {
+      const feeLane = tokenLaneOf(op.route);
       const [chain, rawBlock, rawPriority] = await tokenBatch(call as TokenRpcCall, "primary", [
-        { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+        { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: feeLane.chainDecoder },
         { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: tokenBlock },
         { method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "none", decoder: tokenQuantity }]);
-      if (evmRpcQuantity(chain) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token cleanup fee quote requires Ethereum chain 1.");
+      if (evmRpcQuantity(chain) !== BigInt(feeLane.chainId)) throw new ApnError("APN_CHAIN_MISMATCH", `Uniswap token cleanup fee quote requires ${feeLane.chainLabel}.`);
       const block = evmRpcRecord(rawBlock);
       return { blockNumber: evmRpcQuantity(block.number).toString(), blockHash: evmRpcHex(block.hash, 32),
         baseFeePerGasWei: evmRpcQuantity(block.baseFeePerGas).toString(), priorityFeePerGasWei: evmRpcQuantity(rawPriority).toString() };
@@ -65,25 +77,14 @@ export function createUniswapTokenRuntime(input: { readonly state: StateStore; r
     swapNonceUnused: async (op, fromNonce) => await readSwapNonceUnused(call as TokenRpcCall, op, fromNonce),
     confirm: async (material) => await guard.confirm(material),
   };
-  const admit = async (request: Parameters<UniswapTokenQuoteBuilder["quote"]>[0], now: Date) => await usage.admitQuote(request, now);
-  return new InstalledUniswapTokenRuntime(new UniswapTokenQuoteBuilder(call, materials, admit, () => clock.now(), input.verifyPins), materials,
-    new UniswapTokenJournal(state.root), ports, new UniswapTokenRpcBudgetJournal(state.root), call as TokenRpcCall);
+  const admit = async (request: Parameters<UniswapTokenLaneQuoteBuilder["quote"]>[0], now: Date) => await usage.admitQuote(request, now);
+  return new InstalledUniswapTokenLaneRuntime(lane, new UniswapTokenLaneQuoteBuilder(lane, call, materials, admit, () => clock.now(), input.verifyPins ?? lane.verifyPins),
+    materials, new UniswapTokenJournal(state.root), ports, new UniswapTokenRpcBudgetJournal(state.root), call as TokenRpcCall);
 }
 async function foreground(enabled: boolean, op: UniswapTokenOperation, cleanup: boolean, now: Date, tty: TtyTransferApprovalOptions = {}) {
   if (!enabled) throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Uniswap token approval must continue in the foreground CLI.",
     { reason: "swap_foreground_cli_required" });
-  const lines = cleanup ? ["Agent Payment Node Uniswap token allowance cleanup", `Profile: ${op.profile}`, `Operation: ${op.operationId}`,
-    `Token/spender: ${op.route.inputToken} / ${op.route.router}`, "Replacement allowance: 0", `Reason: ${op.cleanupReason ?? "residual_allowance"}`,
-    `Native debit so far: ${op.accumulatedNativeDebitWei} wei; aggregate cap with this cleanup: ${op.maximumNativeDebitWei} wei`,
-    ...(op.cleanupFeeQuote === undefined ? [] : [`Cleanup fee caps re-quoted by the owner at Ethereum block ${op.cleanupFeeQuote.blockNumber} (base fee ${op.cleanupFeeQuote.baseFeePerGasWei} wei, priority fee ${op.cleanupFeeQuote.priorityFeePerGasWei} wei)`,
-      `Cleanup max fee per gas: ${op.cleanupGas.maxFeePerGas} wei (frozen: ${op.cleanupFeeQuote.previousCleanupGas.maxFeePerGas}); max priority fee: ${op.cleanupGas.maxPriorityFeePerGas} wei (frozen: ${op.cleanupFeeQuote.previousCleanupGas.maxPriorityFeePerGas}); gas limit ${op.cleanupGas.gasLimit}`,
-      `Native debit cap: ${op.maximumNativeDebitWei} wei (was ${op.cleanupFeeQuote.previousMaximumNativeDebitWei})`]),
-    ...(op.retiredEffects ?? []).filter((row) => row.kind === "cleanup").map((row) => `Earlier cleanup ${row.attempt.transactionHash}: ${row.reason}`)] :
-    ["Agent Payment Node Uniswap V3 token swap approval", `Profile: ${op.profile}`, `Operation: ${op.operationId}`, `Signer: ${op.account}`,
-      `Exact input: ${op.route.amountIn} atomic at ${op.route.inputToken}`, `Minimum output: ${op.route.amountOutMinimum} atomic at ${op.route.outputToken}`,
-      `Recipient: ${op.route.recipient}`, `Router: ${op.route.router}`, `Exact approval cap: ${op.approvalCapAtomic}`,
-      `Aggregate native debit cap: ${op.maximumNativeDebitWei} wei`, `Deadline: ${new Date(op.route.deadline * 1000).toISOString()}`,
-      "Approval, swap, and any explicit cleanup are independently signed and broadcast at most once."];
+  const lines = tokenLaneOf(op.route).screen(op, cleanup);
   await exactChainConsent(lines, approvalCode("swap", op.integrityHash, cleanup ? "cleanup" : "execute"),
     cleanup ? new Date(now.getTime() + 300_000).toISOString() : new Date(op.route.deadline * 1000).toISOString(), tty);
 }

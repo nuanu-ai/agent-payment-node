@@ -35,7 +35,7 @@ const EXPECTED: Readonly<Record<string, 128 | 200>> = {
   "pay transfer prepare": 200, "operation recover-transaction-settlement": 200, "pay transfer prepare-solana": 200,
   "pay transfer prepare-tron": 200, "bridge prepare": 200, "circle source submit": 128, "sei funding prepare": 200,
   "circle evm prepare": 128, "mega funding prepare": 200, "oneclick source submit": 128, "gasless usdt prepare": 128,
-  "gasless transfer prepare": 200, "swap ethereum uniswap prepare": 200, "swap ethereum uniswap-token prepare": 200, "swap bnb uniswap prepare": 200,
+  "gasless transfer prepare": 200, "swap ethereum uniswap prepare": 200, "swap ethereum uniswap-token prepare": 200, "swap bnb uniswap prepare": 200, "swap bnb uniswap-token prepare": 200,
   "swap tron sunswap prepare": 200, "swap solana jupiter prepare": 200, "swap solana orca prepare": 200,
 };
 

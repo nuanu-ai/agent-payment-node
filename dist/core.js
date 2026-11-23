@@ -43,6 +43,7 @@ import { binancePegPolicyAsset } from "./binance-peg-policy-assets.js";
 import { executeAllowlistPolicyCommand } from "./allowlist-policy-command.js";
 import { executeUniswapCommand } from "./swap/uniswap-command-service.js";
 import { executeUniswapBnbCommand } from "./swap/uniswap-bnb/command-service.js";
+import { executeUniswapBnbTokenCommand } from "./swap/uniswap-bnb/token-command-service.js";
 import { executeSunSwapCommand } from "./swap/sunswap-tron/command-service.js";
 import { executeJupiterCommand } from "./swap/jupiter-solana/command-service.js";
 import { executeOrcaCommand } from "./swap/orca-solana/command-service.js";
@@ -282,6 +283,13 @@ export class ApnCore {
             case "swap.uniswap-bnb.status":
             case "swap.uniswap-bnb.approve":
             case "swap.uniswap-bnb.execute": return await executeUniswapBnbCommand(request, this.context);
+            case "swap.uniswap-bnb-token.inventory":
+            case "swap.uniswap-bnb-token.quote":
+            case "swap.uniswap-bnb-token.prepare":
+            case "swap.uniswap-bnb-token.status":
+            case "swap.uniswap-bnb-token.approve":
+            case "swap.uniswap-bnb-token.execute":
+            case "swap.uniswap-bnb-token.cleanup": return await executeUniswapBnbTokenCommand(request, this.context);
             case "swap.sunswap.inventory":
             case "swap.sunswap.quote":
             case "swap.sunswap.prepare":

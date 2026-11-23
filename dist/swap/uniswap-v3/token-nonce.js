@@ -3,11 +3,23 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../../canon
 import { ApnError } from "../../errors.js";
 import { SecureStateStore } from "../../secure-state-store.js";
 import { tokenEffectRound } from "./token-operation.js";
-/** Called while the shared account custody lock is held. Only reservations without a durable signed-effect marker may be reclaimed. */
-export class UniswapTokenNonceStore extends SecureStateStore {
+/** The Ethereum lane's reservations, where every earlier release kept them. */
+export const ETHEREUM_TOKEN_NONCE_SPACE = Object.freeze({ directory: "uniswap-token-nonces", accountDomain: "apn.uniswap-token-nonce-account.v1" });
+/** BNB Smart Chain's own reservations: a chain-56 nonce never excludes a chain-1 nonce of the same account, nor the reverse. */
+export const BNB_TOKEN_NONCE_SPACE = Object.freeze({ directory: "uniswap-bnb-token-nonces", accountDomain: "apn.uniswap-bnb-token-nonce-account.v1" });
+/**
+ * Called while the shared account custody lock is held. Only reservations without a durable signed-effect marker may be
+ * reclaimed. One store per lane's nonce space.
+ */
+export class UniswapTokenLaneNonceStore extends SecureStateStore {
+    space;
+    constructor(root, space, options) {
+        super(root, options);
+        this.space = space;
+    }
     async occupied(accountValue) {
         await this.initialize();
-        await this.ensureDirectory("uniswap-token-nonces");
+        await this.ensureDirectory(this.space.directory);
         const account = canonical(accountValue), path = this.path(account), raw = await this.readJson(path);
         if (raw === null)
             return [];
@@ -16,7 +28,7 @@ export class UniswapTokenNonceStore extends SecureStateStore {
     }
     async reconcile(accountValue, evidence) {
         await this.initialize();
-        await this.ensureDirectory("uniswap-token-nonces");
+        await this.ensureDirectory(this.space.directory);
         const account = canonical(accountValue), path = this.path(account), raw = await this.readJson(path);
         if (raw === null)
             return;
@@ -40,7 +52,7 @@ export class UniswapTokenNonceStore extends SecureStateStore {
     }
     async allocate(op, kind, pending, occupied = []) {
         await this.initialize();
-        await this.ensureDirectory("uniswap-token-nonces");
+        await this.ensureDirectory(this.space.directory);
         const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path), current = raw === null ? empty(account) : validate(raw, account), slot = nonceSlot(op, kind), prior = current.reservations[slot];
         if (prior !== undefined)
             return prior.nonce;
@@ -81,7 +93,11 @@ export class UniswapTokenNonceStore extends SecureStateStore {
             return;
         await this.writeJson(path, { ...current, reservations: { ...current.reservations, [slot]: { ...reservation, state: "committed" } } });
     }
-    path(account) { return `uniswap-token-nonces/${domainHash("apn.uniswap-token-nonce-account.v1", account)}.json`; }
+    path(account) { return `${this.space.directory}/${domainHash(this.space.accountDomain, account)}.json`; }
+}
+/** The Ethereum lane's nonce store. */
+export class UniswapTokenNonceStore extends UniswapTokenLaneNonceStore {
+    constructor(root, options) { super(root, ETHEREUM_TOKEN_NONCE_SPACE, options); }
 }
 function empty(account) { return { schemaVersion: "apn.uniswap-token-nonces.v2", account, reservations: {} }; }
 /** Round 0 keeps the original slot; a re-armed cleanup reserves its own nonce. */

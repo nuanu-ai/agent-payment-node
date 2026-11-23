@@ -11,22 +11,30 @@ import type { StateStore } from "../../state.js";
 import { UniswapTokenEffectJournal } from "./token-effects.js";
 import type { TokenEffectKind, TokenSealedEffect } from "./token-execution.js";
 import { tokenEffectRound, UniswapTokenJournal, type TokenGasEnvelope, type UniswapTokenOperation } from "./token-operation.js";
-import { encodeUniswapTokenApproval } from "./token-route.js";
-import { UniswapTokenNonceStore, type TokenNonceEvidence } from "./token-nonce.js";
-import { tokenBatch, tokenBlock, tokenChain, tokenHex, tokenQuantity, type TokenRpcCall } from "./token-rpc.js";
+import { tokenLaneOf } from "./token-lane.js";
+import { UniswapTokenLaneNonceStore, type TokenNonceEvidence } from "./token-nonce.js";
+import { tokenBatch, tokenBlock, tokenHex, tokenQuantity, type TokenRpcCall } from "./token-rpc.js";
 
 const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)"]);
-export interface TokenTransactionEnvelope { readonly chainId: 1; readonly from: string; readonly to: string; readonly data: Hex;
+/** The signed fields of one effect; `chainId` is the lane's (an Ethereum envelope and its hash are unchanged). */
+export interface TokenTransactionEnvelope { readonly chainId: 1 | 56; readonly from: string; readonly to: string; readonly data: Hex;
   readonly value: "0"; readonly nonce: string; readonly gasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string }
 
 /** Local encrypted-wallet custody plus the durable one-way broadcast boundary. */
 export class UniswapTokenCustody {
   private readonly wallets: EncryptedWalletStore;
-  private readonly nonces: UniswapTokenNonceStore;
+  private readonly nonceStores = new Map<string, UniswapTokenLaneNonceStore>();
   private readonly operations: UniswapTokenJournal;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly call: EvmRpcCall,
     private readonly now: () => Date, private readonly effects = new UniswapTokenEffectJournal(state.root)) { this.wallets = new EncryptedWalletStore(state, wrapping);
-    this.nonces = new UniswapTokenNonceStore(state.root); this.operations = new UniswapTokenJournal(state.root); }
+    this.operations = new UniswapTokenJournal(state.root); }
+  /** The nonce reservations of the operation's own lane: a chain's nonces never exclude another chain's. */
+  private nonces(op: UniswapTokenOperation): UniswapTokenLaneNonceStore {
+    const space = tokenLaneOf(op.route).nonceSpace;
+    let store = this.nonceStores.get(space.directory);
+    if (store === undefined) { store = new UniswapTokenLaneNonceStore(this.state.root, space); this.nonceStores.set(space.directory, store); }
+    return store;
+  }
 
   async withAccountLock<T>(op: UniswapTokenOperation, work: () => Promise<T>): Promise<T> {
     return await this.state.withLocks([`profile:${this.state.profileHash(op.profile)}`, walletCustodyLock(this.state, op.profile),
@@ -36,17 +44,17 @@ export class UniswapTokenCustody {
     await assertExclusiveEvmRawSigner(this.state, op.account, this.state.profileHash(op.profile));
   }
   async allocateNonce(op: UniswapTokenOperation, kind: TokenEffectKind) {
-    await this.reconcileNonceReservations(op.account);
-    const rpc = this.call as TokenRpcCall;
+    await this.reconcileNonceReservations(op);
+    const rpc = this.call as TokenRpcCall, lane = tokenLaneOf(op.route);
     const pending = rpc.primaryPoolEnabled?.() === true ? evmRpcQuantity((await tokenBatch(rpc, "primary", [
-      { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+      { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: lane.chainDecoder },
       { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: tokenBlock },
       { method: "eth_getTransactionCount", params: [op.account, "pending"], cachePolicy: "none", decoder: tokenQuantity },
     ]))[2]) : evmRpcQuantity(await this.call("eth_getTransactionCount", [op.account, "pending"]));
     const occupied = (await this.state.listOperations(this.state.profileHash(op.profile)))
-      .filter((operation) => !operation.terminal && operation.walletAddress === op.account && operation.evm?.asset.chainId === 1 && operation.economics !== undefined)
+      .filter((operation) => !operation.terminal && operation.walletAddress === op.account && operation.evm?.asset.chainId === lane.chainId && operation.economics !== undefined)
       .map((operation) => BigInt(operation.economics!.nonceAtomic));
-    return await this.nonces.allocate(op, kind, pending, occupied);
+    return await this.nonces(op).allocate(op, kind, pending, occupied);
   }
   /**
    * True when custody holds no signed bytes for the effect and its reservation is free; false when a signed effect committed
@@ -54,13 +62,15 @@ export class UniswapTokenCustody {
    */
   async releaseNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<boolean> {
     if (await this.probeSealed(op, kind, nonce) !== null || await this.effects.load(op, kind) !== null) {
-      await this.nonces.commit(op, kind, nonce); return false;
+      await this.nonces(op).commit(op, kind, nonce); return false;
     }
-    return await this.nonces.release(op, kind, nonce);
+    return await this.nonces(op).release(op, kind, nonce);
   }
-  async commitNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) { await this.nonces.commit(op, kind, nonce); }
-  private async reconcileNonceReservations(account: string) {
-    await this.nonces.reconcile(account, async (operationId, kind, nonce): Promise<TokenNonceEvidence> => {
+  async commitNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) { await this.nonces(op).commit(op, kind, nonce); }
+  /** The account's open reservations in the operation's own lane: each is settled by its operation's marker and custody. */
+  private async reconcileNonceReservations(owner: UniswapTokenOperation) {
+    const account = owner.account;
+    await this.nonces(owner).reconcile(account, async (operationId, kind, nonce): Promise<TokenNonceEvidence> => {
       const op = await this.operations.load(operationId); if (op === null) return null;
       const attempt = kind === "approval" ? op.approvalAttempt : kind === "swap" ? op.swapAttempt : op.cleanupAttempt;
       // A slot whose attempt was retired (it can no longer land) keeps its nonce spent; a freed slot holds nothing.
@@ -79,10 +89,10 @@ export class UniswapTokenCustody {
    */
   async currentAllowance(op: UniswapTokenOperation, landed?: string) {
     const data = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [op.account as Hex, op.route.router] });
-    const rpc = this.call as TokenRpcCall;
+    const rpc = this.call as TokenRpcCall, chainDecoder = tokenLaneOf(op.route).chainDecoder;
     if (landed !== undefined) {
       const [, rawHead, rawTransaction] = await tokenBatch(rpc, "primary", [
-        { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+        { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: chainDecoder },
         { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: tokenBlock },
         { method: "eth_getTransactionByHash", params: [landed], cachePolicy: "none", decoder: (value) => value === null ? value : evmRpcRecord(value) }]);
       const head = evmRpcRecord(rawHead), transaction = rawTransaction === null ? null : evmRpcRecord(rawTransaction);
@@ -95,7 +105,7 @@ export class UniswapTokenCustody {
     }
     if (rpc.primaryPoolEnabled?.() !== true) return BigInt(evmRpcHex(await this.call("eth_call", [{ to: op.route.inputToken, data }, "latest"]), 32)).toString();
     const values = await tokenBatch(rpc, "primary", [
-      { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+      { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: chainDecoder },
       { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: tokenBlock },
       { method: "eth_call", params: [{ to: op.route.inputToken, data }, "latest"], cachePolicy: "none", decoder: tokenHex(32) },
     ]);
@@ -128,7 +138,7 @@ export class UniswapTokenCustody {
       if (rpc.primaryPoolEnabled?.() === true && primaryProviderId === null) blocked("Token primary provider was not selected before signing.", "uniswap_token_provider_binding_missing");
       const account = privateKeyToAccount(wallet.secret.privateKey), n = BigInt(nonce);
       if (n > BigInt(Number.MAX_SAFE_INTEGER)) blocked("Uniswap token nonce exceeds signer bounds.", "uniswap_token_nonce_bound");
-      const raw = await account.signTransaction({ type: "eip1559", chainId: 1, to: envelope.to as Hex, data: envelope.data,
+      const raw = await account.signTransaction({ type: "eip1559", chainId: envelope.chainId, to: envelope.to as Hex, data: envelope.data,
         value: 0n, nonce: Number(n), gas: BigInt(envelope.gasLimit), maxFeePerGas: BigInt(envelope.maxFeePerGas),
         maxPriorityFeePerGas: BigInt(envelope.maxPriorityFeePerGas), accessList: [] });
       const transactionHash = keccak256(raw);
@@ -203,9 +213,9 @@ export class UniswapTokenCustody {
 }
 
 export function envelopeOf(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): TokenTransactionEnvelope {
-  const gas: TokenGasEnvelope = kind === "approval" ? op.approvalGas : kind === "swap" ? op.swapGas : op.cleanupGas;
-  const call = kind === "swap" ? { to: op.route.router, data: op.route.calldata } : encodeUniswapTokenApproval(op.route.inputToken, kind === "approval" ? op.route.amountIn : "0");
-  return { chainId: 1, from: op.account, to: call.to, data: call.data, value: "0", nonce,
+  const gas: TokenGasEnvelope = kind === "approval" ? op.approvalGas : kind === "swap" ? op.swapGas : op.cleanupGas, lane = tokenLaneOf(op.route);
+  const call = kind === "swap" ? { to: op.route.router, data: op.route.calldata } : lane.encodeApproval(op.route.inputToken, kind === "approval" ? op.route.amountIn : "0");
+  return { chainId: lane.chainId, from: op.account, to: call.to, data: call.data, value: "0", nonce,
     gasLimit: gas.gasLimit, maxFeePerGas: gas.maxFeePerGas, maxPriorityFeePerGas: gas.maxPriorityFeePerGas };
 }
 /** Round 0 keeps the original custody key; a re-armed cleanup signs under its own round. */

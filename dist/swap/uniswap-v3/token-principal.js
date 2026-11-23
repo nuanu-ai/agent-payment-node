@@ -2,6 +2,7 @@ import { ApnError } from "../../errors.js";
 import { evmRpcAddress, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../../evm-rpc-codec.js";
 import { landedTokenCleanups } from "./token-operation.js";
 import { tokenBatch, tokenBlock, tokenQuantity } from "./token-rpc.js";
+import { tokenLaneOf } from "./token-lane.js";
 /**
  * The finalized chain's proof that no swap carrying any of `nonces` (a swap marker's, ascending) can land: a nonce a landed
  * cleanup of this operation took is shown held by it (the cleanup at that nonce in a finalized block); every other nonce is
@@ -73,7 +74,7 @@ export function abandonedPrincipalCandidate(op) {
 }
 /**
  * One primary batch, so one node answers all three: the account's nonce at the finalized tag, the cleanup transaction by
- * its own hash, and the finalized head. Proven only when that node has the cleanup (signed by the account, chain 1, the
+ * its own hash, and the finalized head. Proven only when that node has the cleanup (signed by the account, the lane's chain, the
  * swap marker's nonce) in a block at or below the finalized head, the finalized nonce is past it, and the canonical block
  * at the cleanup's height is the one the transaction names (read next on the same primary: the height is known only from
  * the transaction, and a block at or below the finalized head is final): the finalized chain then holds this cleanup at
@@ -94,7 +95,8 @@ export async function readSwapNonceConsumption(call, op, cleanup) {
     const transaction = evmRpcRecord(rawTransaction);
     if (evmRpcHex(transaction.hash, 32) !== hash.toLowerCase())
         throw new ApnError("APN_RPC_PROTOCOL", "The RPC answered another transaction than the one asked for.");
-    if (evmRpcAddress(transaction.from) !== op.account || evmRpcQuantity(transaction.chainId) !== 1n || evmRpcQuantity(transaction.nonce).toString() !== cleanup.nonce)
+    if (evmRpcAddress(transaction.from) !== op.account || evmRpcQuantity(transaction.chainId) !== BigInt(tokenLaneOf(op.route).chainId) ||
+        evmRpcQuantity(transaction.nonce).toString() !== cleanup.nonce)
         throw new ApnError("APN_OPERATION_BLOCKED", "Cleanup transaction evidence conflicts with its record.", { reason: "uniswap_token_transaction_conflict" });
     if (transaction.blockNumber === null || transaction.blockNumber === undefined)
         return null;
