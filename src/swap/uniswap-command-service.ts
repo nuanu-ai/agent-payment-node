@@ -95,11 +95,12 @@ export function tokenOutcome(value: Awaited<ReturnType<NonNullable<RuntimeContex
  * reads that proof once finality reaches it.
  */
 export function uniswapTokenNextActions(op: UniswapTokenOperation, after?: "execute"): readonly string[] {
-  const prefix = tokenLaneOf(op.route).commandPrefix;
-  if (abandonedPrincipalCandidate(op) !== null) return after === "execute" ? [] : [`${prefix} execute --operation ${op.operationId}`];
-  if (principalReleaseCandidate(op) !== null) return [`${prefix} status --operation ${op.operationId}`];
+  // The lane is read only when an action is named, so a record with no next action needs no route.
+  const prefix = () => tokenLaneOf(op.route).commandPrefix;
+  if (abandonedPrincipalCandidate(op) !== null) return after === "execute" ? [] : [`${prefix()} execute --operation ${op.operationId}`];
+  if (principalReleaseCandidate(op) !== null) return [`${prefix()} status --operation ${op.operationId}`];
   if (op.phase !== "cleanup_required") return [];
-  const cleanup = `${prefix} cleanup --operation ${op.operationId}`;
+  const cleanup = `${prefix()} cleanup --operation ${op.operationId}`;
   return op.preSignFailure?.reason === "uniswap_token_fee_cap" ? [cleanup, `${cleanup} --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>`] : [cleanup];
 }
 function data(value: unknown, proofClass: string): CommandOutcome {
