@@ -86,6 +86,8 @@ import { UNISWAP_TOKEN_EXECUTE_PLAN, uniswapTokenProbedCap } from "./swap/uniswa
 import { tokenPrimaryCandidates } from "./swap/uniswap-v3/token-rpc-pool.js";
 import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
 import { verifyUniswapV3CodePins, verifyUniswapV3MutablePins } from "./swap/uniswap-v3/pins.js";
+import { createUniswapBnbRuntime, lazyBnbRpcCall } from "./swap/uniswap-bnb/runtime-factory.js";
+import { verifyBnbUniswapCodePins, verifyBnbUniswapMutablePins } from "./swap/uniswap-bnb/pins.js";
 import { createSunSwapKeylessRuntime } from "./swap/sunswap-tron/runtime-factory.js";
 import { createJupiterV1Runtime } from "./swap/jupiter-solana/v1-runtime-factory.js";
 import { createOrcaKeylessRuntime, orcaRuntimeSelector } from "./swap/orca-solana/runtime-factory.js";
@@ -247,6 +249,13 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
       foreground: bound.request.command === "swap.uniswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
     : undefined);
+  // BNB Smart Chain keyless Uniswap likewise, over APN_BNB_RPC_URL; only CLI approve gets a terminal.
+  const uniswapBnbRuntime = options.uniswapBnbRuntime ?? (runtimeCommand.startsWith("swap.uniswap-bnb.")
+    ? createUniswapBnbRuntime({ state, wrapping: wrappingSecret, call: lazyBnbRpcCall(process.env), verifyPins: verifyBnbUniswapCodePins,
+      verifySendPins: verifyBnbUniswapMutablePins, clock,
+      policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
+      foreground: bound.request.command === "swap.uniswap-bnb.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
+    : undefined);
   const uniswapTokenRuntime = options.uniswapTokenRuntime ?? (runtimeCommand.startsWith("swap.uniswap-token.")
     ? createUniswapTokenRuntime({ state, wrapping: wrappingSecret, call: createTokenRpc({ environment: process.env, state,
       now: () => clock.now().getTime(), ...uniswapTokenRpcBudget(runtimeCommand) }), clock,
@@ -288,6 +297,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       portfolio: options.portfolio ?? { environment: process.env, http: new PortfolioHttps(), wait: portfolioPause },
     } : {}),
     ...(uniswapRuntime === undefined ? {} : { uniswapRuntime }),
+    ...(uniswapBnbRuntime === undefined ? {} : { uniswapBnbRuntime }),
     ...(uniswapTokenRuntime === undefined ? {} : { uniswapTokenRuntime }),
     ...(sunswapRuntime === undefined ? {} : { sunswapRuntime }),
     ...(orcaRuntime === undefined ? {} : { orcaRuntime }),

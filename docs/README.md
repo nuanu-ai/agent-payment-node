@@ -30,7 +30,7 @@ not a statement that the route has passed live mainnet acceptance; read the [pro
 | x402 offers and settlement | [Standard x402 offer lists](x402-offer-selection.md), [x402 settlement transaction fields](x402-settlement-compatibility.md), [x402 Permit2 source boundaries](x402-non-usdc.md), [x402 to any seller (EVM and Solana)](x402-any-seller.md), [x402 ERC-20 transfer-proof merchants](x402-merchant-usdm.md) |
 | USDC and USDT with gas paid from the amount | [USDC transfers with gas paid from the amount](gasless.md), [Gasless USDT staged implementation](gasless-usdt.md) |
 | Cross-chain routing | [LI.FI EVM cross-chain assets](lifi.md), [Relay bridge routes](relay.md), [Direct Stargate V2 quote](stargate-v2-direct-quote.md), [Direct Stargate V2 native execution](stargate-v2-native-execution.md), [Direct Stargate V2 USDC with Polygon native drop](stargate-v2-token-native-drop.md), [Circle V2 EVM Fast runtime](circle-v2-evm-fast.md) |
-| Guarded swaps | [Guarded Ethereum Uniswap swap](uniswap.md), [Solana Jupiter surfaces](jupiter.md), [TRON SunSwap V2: keyless guarded swap](sunswap.md), [Solana Orca Whirlpool: keyless guarded swap](orca.md) |
+| Guarded swaps | [Guarded Uniswap swap (Ethereum, BNB Smart Chain)](uniswap.md), [Solana Jupiter surfaces](jupiter.md), [TRON SunSwap V2: keyless guarded swap](sunswap.md), [Solana Orca Whirlpool: keyless guarded swap](orca.md) |
 | MetaMask Agent Wallet | [MetaMask native-transfer public selector and private vendor admission](metamask-native-cli-sourceprep.md) |
 | Platform, release and maintenance | [Platform support matrix](platform-support.md), [Local macOS Formula release](local-release.md), [Runtime SDK slices](runtime-sdk-vendor.md) |
 

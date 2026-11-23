@@ -189,7 +189,8 @@ async function verifyCode(call: EvmRpcCall, pin: UniswapV3CodePin, tag: Hex): Pr
   verifyCodeValue(await call("eth_getCode", [pin.address, tag]), pin);
   return pin;
 }
-function verifyCodeValue(value: unknown, pin: UniswapV3CodePin): void {
+/** One pinned runtime: present, within the EIP-170 size and hashing to the pinned code hash, or the quote fails closed. */
+export function verifyCodeValue(value: unknown, pin: UniswapV3CodePin): void {
   const code = evmRpcHex(value);
   if (code === "0x" || code.length > 2 + 2 * 49_152 || keccak256(code) !== pin.codeHash) {
     blocked(`Pinned ${pin.role} runtime code changed or is missing.`, "uniswap_code_pin_drift");

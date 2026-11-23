@@ -21,7 +21,7 @@ export interface SwapAdmissionSubject {
 
 /** The inventory of each lane that prepares through the shared guarded swap service. */
 export const GUARDED_SWAP_INVENTORY: Readonly<Record<SwapProtocolFamily, string>> = Object.freeze({
-  uniswap_ethereum: "apn swap ethereum uniswap inventory", orca_solana: "apn swap solana orca inventory",
+  uniswap_ethereum: "apn swap ethereum uniswap inventory", uniswap_bnb: "apn swap bnb uniswap inventory", orca_solana: "apn swap solana orca inventory",
   sunswap_tron: "apn swap tron sunswap inventory", jupiter_solana: "apn swap solana jupiter inventory" });
 
 /** The owner command that lists the profile's staged and active allowlist revisions: where admitting an asset starts. */

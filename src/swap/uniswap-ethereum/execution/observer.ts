@@ -7,7 +7,7 @@ import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptEconom
 import { uniswapEconomicsFromReceipt } from "../../uniswap-receipt-facts.js";
 import { proveEvmUnlanded, type SwapUnlandedProof } from "../../unlanded.js";
 import { uniswapFeeAtomic, uniswapReceiptFee, validateUniswapReceipt, type UniswapReceiptEvidence } from "../../uniswap-receipt.js";
-import { UNISWAP_ROUTER } from "../../uniswap-pin.js";
+import { ETHEREUM_UNISWAP_NATIVE_LANE, type UniswapNativeLane } from "../../uniswap-v3/native-lane.js";
 import { validateUniswapExecutionBinding } from "./binding.js";
 import { sealUniswapBalanceEvidence, type UniswapBalanceEvidence, type UniswapBalanceEvidencePort } from "./evidence-store.js";
 import type { UniswapExecutionBinding, UniswapReceiptObserverPort } from "./types.js";
@@ -15,9 +15,10 @@ import type { UniswapExecutionBinding, UniswapReceiptObserverPort } from "./type
 /** A finalized outcome: success carries the full receipt proof; a revert carries its finalized status-0 proof. */
 export type UniswapObservedOutcome = { readonly outcome: "succeeded" | "reverted"; readonly proof: SwapReceiptProof };
 
-export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPort {
+/** Observe-only receipt reader of one native-input lane; an operation of another chain is refused before any read. */
+export class UniswapNativeReceiptObserver implements UniswapReceiptObserverPort {
   /** Without an evidence store every observation reads the balances around the swap block again. */
-  constructor(private readonly call: EvmRpcCall, private readonly now: () => Date = () => new Date(),
+  constructor(private readonly lane: UniswapNativeLane, private readonly call: EvmRpcCall, private readonly now: () => Date,
     private readonly evidence?: UniswapBalanceEvidencePort) {}
 
   async observe(operationValue: SwapOperationRecord, bindingValue: UniswapExecutionBinding,
@@ -29,7 +30,7 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
 
   async observeOutcome(operationValue: SwapOperationRecord, bindingValue: UniswapExecutionBinding,
     transactionHash: Hex): Promise<UniswapObservedOutcome | null> {
-    const operation = validateSwapOperation(operationValue), binding = validateUniswapExecutionBinding(bindingValue, operation);
+    const operation = this.own(operationValue), binding = validateUniswapExecutionBinding(bindingValue, operation);
     if (operation.submissionMarker === null || operation.submissionMarker.markerHash !== binding.submissionMarkerHash) {
       blocked("Uniswap observation is forbidden before the durable submission marker.", "uniswap_observation_before_marker");
     }
@@ -49,7 +50,7 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
     const txBlock = evmRpcQuantity(tx.blockNumber), receiptBlock = evmRpcQuantity(receipt.blockNumber),
       txBlockHash = evmRpcHex(tx.blockHash, 32), receiptBlockHash = evmRpcHex(receipt.blockHash, 32);
     if (txBlock !== receiptBlock || txBlockHash !== receiptBlockHash) blocked("Uniswap transaction and receipt block identities conflict.", "uniswap_reorg_conflict");
-    if (evmRpcAddress(receipt.from) !== operation.quote.account || evmRpcAddress(receipt.to) !== UNISWAP_ROUTER) {
+    if (evmRpcAddress(receipt.from) !== operation.quote.account || evmRpcAddress(receipt.to) !== this.lane.router) {
       blocked("Uniswap receipt sender or router conflicts with the bound transaction.", "uniswap_receipt_conflict");
     }
     const block = await evmRpcBlock(this.call, `0x${txBlock.toString(16)}`);
@@ -87,7 +88,7 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
 
   /** One read of a swap its record proved finalized: its own receipt and the finalized head, for the economics (no balances). */
   async receiptEconomics(operationValue: SwapOperationRecord): Promise<SwapReceiptEconomics> {
-    const operation = validateSwapOperation(operationValue), hash = operation.receiptProof?.transactionHash;
+    const operation = this.own(operationValue), hash = operation.receiptProof?.transactionHash;
     if (hash === undefined) blocked("Uniswap receipt facts need the record's proven transaction.", "receipt_facts_binding");
     await this.assertChain();
     const [receipt, finalized] = await Promise.all([this.call("eth_getTransactionReceipt", [hash]), evmRpcBlock(this.call, "finalized")]);
@@ -97,7 +98,7 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
 
   /** Router deadline passed at a finalized block with no receipt for the sealed hash: the input can never move. */
   async proveUnlanded(deadlineSeconds: number, loadTransactionHash: () => Promise<string | null>): Promise<SwapUnlandedProof | null> {
-    return await proveEvmUnlanded(this.call, { chainId: 1n, deadlineSeconds, loadTransactionHash });
+    return await proveEvmUnlanded(this.call, { chainId: BigInt(this.lane.chainId), deadlineSeconds, loadTransactionHash });
   }
 
   /** Status 0 at a canonical finalized block with no logs proves the input never left; only gas was spent. */
@@ -131,8 +132,8 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
       values = await Promise.all([this.balance(operation.quote.account, beforeTag), this.balance(operation.quote.account, block.tag),
         evmTokenBalance(this.call, outputToken, recipient, beforeTag), evmTokenBalance(this.call, outputToken, recipient, block.tag)]);
     } catch (error) {
-      throw new ApnError("APN_PROVIDER_UNAVAILABLE", `Ethereum balances around block ${txBlock} could not be read. A pruning RPC serves only ` +
-        "about the last 128 blocks; retry, or re-run status with an archive-capable APN_ETHEREUM_RPC_URL.",
+      throw new ApnError("APN_PROVIDER_UNAVAILABLE", `${this.lane.networkName} balances around block ${txBlock} could not be read. A pruning RPC ` +
+        `serves only about the last 128 blocks; retry, or re-run status with an archive-capable ${this.lane.rpcEnvironment}.`,
       { reason: "uniswap_pre_state_unavailable", block: txBlock.toString(), cause: error instanceof ApnError ? error.code : "rpc_error" });
     }
     await recheckEvmBlock(this.call, block);
@@ -143,10 +144,19 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
   }
 
   private async balance(address: string, tag: Hex): Promise<bigint> { return evmRpcQuantity(await this.call("eth_getBalance", [address, tag])); }
-  private async assertChain(): Promise<void> { if (evmRpcQuantity(await this.call("eth_chainId", [])) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap observer requires exact Ethereum chain 1 RPC."); }
+  private async assertChain(): Promise<void> {
+    if (evmRpcQuantity(await this.call("eth_chainId", [])) !== BigInt(this.lane.chainId)) {
+      throw new ApnError("APN_CHAIN_MISMATCH", `Uniswap observer requires exact ${this.lane.networkName} chain ${this.lane.chainId} RPC.`);
+    }
+  }
+  private own(operationValue: SwapOperationRecord): SwapOperationRecord {
+    const operation = validateSwapOperation(operationValue);
+    if (operation.quote.sourceAsset.chain !== this.lane.chain) blocked("This Uniswap observer reads another chain's swaps.", "uniswap_observer_chain");
+    return operation;
+  }
   private assertTransactionEnvelope(tx: Record<string, unknown>, binding: UniswapExecutionBinding): void {
     const envelope = binding.envelope, legacy = envelope.gasPrice !== undefined;
-    if (evmRpcQuantity(tx.chainId) !== 1n || evmRpcQuantity(tx.nonce).toString() !== binding.nonce ||
+    if (evmRpcQuantity(tx.chainId) !== BigInt(this.lane.chainId) || evmRpcQuantity(tx.nonce).toString() !== binding.nonce ||
         evmRpcQuantity(tx.gas).toString() !== envelope.gasLimit || evmRpcQuantity(tx.type) !== (legacy ? 0n : 2n)) {
       blocked("Uniswap mined transaction chain, nonce, gas, or type conflicts with the signed binding.", "uniswap_transaction_conflict");
     }
@@ -156,6 +166,13 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
         evmRpcQuantity(tx.maxPriorityFeePerGas).toString() !== envelope.maxPriorityFeePerGas) {
       blocked("Uniswap mined EIP-1559 fees conflict with the signed binding.", "uniswap_transaction_conflict");
     }
+  }
+}
+
+/** The Ethereum mainnet lane's observer, over APN_ETHEREUM_RPC_URL. */
+export class UniswapEthereumReceiptObserver extends UniswapNativeReceiptObserver {
+  constructor(call: EvmRpcCall, now: () => Date = () => new Date(), evidence?: UniswapBalanceEvidencePort) {
+    super(ETHEREUM_UNISWAP_NATIVE_LANE, call, now, evidence);
   }
 }
 

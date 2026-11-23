@@ -64,6 +64,12 @@ export type CommandRequest =
       readonly maxGasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string }
   | { readonly command: "swap.uniswap.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
   | { readonly command: "swap.uniswap.status" | "swap.uniswap.approve" | "swap.uniswap.execute"; readonly operationId: string }
+  | { readonly command: "swap.uniswap-bnb.inventory" }
+  | { readonly command: "swap.uniswap-bnb.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
+      readonly outputToken: string; readonly amountAtomic: string; readonly slippageBps: number; readonly ownerSlippageCapBps: number; readonly deadline: number;
+      readonly maxGasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string }
+  | { readonly command: "swap.uniswap-bnb.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
+  | { readonly command: "swap.uniswap-bnb.status" | "swap.uniswap-bnb.approve" | "swap.uniswap-bnb.execute"; readonly operationId: string }
   | { readonly command: "swap.uniswap-token.inventory" }
   | { readonly command: "swap.uniswap-token.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
       readonly sourceToken: string; readonly outputToken: string; readonly amountAtomic: string; readonly minimumOutputAtomic: string;

@@ -21,6 +21,7 @@ const SOLANA_OWNER = WRAPPED_SOL_MINT;
 const FAMILIES = [
   { path: "swap ethereum uniswap", command: "swap.uniswap", cleanup: false },
   { path: "swap ethereum uniswap-token", command: "swap.uniswap-token", cleanup: true },
+  { path: "swap bnb uniswap", command: "swap.uniswap-bnb", cleanup: false },
   { path: "swap tron sunswap", command: "swap.sunswap", cleanup: false },
   { path: "swap solana jupiter", command: "swap.jupiter", cleanup: false },
   { path: "swap solana orca", command: "swap.orca", cleanup: false, stableReads: true },
@@ -35,7 +36,7 @@ test("guarded swap families expose six parity actions plus explicit token cleanu
       .map((action) => `${family.path} ${action}`)));
   const tools = MCP_TOOLS.filter((row) => row.command.path[0] === "swap");
   const foreground = MCP_FOREGROUND_HANDOFF.commands.filter((row) => row.path[0] === "swap");
-  assert.equal(tools.length, 23); assert.equal(foreground.length, 12);
+  assert.equal(tools.length, 27); assert.equal(foreground.length, 14);
   assert.equal(MCP_TOOLS.some((row) => row.name === "apn_swap_solana_orca_stable_recover_no_send"), false);
   assert.equal(foreground.some((row) => row.path.join(" ") === "swap solana orca stable-recover-no-send"), true);
   assert.equal(bindArgv(["swap", "solana", "orca", "stable-observe", "--operation", H("a")]).request.command,
@@ -130,7 +131,7 @@ test("status performs only a durable read and returns a stable missing-operation
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   await assert.rejects(lstat(temporary.root), { code: "ENOENT" });
   const core = new ApnCore({ state: new StateStore(temporary.root) });
-  for (const command of ["swap.uniswap.status", "swap.sunswap.status"] as const) {
+  for (const command of ["swap.uniswap.status", "swap.uniswap-bnb.status", "swap.sunswap.status"] as const) {
     const result = await core.execute({ command, operationId: H("c") });
     assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_OPERATION_NOT_FOUND");
   }
