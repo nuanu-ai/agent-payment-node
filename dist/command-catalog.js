@@ -147,7 +147,7 @@ const BASE_COMMANDS = [
     command(["doctor", "keychain"], "apn doctor keychain [--profile <profile>]", "Check whether the ordinary login Keychain command path is usable.", [profileOptional], "local_read", "Reads Keychain availability and whether the wrapping secret exists, and decrypts an existing local wallet, without creating wallet material.", "none", "Never.", completedStates, [], ["apn doctor keychain"]),
     command(["wallet", "ensure"], "apn wallet ensure [--profile <profile>]", "Create or reuse one encrypted disposable wallet.", [profileOptional], "local_write", "May create ~/.apn state and, only while nothing encrypted exists yet, one Keychain wrapping secret; completes an incomplete wallet (status incomplete) from its sealed key alone, creating no key.", "none", "Wallet creation itself is non-interactive.", completedStates, [], ["apn wallet ensure --profile default"]),
     command(["wallet", "import"], "apn wallet import --profile <profile> --key-file <absolute-path> --key-name <env-name> --expected-address <checksummed-address>", "Import a private key from an owner-only file into a new encrypted local wallet profile.", [profileRequired, option("--key-file", "string", true, noDefault, ["absolute_owner_only_regular_file_mode_0600"], "operator_input"), option("--key-name", "string", true, noDefault, ["environment_variable_name"], "public"), option("--expected-address", "address", true, noDefault, ["exact_checksum_match"], "public")], "local_write", "Creates a new encrypted wallet envelope and public profile metadata without overwriting existing state.", "none", "The operator supplies the private key file path and expected public address.", completedStates, [], ["apn wallet import --profile test-payer --key-file /secure/evm.env --key-name EVM_SIGNER --expected-address <checksummed-address>"]),
-    command(["wallet", "connect"], "apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds>] [--idempotency-key <key>]", "Create, reuse or explicitly rebind a foreground-authenticated provider wallet profile.", [
+    command(["wallet", "connect"], "apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds-within-24-hours>] [--idempotency-key <key>]", "Create, reuse or explicitly rebind a foreground-authenticated provider wallet profile.", [
         profileRequired,
         option("--provider", "provider_id", true, noDefault, ["registered_provider_identifier"], "public"),
         option("--auth-method", "provider_auth_method", false, noDefault, [
@@ -161,6 +161,7 @@ const BASE_COMMANDS = [
         ], "operator_input"),
         option("--permission-expires-at", "positive_integer", false, noDefault, [
             "future_absolute_unix_seconds",
+            "at_most_24_hours_from_now",
             "required_only_for_permission_lifecycle_providers",
             "caller_supplied_without_default",
         ], "operator_input"),
@@ -173,7 +174,7 @@ const BASE_COMMANDS = [
         "apn wallet connect --profile provider-one --provider coinbase-agentic-wallet",
         "apn wallet connect --profile metamask --provider metamask-agent-wallet",
         "apn wallet connect --profile metamask --provider metamask-agent-wallet --auth-method browser",
-        "apn wallet connect --profile smart-account --provider metamask-smart-account --auth-method browser --permission-cap-usdc-atomic 2000000 --permission-expires-at 2000000000 --idempotency-key smart-account-connect-0001",
+        "apn wallet connect --profile smart-account --provider metamask-smart-account --auth-method browser --permission-cap-usdc-atomic 2000000 --permission-expires-at <unix-seconds-within-24-hours> --idempotency-key smart-account-connect-0001",
     ]),
     command(["wallet", "permission", "list"], "apn wallet permission list --profile <profile>", "Read the locally persisted bounded provider permission without contacting the provider.", [profileRequired], "local_read", "Reads only safe permission identity, bounds, lifecycle, revision and freshness metadata.", "none", "Never.", permissionStates, [
         {
