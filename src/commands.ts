@@ -114,9 +114,11 @@ export type CommandRequest =
       readonly maxFeePerGasWei: string; readonly maxPriorityFeePerGasWei: string; readonly maxNativeDebitWei: string;
       readonly idempotencyKey: string }
   | { readonly command: "gasless.capabilities"; readonly profile?: string }
-  | { readonly command: "gasless.balance"; readonly profile: string; readonly chainId: GaslessCommandChainId }
+  /** `asset`: the MetaMask server-wallet transfer token, required on chain 56 (USDT or USDC); no other provider takes one. */
+  | { readonly command: "gasless.balance"; readonly profile: string; readonly chainId: GaslessCommandChainId; readonly asset?: Address }
   | { readonly command: "gasless.transfer.quote"; readonly profile: string; readonly owner: Address; readonly request: GaslessCommandRequest; readonly rpcMaxBatchItems?: number }
-  | { readonly command: "gasless.transfer.prepare"; readonly profile: string; readonly request: GaslessCommandRequest; readonly idempotencyKey: string }
+  | { readonly command: "gasless.transfer.prepare"; readonly profile: string; readonly request: GaslessCommandRequest; readonly idempotencyKey: string;
+      readonly asset?: Address }
   | { readonly command: "gasless.transfer.approve" | "gasless.transfer.approve-sealed" | "gasless.transfer.revoke"; readonly operationId: string }
   | { readonly command: "gasless.usdt.status" | "gasless.usdt.resume"; readonly profileHash: string; readonly operationId: string }
   | { readonly command: "gasless.usdt.execute" | "gasless.usdt.execution-status" | "gasless.usdt.observe"; readonly profileHash: string; readonly operationId: string }

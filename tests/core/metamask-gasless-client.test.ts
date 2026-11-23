@@ -5,7 +5,7 @@ import test from "node:test";
 import { executeHelperRequest, MetaMaskGaslessProviderClient, MM_HELPER_VERSION,
   SubprocessMetaMaskGaslessHelperRunner, type MetaMaskGaslessHelperRunner } from "../../src/metamask-gasless/client/index.js";
 import type { MetaMaskGaslessProfileIdentity, MetaMaskGaslessUnsignedResult } from "../../src/metamask-gasless/model.js";
-import { MM_CHAINS } from "../../src/metamask-gasless/registry.js";
+import { MM_DEPLOYMENTS } from "../../src/metamask-gasless/registry.js";
 import { expectedQuote, intent, NOW, OWNER, PROJECT, PROJECT_WALLETS_URL, quoteInput, SECRET, SdkExchange, syntheticHome } from
   "./metamask-gasless-client-fixtures/sdk.js";
 
@@ -186,9 +186,9 @@ test("public helper enforces JWT NumericDate millisecond boundaries before provi
   });
 });
 
-test("client buildUnsigned runs public prepareDelegation defaults and root verifier on all eight chains with no network", async () => {
-  for (const chainId of MM_CHAINS) {
-    const quote = expectedQuote(chainId), exchange = new SdkExchange(chainId);
+test("client buildUnsigned runs public prepareDelegation defaults and root verifier on every registry row with no network", async () => {
+  for (const { row: { chainId, token } } of MM_DEPLOYMENTS) {
+    const quote = expectedQuote(chainId, token), exchange = new SdkExchange(chainId, 200, null, token);
     const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "buildUnsigned",
       input: { owner: OWNER, chainId, executions: quote.executions } }, { now: () => NOW, exchange });
     assert.equal(result.ok, true, `chain ${chainId}`); assert.equal(exchange.requests.length, 0);
@@ -200,13 +200,14 @@ test("client buildUnsigned runs public prepareDelegation defaults and root verif
   }
 });
 
-test("client quote runs actual public factory and exact finite network budget on all eight chains", async (t) => {
-  for (const chainId of MM_CHAINS) {
-    const home = await syntheticHome(); t.after(home.cleanup); const exchange = new SdkExchange(chainId);
-    const input = quoteInput(home.binding, chainId), result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input },
+test("client quote runs actual public factory and exact finite network budget on every registry row", async (t) => {
+  // Chain 56 quotes its USDT and its USDC: 18-decimal amounts and token fees through the pinned SDK.
+  for (const { row: { chainId, token } } of MM_DEPLOYMENTS) {
+    const home = await syntheticHome(); t.after(home.cleanup); const exchange = new SdkExchange(chainId, 200, null, token);
+    const input = quoteInput(home.binding, chainId, token), result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input },
       { homeDirectory: home.home, now: () => NOW, exchange });
     assert.equal(result.ok, true, `chain ${chainId}: ${JSON.stringify(result)}`);
-    if (result.ok) assert.deepEqual(result.result, expectedQuote(chainId));
+    if (result.ok) assert.deepEqual(result.result, expectedQuote(chainId, token));
     assert.equal(exchange.requests.length, 7);
     assert.deepEqual([exchange.requests[0]!.method, exchange.requests[0]!.url, exchange.requests[0]!.body], ["GET", PROJECT_WALLETS_URL, null]);
     assert.equal(exchange.requests.filter((request) => request.url === input.rpcUrl).length, 2);

@@ -1,8 +1,13 @@
 import type { Address, Hex } from "../model.js";
 import type { MetaMaskGaslessFailure, MetaMaskGaslessReason } from "./reasons.js";
 
-export const MM_CHAINS = [1, 10, 137, 143, 1329, 8453, 42161, 59144] as const;
+export const MM_CHAINS = [1, 10, 56, 137, 143, 1329, 8453, 42161, 59144] as const;
 export type MetaMaskGaslessChainId = typeof MM_CHAINS[number];
+/** The token scales the lane admits: 6 for the Circle USDC rows, 18 for the Binance-Peg USDT and USDC rows on chain 56. */
+export const MM_TOKEN_DECIMALS = [6, 18] as const;
+export type MetaMaskGaslessDecimals = typeof MM_TOKEN_DECIMALS[number];
+/** keccak256 of empty code: the implementation code hash a row pins for a token that is no proxy. */
+export const MM_EMPTY_CODE_HASH = "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470";
 export const MM_TTL_MS = 300_000;
 export const MM_MIN_REMAINING_MS = 15_000;
 export const MM_OBSERVATION_MAX_AGE_MS = 120_000;
@@ -25,6 +30,11 @@ export interface MetaMaskGaslessRequest {
   readonly maxFeeAtomic: string;
   readonly minReceivedAtomic: string;
   readonly fixedNet?: MetaMaskGaslessFixedNet;
+  /**
+   * The transfer token, present exactly on a chain whose registry holds several tokens (chain 56: USDT and USDC). A chain
+   * with one token row keeps the request without it, as every earlier record does.
+   */
+  readonly token?: Address;
 }
 /** Public legacy profile identity. Private provider selection never crosses the helper boundary. */
 export interface MetaMaskGaslessProfileIdentity {
@@ -97,11 +107,16 @@ export interface MetaMaskGaslessDeploymentRow {
   readonly chainId: MetaMaskGaslessChainId;
   readonly network: string;
   readonly token: Address;
-  readonly decimals: 6;
+  readonly decimals: MetaMaskGaslessDecimals;
   readonly finalityTag: "safe" | "finalized";
   readonly protocol: MetaMaskGaslessProtocolPins;
+  /** The token contract's own runtime code hash (the proxy's, for a proxied token). */
   readonly tokenProxyCodeHash: Hex;
   readonly tokenImplementationSlot: Hex;
+  /**
+   * The implementation the slot names. A token that is no proxy pins the zero address with `MM_EMPTY_CODE_HASH`: its slot
+   * must read zero and its own pinned runtime is all the code it runs.
+   */
   readonly tokenImplementationAddress: Address;
   readonly tokenImplementationCodeHash: Hex;
   readonly evidenceBlock: MetaMaskGaslessBlock;
@@ -117,9 +132,10 @@ export interface MetaMaskGaslessChainState {
   readonly tokenProxyCodeHash: Hex;
   readonly tokenImplementationAddress: Address;
   readonly tokenImplementationCodeHash: Hex;
-  readonly tokenDecimals: 6;
+  readonly tokenDecimals: MetaMaskGaslessDecimals;
   readonly ownerCodeHash: Hex;
   readonly designation: "empty" | "pinned";
+  /** The owner's balance of the transfer token, in its atoms; the name predates tokens other than USDC. */
   readonly usdcBalanceAtomic: string;
   readonly counterAtomic: string;
 }
@@ -146,7 +162,7 @@ export interface MetaMaskGaslessIntent extends MetaMaskGaslessUnsignedResult {
   readonly request: MetaMaskGaslessRequest;
   readonly binding: MetaMaskGaslessBinding;
   readonly token: Address;
-  readonly decimals: 6;
+  readonly decimals: MetaMaskGaslessDecimals;
   readonly deploymentEvidenceHash: string;
   readonly initialSnapshot: MetaMaskGaslessSnapshot;
   readonly preparedGrossAtomic?: string;

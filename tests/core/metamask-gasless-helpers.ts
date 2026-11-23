@@ -15,13 +15,13 @@ import { StateStore } from "../../src/state.js";
 import { accountBindingHash, capabilityHash, metamaskDirectCapabilitySnapshot,
   type ProviderProfileRecord } from "../../src/provider-profile.js";
 import { mmPrivateHash, mmWalletIdentityHash } from "../../src/metamask-gasless/identity.js";
-import type { MetaMaskGaslessBinding, MetaMaskGaslessBlock, MetaMaskGaslessChainId, MetaMaskGaslessChainState,
+import type { MetaMaskGaslessBinding, MetaMaskGaslessBlock, MetaMaskGaslessChainId, MetaMaskGaslessChainState, MetaMaskGaslessDeploymentRow,
   MetaMaskGaslessCursor, MetaMaskGaslessIntent, MetaMaskGaslessObservation, MetaMaskGaslessProviderIntent,
   MetaMaskGaslessProviderObservation, MetaMaskGaslessRequest, MetaMaskGaslessRpcObservation, MetaMaskGaslessUnsignedDelegation } from "../../src/metamask-gasless/model.js";
 import type { MetaMaskGaslessOperationRecord } from "../../src/metamask-gasless/operation-model.js";
 import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMaskGaslessQuoteInput,
   MetaMaskGaslessRepositoryPort, MetaMaskGaslessRpcPort, MetaMaskGaslessUnsignedInput } from "../../src/metamask-gasless/ports.js";
-import { mmRegistry } from "../../src/metamask-gasless/registry.js";
+import { mmChainFacts, mmChainTokens, mmRegistry } from "../../src/metamask-gasless/registry.js";
 import type { MetaMaskDisableCall } from "../../src/metamask-gasless/revocation/call.js";
 import type { MetaMaskRevocationChain } from "../../src/metamask-gasless/revocation/chain.js";
 import type { MetaMaskRevocationReadPort, MetaMaskRevocationSessionProject } from "../../src/metamask-gasless/revocation/requests.js";
@@ -117,7 +117,7 @@ export class MmTestProvider implements MetaMaskGaslessProviderPort {
     return { ...material, hash: hashObject(material) };
   }
   async buildUnsigned(input: MetaMaskGaslessUnsignedInput) {
-    this.calls.push("buildUnsigned"); const row = mmRegistry(input.chainId).row;
+    this.calls.push("buildUnsigned"); const row = mmChainFacts(input.chainId);
     const unsignedDelegation: MetaMaskGaslessUnsignedDelegation = { delegator: input.owner, delegate: MM_ANY_BENEFICIARY,
       authority: MM_ROOT_AUTHORITY, salt: `0x${"42".repeat(32)}`,
       caveats: [{ enforcer: row.protocol.limitedCalls.address, terms: createLimitedCallsTerms({ limit: 1 }), args: "0x" },
@@ -161,12 +161,14 @@ export class MmTestRpc implements MetaMaskGaslessRpcPort {
   revocations: Array<{ readonly intent: MetaMaskGaslessIntent; readonly call: MetaMaskDisableCall }> = [];
   /** The native balance the send-time read answers; the priced chain's own balance unless a test sets another. */
   sendBalanceWei: string | undefined;
-  constructor(readonly chainId: MetaMaskGaslessChainId, readonly now: Date, designation: "empty" | "pinned" = "empty") {
-    const row = mmRegistry(chainId).row;
+  /** The row of the transfer token: on chain 56 the named USDT or USDC, elsewhere the chain's one USDC. */
+  readonly row: MetaMaskGaslessDeploymentRow;
+  constructor(readonly chainId: MetaMaskGaslessChainId, readonly now: Date, designation: "empty" | "pinned" = "empty", token?: Address) {
+    const row = mmRegistry(chainId, token).row; this.row = row;
     this.state = { protocolCodeHashes: Object.fromEntries(Object.entries(row.protocol).map(([key, value]) =>
       [key, value.codeHash])) as MetaMaskGaslessChainState["protocolCodeHashes"], tokenProxyCodeHash: row.tokenProxyCodeHash,
       tokenImplementationAddress: row.tokenImplementationAddress, tokenImplementationCodeHash: row.tokenImplementationCodeHash,
-      tokenDecimals: 6, ownerCodeHash: keccak256(designation === "empty" ? "0x" : `0xef0100${row.protocol.delegate.address.slice(2)}`),
+      tokenDecimals: row.decimals, ownerCodeHash: keccak256(designation === "empty" ? "0x" : `0xef0100${row.protocol.delegate.address.slice(2)}`),
       designation, usdcBalanceAtomic: "100000000", counterAtomic: "0" };
   }
   async balance() {
@@ -191,7 +193,7 @@ export class MmTestRpc implements MetaMaskGaslessRpcPort {
     return this.sendBalanceWei ?? this.revocationChain.nativeBalanceWei;
   }
   async observe(intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor): Promise<MetaMaskGaslessRpcObservation> {
-    this.calls.push("observe"); const row = mmRegistry(this.chainId).row;
+    this.calls.push("observe"); const row = this.row;
     const observedAt = this.observedAt ?? this.now.toISOString();
     const transactionBlock = mmTestBlock("102", this.now), finalityBlock = mmTestBlock("103", this.now);
     const reason = { pending: "mm_gasless_pending", unavailable: "mm_gasless_rpc_unavailable", invalid: "mm_gasless_evidence_invalid",
@@ -222,7 +224,7 @@ export class MmTestRpc implements MetaMaskGaslessRpcPort {
  * approval as expired.
  */
 export async function mmFixture(root: string, chainId: MetaMaskGaslessChainId = 8453,
-  designation: "empty" | "pinned" = "empty", options: { abandonApproval?: OperationAbandonApprovalPort; now?: Date } = {}) {
+  designation: "empty" | "pinned" = "empty", options: { abandonApproval?: OperationAbandonApprovalPort; now?: Date; token?: Address } = {}) {
   const state = new StateStore(root), now = new Date(options.now ?? Math.floor(Date.now() / 1000) * 1000), profile = "mm-fixture";
   await state.initialize(); const capabilities = metamaskDirectCapabilitySnapshot();
   const publicProfile: ProviderProfileRecord = { schema_version: "apn.provider-profile.v1", profile,
@@ -235,7 +237,9 @@ export async function mmFixture(root: string, chainId: MetaMaskGaslessChainId = 
     accountBindingHash: publicProfile.account_binding_hash, capabilityHash: publicProfile.capability_hash, revision: 1,
     projectHash: mmPrivateHash("project", "synthetic-project"), walletReferenceHash: mmPrivateHash("wallet-reference", "synthetic-wallet", "name"),
     walletIdHash: mmWalletIdentityHash(MM_TEST_OWNER), namespace: "eip155", mode: "server", environment: "prod" };
-  const provider = new MmTestProvider(binding, now), rpc = new MmTestRpc(chainId, now, designation), approval = new MmTestApproval();
+  const provider = new MmTestProvider(binding, now), rpc = new MmTestRpc(chainId, now, designation, options.token), approval = new MmTestApproval();
+  // A chain with several tokens (56) names the transfer token with the command's --asset; the request then carries it.
+  const asset = options.token !== undefined && mmChainTokens(chainId).length > 1 ? { asset: options.token } : {};
   const wrapping = new MmTestWrappingSecret(), references = new EncryptedMetaMaskGaslessRequestReferenceStore(state, wrapping);
   // The sealed disable request ids (lane `metamask-revocation`) and resume's read of each, as production wires them.
   const providerReferences = new EncryptedProviderRequestReferenceStore(state, wrapping), revocationReader = new MmTestRevocationReader();
@@ -252,13 +256,13 @@ export async function mmFixture(root: string, chainId: MetaMaskGaslessChainId = 
     grossAtomic: "10000000", maxFeeAtomic: "50000", minReceivedAtomic: "9950000" };
   const record = async (id: string): Promise<MetaMaskGaslessOperationRecord> => (await core.metaMaskGasless.records.findOperation(id))!;
   const prepare = async (idempotencyKey = "mm-fixture-1") => {
-    const input = { command: "gasless.transfer.prepare", profile, request, idempotencyKey } as const;
+    const input = { command: "gasless.transfer.prepare", profile, request, idempotencyKey, ...asset } as const;
     const result = await core.execute(input); assert.equal(result.ok, true, JSON.stringify(result.error));
     const id = (result.operation as { operation_id: string }).operation_id;
     return { id, input, operation: await record(id) };
   };
   const restart = () => new ApnCore({ state: new StateStore(root), metaMaskGasless: dependencies, clock, wait, ...abandon });
-  return { state, now, profile, publicProfile, binding, provider, rpc, approval, wrapping, references, providerReferences, revocationReader,
+  return { state, now, profile, publicProfile, binding, provider, rpc, asset, approval, wrapping, references, providerReferences, revocationReader,
     dependencies, clock, wait, advance, makeCore, core, request, prepare, record, restart };
 }
 

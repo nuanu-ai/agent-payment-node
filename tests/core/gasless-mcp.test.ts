@@ -60,10 +60,10 @@ test("gasless CLI and MCP project the same seven strict tools and canonical inpu
     { name: "apn_gasless_usdt_status", properties: ["profile_hash", "operation"], required: ["profile_hash", "operation"], additionalProperties: false },
     { name: "apn_gasless_usdt_resume", properties: ["profile_hash", "operation"], required: ["profile_hash", "operation"], additionalProperties: false },
     { name: "apn_gasless_capabilities", properties: ["profile"], required: [], additionalProperties: false },
-    { name: "apn_gasless_balance", properties: ["profile", "chain"], required: ["profile", "chain"], additionalProperties: false },
+    { name: "apn_gasless_balance", properties: ["profile", "chain", "asset"], required: ["profile", "chain"], additionalProperties: false },
     { name: "apn_gasless_transfer_quote", properties: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url", "rpc_max_batch_items"],
       required: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url"], additionalProperties: false },
-    { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "net_amount_atomic", "max_gross_atomic", "max_fee_atomic", "idempotency_key"],
+    { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "asset", "to", "amount", "max_fee", "min_received", "net_amount_atomic", "max_gross_atomic", "max_fee_atomic", "idempotency_key"],
       required: ["profile", "chain", "to", "idempotency_key"], additionalProperties: false },
   ]);
   assert.equal((requiredTool(tools, "apn_gasless_usdt_status").inputSchema.properties.profile_hash as { pattern?: unknown }).pattern, "^[a-f0-9]{64}$");
@@ -90,7 +90,8 @@ test("gasless CLI and MCP project the same seven strict tools and canonical inpu
       parseArgv(["gasless", "balance", "--profile", "gasless-local", "--chain", chain]),
     );
   }
-  for (const chain of ["0", "01", "56", "8453.0", "eip155:8453"]) {
+  // Chain 56 is a MetaMask chain since the Binance-Peg rows; 97 (its testnet) stays outside every gasless rail.
+  for (const chain of ["0", "01", "97", "8453.0", "eip155:8453"]) {
     invalid(() => parseArgv(["gasless", "balance", "--profile", "gasless-local", "--chain", chain]));
     invalid(() => bindMcpInput(balance.command, { profile: "gasless-local", chain }));
   }

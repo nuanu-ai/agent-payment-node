@@ -92,7 +92,7 @@ export class MetaMaskGaslessProviderClient implements MetaMaskGaslessProviderPor
       if (response.diagnostic !== undefined) {
         const quoted = request.mode === "quote" ? request.input : undefined;
         throw withMetaMaskProviderRefusal(readFailureError(response.failure.reason, response.diagnostic), response.diagnostic,
-          quoted?.chainId, quoted?.binding);
+          quoted?.chainId, quoted?.binding, quoted?.token);
       }
       throw mmError(response.failure.reason);
     }
