@@ -1,5 +1,7 @@
 # Agent Payment Node (APN)
 
+[![Featured in Awesome AI Agents](https://img.shields.io/badge/Featured_in-Awesome_AI_Agents-2ea44f)](https://github.com/NipunaRanasinghe/awesome-ai-agents)
+
 **Agent Payment Node (APN)** is an open-source, local-first payment runtime and MCP server for AI agents. An agent drives it through the `apn` CLI or a local
 stdio MCP server; a human owner sets the limits and approves payments in a foreground terminal, and x402 purchases run
 inside a policy the owner activated. APN keeps each
