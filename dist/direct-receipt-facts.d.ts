@@ -50,7 +50,7 @@ export declare function publicDirectFacts(operation: Pick<OperationRecord, "evm"
     actual_facts_refusal?: ReceiptFactsRefusal;
     actual_network_fee: {
         status: string;
-        chain: "eip155:1" | "eip155:8453" | "eip155:42161" | "eip155:10" | "eip155:137" | "eip155:56" | "eip155:43114" | "eip155:130" | "eip155:59144" | "eip155:143" | "eip155:1329";
+        chain: "eip155:1" | "eip155:8453" | "eip155:56" | "eip155:42161" | "eip155:10" | "eip155:137" | "eip155:43114" | "eip155:130" | "eip155:59144" | "eip155:143" | "eip155:1329";
         unit: string;
         decimals: 18;
         fee_model: import("./evm-direct-networks.js").DirectEvmFeeModel;

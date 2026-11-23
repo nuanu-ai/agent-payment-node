@@ -131,7 +131,8 @@ export declare function directEvmNetworkByCaip2(chain: string): DirectEvmNetwork
 export declare function directEvmQuoteFeeModel(chainId: DirectEvmChainId): DirectEvmQuoteFeeModel | undefined;
 export declare function directEvmRequiresSafeHead(chainId: DirectEvmChainId): boolean;
 /**
- * Direct rows of one network: frozen native/token identities plus the three direct-only token deployments.
+ * Direct rows of one network: frozen native/token identities, the three direct-only token deployments and the
+ * Binance-Peg USDT and USDC of BNB Smart Chain.
  * The registry's native coin must agree with the frozen row, so a list revision cannot silently rename or re-scale it.
  */
 export declare function directEvmListRows(chainId: DirectEvmChainId): readonly CandidateAsset[];
