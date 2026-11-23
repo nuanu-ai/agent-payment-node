@@ -66,6 +66,7 @@ test("every admitted route's derived send step is a handful of primary POSTs", (
   }
   // Token routes: guard before and after consent, re-check, send, then the bridge's guard, re-check and send. The BNB
   // composite destination adds its routing check to each full guard.
-  assert.equal(steps.length, 25); assert.equal(Math.max(...steps), 7); assert.equal(Math.min(...steps), 4);
+  // Four of them reach a BSC Binance-Peg row over Across: Ethereum USDC and USDT, Base USDC and Arbitrum USDC.
+  assert.equal(steps.length, 29); assert.equal(Math.max(...steps), 7); assert.equal(Math.min(...steps), 4);
   assert.equal(bridgeSendStepPosts({ fromChainId: 1, toChainId: 56, toToken: BRIDGE_ZERO_ADDRESS }, "across", { consent: true, effects: 1 }), 6);
 });

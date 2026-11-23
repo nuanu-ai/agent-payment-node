@@ -16,7 +16,7 @@ import { LIFI_INVENTORY_RESPONSE_BYTES, LifiProvider, normalizeLifiStatus, type 
 import { validateBridgeQuote } from "../../src/lifi/quote-repository.js";
 import { bridgeRpcFactory } from "../../src/lifi/rpc.js";
 import { bridgeCapabilities, bridgeInventory } from "../../src/lifi/catalog.js";
-import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
+import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS } from "../../src/lifi/asset-registry.js";
 import { BASE_SOLANA_USDC_CANDIDATE, BASE_TRON_USDT_CANDIDATE } from "../../src/lifi/discovery-candidates.js";
 
 const BRIDGE_USDC = { 1: BRIDGE_ASSET_REGISTRY[1].tokens[0]!.address, 8453: BRIDGE_ASSET_REGISTRY[8453].tokens[0]!.address,
@@ -150,9 +150,10 @@ test("LI.FI RPC environment requires each exact admitted chain endpoint and reje
 test("LI.FI public provider API contract uses fixed endpoints, finite tools, one inventory per admitted asset pair and bounded status normalization", async () => {
   const calls: Parameters<LifiTransport["request"]>[] = [], provider = new LifiProvider({ async request(...args) { calls.push(args); return { status: 200, body: "{}" }; } });
   // One connection probe per admitted (asset, peer) row, so the count follows the registry rather than a constant.
-  const admittedPairs = ([1, 8453, 42161] as const).reduce((sum, id) =>
+  // BNB Smart Chain's Binance-Peg USDC and USDT rows add their own four: 12 from Ethereum, Base and Arbitrum, 4 from BSC.
+  const admittedPairs = BRIDGE_CHAINS.reduce((sum, id) =>
     sum + BRIDGE_ASSET_REGISTRY[id].tokens.reduce((rows, asset) => rows + asset.peers.length, 0), 0);
-  assert.equal(admittedPairs, 8);
+  assert.equal(admittedPairs, 16);
   const responses = await provider.inventory(); assert.equal(calls.length, 3 + admittedPairs + 1 + 4);
   const pairs = JSON.parse(responses.connections.body).pairs as Array<Record<string, unknown>>;
   assert.equal(pairs.length, admittedPairs + 2);

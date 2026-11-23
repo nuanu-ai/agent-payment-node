@@ -29,12 +29,13 @@ const DESTINATION_ROUTES: Route[] = ([1, 8453, 42161] as const).flatMap((chainId
   }))));
 const receipts = (chainId: number): ReceiptRoute[] => chainId === 8453 ? ["primary", "fallback", "batch", "scalar"] : ["primary", "fallback", "batch"];
 const label = ({ request: r, tool }: Route) => `${r.fromChainId}->${r.toChainId} ${tool} ${r.toToken === BRIDGE_ZERO_ADDRESS ? "native" : r.toToken}`;
-const cap = ({ request }: Route) => bridgeDestinationObservationRequests(request, request.toChainId === 56);
+const bnbComposite = (request: Route["request"]) => request.toChainId === 56 && request.toToken === BRIDGE_ZERO_ADDRESS;
+const cap = ({ request }: Route) => bridgeDestinationObservationRequests(request, bnbComposite(request));
 
 /** One destination observation through the production adapter, in the order `BridgeObservation` reads it. */
 async function observeDestination({ request, tool }: Route, receipt: ReceiptRoute, maxHttpRequests: number) {
   const chainId = request.toChainId, peer = request.fromChainId, token = request.toToken, amount = 10_000_000n;
-  const composite = chainId === 56, delivered = bridgeProviderBoundNativeDestination(request);
+  const composite = bnbComposite(request), delivered = bridgeProviderBoundNativeDestination(request);
   const emitter = composite ? BNB_COMPOSITE.executor : bridgeProtocolEmitter(chainId, tool, token);
   let now = Date.parse("2026-10-15T20:20:00Z"); const wait = async (ms: number) => { now += ms; };
   const chain = chainDouble([[chainId, peer, tool, token]], code, receipt, { nowSeconds: BigInt(now / 1000),

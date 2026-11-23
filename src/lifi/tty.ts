@@ -29,6 +29,10 @@ export class TtyBridgeApproval implements BridgeApprovalPort {
       `Minimum destination output (${to.chain} ${to.symbol}): ${bounds.destination.minimum_output_atomic} atomic`,
       `Owner minimum destination floor (${to.chain} ${to.symbol}): ${bounds.destination.owner_minimum_output_atomic} atomic`,
       `Maximum slippage: ${s.transfer.slippageBps} basis points`,
+      ...(bounds.scaled_precision === undefined ? [] : [
+        `Precision: source ${from.symbol} ${from.decimals} decimals, destination ${to.symbol} ${to.decimals} decimals; the same token value, not a conversion`,
+        `Token loss bound at this route: ${bounds.scaled_precision.token_loss_bound_source_atomic} ${from.symbol} atomic at ${from.decimals} decimals (rounded up)`,
+      ]),
     ];
     const lines = ["Agent Payment Node cross-chain bridge approval", `Profile: ${s.profile}`, `Provider: ${s.provider}`,
       `Custody: ${s.custody}`, `Execution owner: ${s.execution_owner}`, `Operation: ${input.operationId}`,

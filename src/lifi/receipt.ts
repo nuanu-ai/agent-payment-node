@@ -8,6 +8,7 @@ import type { LegacyBridgeOperationRecord, StoredBridgeOperationRecord } from ".
 import { isLegacyBridgeOperation } from "./legacy-operation.js";
 import { BRIDGE_ARCHIVE_RPC_ENV, BRIDGE_RECEIPT_RPC_ENV } from "./rpc-archive.js";
 import { BRIDGE_RPC_ENV } from "./rpc-transport.js";
+import { bridgeLossAsSource, bridgeRequestScale } from "./denomination.js";
 
 /** The next actions a receipt binds. Stored receipts hash them, so they never change for a transition already written. */
 export function bridgeNextActions(op: BridgeOperationRecord): readonly string[] {
@@ -64,7 +65,7 @@ function projectBridgeOperation(op: BridgeOperationRecord, legacy: boolean) {
   const from = assetProjection(m.request.fromChainId, m.request.fromToken);
   const to = assetProjection(m.request.toChainId, m.request.toToken);
   const sameDenomination = fromAsset.pairKey === toAsset.pairKey && fromAsset.decimals === toAsset.decimals;
-  const nativePrincipal = bridgeNativePrincipal(m.request);
+  const nativePrincipal = bridgeNativePrincipal(m.request), scale = bridgeRequestScale(m.request);
   const assetBounds = {
     binding: "intent.materialization.request" as const,
     same_denomination: sameDenomination,
@@ -77,6 +78,10 @@ function projectBridgeOperation(op: BridgeOperationRecord, legacy: boolean) {
     destination: { chain: to.chain, asset: to.token, symbol: to.symbol, decimals: to.decimals,
       expected_output_atomic: m.quotedOutputAtomic, minimum_output_atomic: m.minimumOutputAtomic,
       owner_minimum_output_atomic: m.request.minOutputAtomic },
+    // Only the Binance-Peg pair carries this: one value at two precisions. No stored receipt of another pair changes.
+    ...(scale.scaled ? { scaled_precision: { finer_decimals: Math.max(fromAsset.decimals, toAsset.decimals),
+      token_loss_bound_source_atomic: bridgeLossAsSource(BigInt(m.request.amountAtomic), BigInt(m.minimumOutputAtomic), scale).toString(),
+      rounding: "loss_rounded_up_to_source_atomic" as const } } : {}),
   };
   const effects = op.effects.map((e) => ({
     role: e.role, phase: e.phase, envelope_hash: e.envelope.envelopeHash, transaction_hash: e.transactionHash,

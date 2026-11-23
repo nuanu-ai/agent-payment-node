@@ -40,7 +40,7 @@ option is not a fallback for bridge operations.
 | Ethereum | `eip155:1` | `APN_ETHEREUM_RPC_URL` | Bridge source and destination; 1Click Ethereum lanes |
 | Base | `eip155:8453` | `APN_BASE_RPC_URL` | Bridge source and destination; GasZip source; 1Click Base lane; Circle approval and burn |
 | Arbitrum One | `eip155:42161` | `APN_ARBITRUM_RPC_URL` | Bridge source and destination |
-| BNB Smart Chain | `eip155:56` | `APN_BNB_RPC_URL` | Bridge destination only |
+| BNB Smart Chain | `eip155:56` | `APN_BNB_RPC_URL` | Bridge destination; source of the Binance-Peg USDT and USDC over Across |
 | Monad | `eip155:143` | `APN_MONAD_RPC_URL` | Bridge destination only |
 | Linea | `eip155:59144` | `APN_LINEA_RPC_URL` | Bridge destination only |
 | Sei | chain 1329 | `APN_SEI_RPC_URL` | GasZip destination |
@@ -115,15 +115,16 @@ A changed policy refuses before signing (`allowlist_policy_changed`); prepare a 
 
 ### Directions
 
-Ethereum, Base and Arbitrum One are source chains. BNB Smart Chain, Monad and Linea are destination-only: they are
-reached only from Ethereum with native ETH, and the recipient must be the profile owner's own address
-(`bridge_self_recipient_required`). A destination-only chain presented as a source never reaches LI.FI step
-materialization. Where APN stops it depends on the pair:
+Ethereum, Base and Arbitrum One are source chains. BNB Smart Chain is a source for its Binance-Peg USDT and USDC only,
+over Across (see [Binance-Peg USDT and USDC](#binance-peg-usdt-and-usdc-of-bnb-smart-chain)). For native coins BNB Smart
+Chain, Monad and Linea are destination-only: they are reached only from Ethereum with native ETH, and the recipient must
+be the profile owner's own address (`bridge_self_recipient_required`). A destination-only leg presented as a source
+never reaches LI.FI step materialization. Where APN stops it depends on the pair:
 
 | Request | Stopped by | Result |
 | --- | --- | --- |
 | BNB to Ethereum ETH, MON to Ethereum ETH | `bridge routes` request validation, before any wallet read or LI.FI call | `APN_INVALID_INPUT`, message `Bridge validation failed: admitted_asset_pair.` BNB and MON pair only with their own coin, and no source chain has a BNB or MON row |
-| Any other request from BNB Smart Chain, Monad or Linea | `bridge routes` request validation | `APN_INVALID_INPUT` with `admitted_asset_pair` (another chain or asset kind), `admitted_quote_asset_pair` (a quote-only destination), or `asset_not_on_frozen_list` / `asset_listed_not_bridge_admitted` (a token leg: these chains have no token rows) |
+| Any other request from BNB Smart Chain, Monad or Linea | `bridge routes` request validation | `APN_INVALID_INPUT` with `admitted_asset_pair` (another chain, asset kind or pair key), `admitted_quote_asset_pair` (a quote-only destination), or `asset_not_on_frozen_list` / `asset_listed_not_bridge_admitted` (a token without a row; only the BSC Binance-Peg USDT and USDC have one) |
 | Linea ETH to Ethereum ETH | `bridge prepare` | `bridge routes` lists every row as `preparable: false` with its row gate ([Route row gates](#route-row-gates)): `source_execution_unreviewed` on the `across` row, `asset_tool_unreviewed` on a `stargateV2` row, `finite_decoder_and_correlated_evidence_unavailable` on any other tool. `bridge prepare` refuses every row of the quote with `APN_PROVIDER_CAPABILITY_UNAVAILABLE`, message `Bridge validation failed: source_execution_unreviewed.`, before materialization or any RPC read, including a quote saved earlier |
 
 ### Native coins
@@ -149,32 +150,62 @@ return `asset_tool_unreviewed`.
 
 | Chain | Token | Decimals | Address | Contract shape | Tools | Peers |
 | --- | --- | --- | --- | --- | --- | --- |
-| `eip155:1` | USDC | 6 | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | legacy proxy | Across, Stargate pool 1 | Base, Arbitrum |
-| `eip155:8453` | USDC | 6 | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | legacy proxy | Across, Stargate pool 1 | Ethereum, Arbitrum |
-| `eip155:42161` | USDC | 6 | `0xaf88d065e77c8cC2239327C5EDb3A432268e5831` | legacy proxy | Across, Stargate pool 1 | Ethereum, Base |
-| `eip155:1` | USDT | 6 | `0xdAC17F958D2ee523a2206206994597C13D831ec7` | immutable; fee fields pinned at zero | Across | none |
+| `eip155:1` | USDC | 6 | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | legacy proxy | Across, Stargate pool 1 | Base, Arbitrum; BNB Smart Chain over Across |
+| `eip155:8453` | USDC | 6 | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | legacy proxy | Across, Stargate pool 1 | Ethereum, Arbitrum; BNB Smart Chain over Across |
+| `eip155:42161` | USDC | 6 | `0xaf88d065e77c8cC2239327C5EDb3A432268e5831` | legacy proxy | Across, Stargate pool 1 | Ethereum, Base; BNB Smart Chain over Across |
+| `eip155:56` | USDC (Binance-Peg) | 18 | `0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d` | EIP-1967 proxy (implementation `0xba5fe23f8a3a24bed3236f05f2fcf35fd0bf0b5c`, admin `0xd2f93484f2d319194cba95c5171b18c1d8cfd6c4`) | Across | Ethereum, Base, Arbitrum |
+| `eip155:56` | USDT (Binance-Peg) | 18 | `0x55d398326f99059fF775485246999027B3197955` | immutable | Across | Ethereum |
+| `eip155:1` | USDT | 6 | `0xdAC17F958D2ee523a2206206994597C13D831ec7` | immutable; fee fields pinned at zero | Across | BNB Smart Chain |
 | `eip155:1` | WBTC | 8 | `0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599` | immutable | Across | Arbitrum |
 | `eip155:42161` | WBTC | 8 | `0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f` | beacon proxy (beacon `0xE72ba9418b5f2Ce0A6a40501Fe77c6839Aa37333`, implementation `0x3f770Ac673856F105b586bb393d122721265aD46`) | Across | Ethereum |
 
 Both sides of a route must be admitted rows of the same kind with the same pair key, the same decimals, and each other
-in their peer sets (`admitted_asset_pair`). Peer sets are asymmetric on purpose: Base has no canonical WBTC, so no WBTC
-direction touches Base. A row with no peer is refused as `asset_has_no_listed_peer`.
+in their peer sets (`admitted_asset_pair`). The one exception to equal decimals is a Binance-Peg row and its 6-decimal
+peer. Peer sets are asymmetric on purpose: Base has no canonical WBTC, so no WBTC direction touches Base. A row with no
+peer is refused as `asset_has_no_listed_peer`.
 
 **USDT on Ethereum.** The row is admitted with the storage a code hash cannot see: every deployment check requires
 `basisPointsRate()`, `maximumFee()` and `deprecated()` to be zero, so a switched-on transfer fee or a deprecation
 forward fails closed. Tether's `approve` returns no value and reverts a nonzero approve over a nonzero allowance; APN
 never reads the return value (it proves the approval by the exact `Approval` log and the observed allowance) and only
 approves exactly the principal from a zero allowance, or uses an exact existing allowance. LI.FI's `approvalReset` flag
-is accepted only for this row and never acted on. The row has no peer, so every USDT route is refused before any
-provider call; admitting one needs a listed USDT destination on an admitted chain.
+is accepted only for this row and never acted on. Its one peer is the Binance-Peg USDT of BNB Smart Chain; a USDT route to
+Base or Arbitrum One is refused before any provider call, because the frozen list names no USDT there.
 
 ### The frozen allowlist binds the registry
 
-Every native coin and every token row except WBTC must equal an entry of the frozen allowlist dataset
-(`data/allowlist/2026-09-17/dataset.json`): chain, kind, contract, symbol and decimals. APN checks this before admitting
-any route leg and treats a drift as an installation fault. An address the list does not name is refused as
+Every native coin and every token row except WBTC and the Binance-Peg rows must equal an entry of the frozen allowlist
+dataset (`data/allowlist/2026-09-17/dataset.json`): chain, kind, contract, symbol and decimals. APN checks this before
+admitting any route leg and treats a drift as an installation fault. An address the list does not name is refused as
 `asset_not_on_frozen_list` and is never matched by symbol; a listed address without a bridge row is refused as
-`asset_listed_not_bridge_admitted`. WBTC predates the list and stays a `legacy_pinned` row with its own pins.
+`asset_listed_not_bridge_admitted`. WBTC predates the list and stays a `legacy_pinned` row with its own pins. The
+Binance-Peg USDT and USDC are `reviewed_supplement` rows: each must equal the owner-admitted supplement
+(`src/binance-peg-policy-assets.ts`) and keep its reviewed shape (Across only, standard approval, no transfer fee). The
+frozen dataset and its digests do not change.
+
+### Binance-Peg USDT and USDC of BNB Smart Chain
+
+Binance, not Tether or Circle, issues these two tokens 1:1 against reserves it holds. The owner admitted both on
+2026-11-23. They carry 18 decimals; their peers on Ethereum, Base and Arbitrum carry 6. A route between them moves one
+token value at two precisions; it is not a conversion between assets.
+
+| Direction | Pair | Tool |
+| --- | --- | --- |
+| BNB Smart Chain to Ethereum, and back | Binance-Peg USDT and Tether USDT | Across V4 |
+| BNB Smart Chain to Ethereum, Base or Arbitrum One, and back | Binance-Peg USDC and Circle USDC | Across V4 |
+
+LI.FI also quotes Stargate V2 Taxi for these pairs. APN refuses those rows as `asset_tool_unreviewed`: no Stargate pool of
+the Binance-Peg tokens is reviewed, and their pools convert 18 local decimals to 6 shared ones with dust removal that the
+exact-amount proofs do not yet model. Every other LI.FI tool keeps its own gate.
+
+As a source, BNB Smart Chain uses the same LI.FI Diamond bytecode as Ethereum and Arbitrum, FeeForwarder v2.1.0 with the
+same code and owner, and AcrossFacetV4 `0xAd3f1634a917924cBb54A0F76e43ca035D2B6BCd`, whose bytecode equals Ethereum's apart
+from its two immutables: the BSC SpokePool `0x4e8E101924eDE233C13e2D8622DC8aED2872d505` and WBNB. The light deployment
+check reads the FeeForwarder allowlisting, the token's 18 `decimals()`, the facet's routing to that SpokePool and WBNB,
+and the SpokePool time buffers. BSC fees are EIP-1559 with a zero base fee: `gas limit x maxFeePerGas` caps them on
+chain. Native BNB stays destination-only (`bridge_source_execution_unreviewed`). An owner policy admits the source asset
+on rail `bridge` with the Across mechanism, and its caps are in that asset's own atomic units (18 decimals for a
+Binance-Peg source).
 
 ### Quote-only destinations
 
@@ -207,7 +238,8 @@ Taxi endpoint IDs, and reject altered calldata or fees.
 | --- | --- |
 | Native principal over Stargate outside Ethereum ETH to Base ETH | Only the Ethereum to Base asset ID 13 pool pair is admitted (`asset_tool_unreviewed`) |
 | WETH on any chain | Not on the frozen list; LI.FI itself filters the route because Across does not send WETH to EOAs |
-| USDT from Ethereum | No peer: LI.FI's Arbitrum USDT output is USD₮0 `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9`, which the frozen list does not name, and LI.FI returns no Across or Stargate route from USDT to a listed USDC without a swap |
+| USDT from Ethereum to Base or Arbitrum One | The frozen list names no USDT there: LI.FI's Arbitrum USDT output is USD₮0 `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9`, which the list does not name, and LI.FI returns no Across or Stargate route from USDT to a listed USDC without a swap |
+| Binance-Peg USDT or USDC over Stargate V2 | No reviewed Stargate pool of these tokens (`asset_tool_unreviewed`) |
 | Any token the frozen list does not name (DAI, cbBTC, USD₮0, ...) | `asset_not_on_frozen_list` |
 | Stargate pools other than USDC asset ID 1 and Ethereum to Base native asset ID 13 | No admitted pool pair and correlated proof |
 | Fee-on-transfer or rebasing tokens | The exact-amount `Transfer` proof cannot hold |
@@ -337,8 +369,10 @@ and attempts each frozen source effect once.
 
 ### Amounts
 
-`--amount`, `--min-output` and `--max-route-fee` are decimal strings at the selected asset's own precision: six
-fractional digits for USDC and USDT, eight for WBTC, eighteen for native coins. `--max-native-debit-wei` is an integer
+`--amount`, `--min-output` and `--max-route-fee` are decimal strings at each asset's own precision: `--amount` and
+`--max-route-fee` at the source asset's, `--min-output` at the destination asset's. That is six fractional digits for
+USDC and USDT, eight for WBTC, eighteen for native coins and for the Binance-Peg USDT and USDC of BNB Smart Chain.
+`--max-native-debit-wei` is an integer
 native budget on the source chain. For a native principal it bounds fees only; the principal is bound by `--amount`,
 and the funding check still requires principal plus fees. APN uses integer arithmetic and rejects exponent notation,
 signs, whitespace, excess precision and uint256 overflow.
@@ -351,6 +385,14 @@ expected, materialized minimum and owner minimum destination output, and the rec
 is `null`. These values come from the fingerprinted materialization request, not from display-only inputs. Included
 token fees are counted once. Stargate's native messaging fee must equal transaction value and one declared additional
 native fee. Approval gas is a separate paid effect.
+
+A Binance-Peg route (18 decimals against 6) compares its legs exactly at 18 decimals: the output may not exceed the
+principal, the principal minus the materialized minimum output must fit `--max-route-fee`, and the included fees, all
+source-chain fees in the source asset, plus the output may not exceed the principal. Only a value stated in source atomic
+units is rounded, and against the owner: the loss bound up, the output down. The receipt states
+`same_denomination: false`, keeps `token_loss_bound_atomic` `null`, and adds `asset_bounds.scaled_precision` with the
+finer decimals and `token_loss_bound_source_atomic`; consent prints both precisions and that bound. The unitemized
+protocol fee is in source atomic units. The usage ledger reserves the principal in the source asset's own units.
 
 ### Allowance
 
@@ -405,6 +447,14 @@ one fee step whose call and approval target are the same recorded FeeForwarder, 
 referrer and exact fee distribution to the fee recipient `0xC06ebbefD94032B85424D51906e2A335EFAe264B`. Across requires
 an empty message and no exclusivity. Stargate requires Taxi with an empty compose message, options and `oftCmd`.
 Arbitrary calldata, swaps, Permit2, typed-data requests, approval resets and provider-added effects are rejected.
+
+AcrossFacetV4 deposits `minAmount x outputAmountMultiplier / 1e18`, recomputed on chain after the fee step, not the
+calldata's `outputAmount`. For one denomination APN requires the two to be equal and the multiplier to be at most 1e18.
+For a Binance-Peg pair the multiplier carries the 10^12 (at most `1e18 x 10^12` from 6 decimals, `1e6` from 18), and
+LI.FI rounds it up, so from 18 decimals the deposit can exceed the calldata output by a few atomic units (19912833 against
+19912827 in the 2026-11-23 capture). The calldata output must equal LI.FI's minimum, the multiplier must be the least one
+whose deposit reaches it, and the decoded output is what the chain deposits: the `FundsDeposited` and `FilledRelay` logs
+and the recipient's token transfer must carry exactly that amount.
 
 A new route must name FeeForwarder v2.1.0 `0xDe2b920506EE931a6A2ABDF566526220214FBbAE`. On 2026-11-04 Diamond
 transactions on Ethereum, Base and Arbitrum allowlisted it and de-allowlisted v2.0.0
