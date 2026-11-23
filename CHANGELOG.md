@@ -2,6 +2,19 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.115 — 2026-11-24
+
+0.5.114 swapped native BNB into the Binance-Peg USDT and USDC of BNB Smart Chain, but not back: the owner's order of 2026-11-23 covers swap in both directions.
+
+- **Swap on BNB Smart Chain, token input (Uniswap V3).** New family `apn swap bnb uniswap-token inventory|quote|prepare|status|approve|execute|cleanup`, with MCP tools and a foreground handoff. It sells USDT or USDC for native BNB over the pinned USDT/WBNB and USDC/WBNB 0.05% pools, and swaps USDT into USDC and back over the USDT/USDC 0.01% pool `0x2C3c320D49019D4f9A92352e947c7e5AcFE47D68`, the deepest by in-range liquidity on 2026-11-24, pinned to its code hash. `--output-token native` names BNB; otherwise it is the other token's address.
+- **The rules are the Ethereum token lane's.** An exact approval of SwapRouter02 `0xB971…85d2` from a zero or exact allowance, one swap, the owner's explicit cleanup, and the same recovery and principal release. The owner admits the input token and the output asset on rail `swap` with the route that `inventory` prints; the route of the native-input family does not admit this one. Every pin, the USDC proxy implementation and `decimals()` (18) are checked at quote and before every signature. A zero priority fee is refused (`uniswap_zero_gas_price`). The family keeps its own nonce reservations, and a direct BNB transfer never reuses them.
+- **Output to native BNB.** The router swaps into WBNB and unwraps it to the recipient at the same floor (`exactInputSingle` to the router, then `unwrapWETH9`). The proof is the router's one WBNB `Withdrawal` in the swap receipt, not the recipient's balance, which the same account's gas would change.
+- **No price-impact check.** As on the Ethereum token lane, `--minimum-output` is the only floor. The USDC/WBNB pool is thin: on 2026-11-24, 10 USDC sold for 0.01768 BNB and 10 000 USDC for 4.886 BNB.
+- **RPC.** Use `https://bsc-rpc.publicnode.com` or set `APN_BNB_ARCHIVE_RPC_URL`. `bsc-dataseed.bnbchain.org` keeps state for about 127 blocks and refuses `safe` and `finalized` state reads, so status, never-lands and finality reads fail on it.
+- **The Ethereum token lane now runs on a shared lane descriptor.** Its pins, digests, hash domains, records, refusals and screens are unchanged. Its prepare and builder now refuse a command of the other lane, and each command reads its journal once more to check the lane.
+- **Not proven live.** No real-money run on BNB Smart Chain yet.
+- **Downgrade.** BNB token-swap records live in the shared `uniswap-token-operations/` journal. 0.5.114 and earlier cannot validate them. Once 0.5.115 has written one, going back is not supported.
+
 ## 0.5.114 — 2026-11-24
 
 0.5.113 admitted the Binance-Peg USDT `0x55d398326f99059fF775485246999027B3197955` and USDC `0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d` of BNB Smart Chain for x402 Permit2 and direct transfers only. The portfolio, the LI.FI bridge, Relay, swap and MetaMask gasless each kept their own token list and refused them. The owner ordered on 2026-11-23 that both tokens work in every lane. Both have 18 decimals. Swap, gasless and the LI.FI source check read `decimals()` on chain and refuse a token that reports other decimals; Relay and LI.FI as a destination use the pinned 18 and Relay's quote metadata, with no chain read. The frozen dataset and its digests do not change.
