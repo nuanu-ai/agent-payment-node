@@ -84,6 +84,17 @@ export type CommandRequest =
   /** `cleanupFees`: the owner's own new caps for this cleanup only, checked against a fresh fee quote and shown at consent. */
   | { readonly command: "swap.uniswap-token.cleanup"; readonly operationId: string;
       readonly cleanupFees?: { readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string } }
+  /** BNB Smart Chain token input; `outputToken` is a Binance-Peg token address or `native` (BNB). */
+  | { readonly command: "swap.uniswap-bnb-token.inventory" }
+  | { readonly command: "swap.uniswap-bnb-token.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
+      readonly sourceToken: string; readonly outputToken: string; readonly amountAtomic: string; readonly minimumOutputAtomic: string;
+      readonly approvalCapAtomic: string; readonly deadline: number; readonly maxApprovalGasLimit: string; readonly maxSwapGasLimit: string;
+      readonly maxCleanupGasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string;
+      readonly maxNativeDebitWei: string }
+  | { readonly command: "swap.uniswap-bnb-token.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
+  | { readonly command: "swap.uniswap-bnb-token.status" | "swap.uniswap-bnb-token.approve" | "swap.uniswap-bnb-token.execute"; readonly operationId: string }
+  | { readonly command: "swap.uniswap-bnb-token.cleanup"; readonly operationId: string;
+      readonly cleanupFees?: { readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string } }
   | { readonly command: "swap.sunswap.inventory" }
   | { readonly command: "swap.sunswap.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
       readonly amountAtomic: string; readonly slippageBps: number; readonly ownerSlippageCapBps: number; readonly feeLimitSun: string; readonly deadline: number }

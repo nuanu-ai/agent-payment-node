@@ -88,6 +88,8 @@ export interface OperationFamilyAdapter<R = unknown> {
    */
   observeCommand?(record: R): string | undefined;
   readonly commands?: { readonly status: string; readonly resume?: string; readonly exit?: string };
+  /** The family commands of one readable record, where they depend on it (a token swap's chain); `commands` otherwise. */
+  commandsFor?(record: R): { readonly status: string; readonly resume?: string; readonly exit?: string };
   /**
    * The family's own command whose runtime `status`, `resume` and `receipt` delegate to. The runtime factory builds a
    * family runtime only for the commands that name it, so a generic operation command is built as this command is.

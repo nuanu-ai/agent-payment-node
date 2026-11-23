@@ -11,7 +11,7 @@ import { UNISWAP_WBTC_MECHANISM_PIN, UNISWAP_WBTC_PROTOCOL_REGISTRY, UNISWAP_WBT
 import { swapActualEconomics, swapStatusReceipt } from "./receipt-facts.js";
 import type { SwapReceiptEconomics } from "./model.js";
 import { walletAllowanceRevokeCommand } from "../wallet-allowance/view.js";
-import { UNISWAP_TOKEN_CHAIN_ID } from "../operation-index/adapters/uniswap-token.js";
+import { tokenLaneOf } from "./uniswap-v3/token-lane.js";
 
 type Request = Extract<CommandRequest, { readonly command: `swap.uniswap.${string}` | `swap.uniswap-token.${string}` }>;
 export async function executeUniswapCommand(request: Request, context: RuntimeContext): Promise<CommandOutcome> {
@@ -72,7 +72,7 @@ export async function executeUniswapCommand(request: Request, context: RuntimeCo
  * The token lane's observed receipt already holds what the swap proved; `actualEconomics` gives it the shared swap shape:
  * the exact input debit, the output credit, every gas the operation paid (approval, swap, cleanup) and the ETH that left.
  */
-function tokenOutcome(value: Awaited<ReturnType<NonNullable<RuntimeContext["uniswapTokenRuntime"]>["status"]>>, residual: string | null = null,
+export function tokenOutcome(value: Awaited<ReturnType<NonNullable<RuntimeContext["uniswapTokenRuntime"]>["status"]>>, residual: string | null = null,
   after?: "execute"): CommandOutcome {
   const receipt = value.receipt, actualEconomics: SwapReceiptEconomics | null = receipt === null ? null : { inputAtomic: receipt.inputDebitAtomic,
     outputAtomic: receipt.outputCreditAtomic, networkFeeAtomic: (BigInt(receipt.approvalGasWei) + BigInt(receipt.swapGasWei) + BigInt(receipt.cleanupGasWei)).toString(),
@@ -82,7 +82,7 @@ function tokenOutcome(value: Awaited<ReturnType<NonNullable<RuntimeContext["unis
   if (residual === null || residual === "0") return outcome;
   // A terminal swap with its approval standing (cleaned by the earlier expired-approval exit, or abandoned by the owner, whose
   // own cleanup can no longer reopen): the live residual and the generic exact revoke.
-  const target = { profile: value.profile, chainId: UNISWAP_TOKEN_CHAIN_ID, token: value.route.inputToken, spender: value.route.router };
+  const target = { profile: value.profile, chainId: tokenLaneOf(value.route).chainId, token: value.route.inputToken, spender: value.route.router };
   return { ...outcome, data: { residualAllowance: { chain: `eip155:${target.chainId}`, token: target.token, owner: value.account, spender: target.spender,
     allowanceAtomic: residual, readAt: "latest" } }, nextActions: [...outcome.nextActions, walletAllowanceRevokeCommand(target)] };
 }
@@ -95,10 +95,11 @@ function tokenOutcome(value: Awaited<ReturnType<NonNullable<RuntimeContext["unis
  * reads that proof once finality reaches it.
  */
 export function uniswapTokenNextActions(op: UniswapTokenOperation, after?: "execute"): readonly string[] {
-  if (abandonedPrincipalCandidate(op) !== null) return after === "execute" ? [] : [`apn swap ethereum uniswap-token execute --operation ${op.operationId}`];
-  if (principalReleaseCandidate(op) !== null) return [`apn swap ethereum uniswap-token status --operation ${op.operationId}`];
+  const prefix = tokenLaneOf(op.route).commandPrefix;
+  if (abandonedPrincipalCandidate(op) !== null) return after === "execute" ? [] : [`${prefix} execute --operation ${op.operationId}`];
+  if (principalReleaseCandidate(op) !== null) return [`${prefix} status --operation ${op.operationId}`];
   if (op.phase !== "cleanup_required") return [];
-  const cleanup = `apn swap ethereum uniswap-token cleanup --operation ${op.operationId}`;
+  const cleanup = `${prefix} cleanup --operation ${op.operationId}`;
   return op.preSignFailure?.reason === "uniswap_token_fee_cap" ? [cleanup, `${cleanup} --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>`] : [cleanup];
 }
 function data(value: unknown, proofClass: string): CommandOutcome {

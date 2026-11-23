@@ -87,6 +87,7 @@ export interface RuntimeFactoryOptions {
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
   readonly uniswapBnbRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap-bnb.quote" }>>;
   readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
+  readonly uniswapBnbTokenRuntime?: UniswapTokenCommandRuntime;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly orcaRuntime?: OrcaRuntimeSelector;
   /** Test seam for the owner's active sealed swap policy. Production reads the activated allowlist revision. */

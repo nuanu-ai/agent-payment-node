@@ -28,6 +28,7 @@ import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
 import { bindUniswapCommand } from "./swap/uniswap-command-catalog.js";
 import { bindUniswapTokenCommand } from "./swap/uniswap-token-command-catalog.js";
 import { bindUniswapBnbCommand } from "./swap/uniswap-bnb/command-catalog.js";
+import { bindUniswapBnbTokenCommand } from "./swap/uniswap-bnb/token-command-catalog.js";
 import { bindSunSwapCommand } from "./swap/sunswap-tron/command-catalog.js";
 import { bindJupiterCommand } from "./swap/jupiter-solana/command-catalog.js";
 import { bindOrcaCommand } from "./swap/orca-solana/command-catalog.js";
@@ -138,6 +139,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
     const path = parsed.command.path.join(" ");
     if (path.startsWith("swap ethereum uniswap-token ")) return { request: bindUniswapTokenCommand(path, options) };
     if (path.startsWith("swap ethereum uniswap ")) return { request: bindUniswapCommand(path, options) };
+    if (path.startsWith("swap bnb uniswap-token ")) return { request: bindUniswapBnbTokenCommand(path, options) };
     if (path.startsWith("swap bnb uniswap ")) return { request: bindUniswapBnbCommand(path, options) };
     if (path.startsWith("swap tron sunswap ")) return { request: bindSunSwapCommand(path, options) };
     if (path.startsWith("swap solana jupiter ")) return { request: bindJupiterCommand(path, options) };

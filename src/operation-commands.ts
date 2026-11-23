@@ -172,7 +172,7 @@ function publicRelease(entry: OperationIndexEntry) {
 }
 
 function familyActions(found: Found, use: "status" | "resume" | "exit"): readonly string[] {
-  const commands = found.adapter.commands, id = found.entry.operationId;
+  const commands = found.adapter.commandsFor?.(found.record) ?? found.adapter.commands, id = found.entry.operationId;
   const template = use === "exit" ? commands?.exit ?? commands?.resume ?? commands?.status
     : use === "resume" ? commands?.resume ?? commands?.status : commands?.status;
   return template === undefined ? [] : [template.replaceAll("<operation-id>", id)];

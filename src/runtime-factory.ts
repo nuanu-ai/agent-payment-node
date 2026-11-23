@@ -80,8 +80,9 @@ import { portfolioPause } from "./portfolio/command.js";
 import { PortfolioHttps } from "./portfolio/https.js";
 import { TtyAllowlistPolicyApproval } from "./allowlist-policy-activation.js";
 import { createUniswapKeylessRuntime, lazyEthereumRpcCall, REFUSING_SWAP_APPROVAL } from "./swap/uniswap-v3/runtime-factory.js";
-import { createUniswapTokenRuntime } from "./swap/uniswap-v3/token-runtime-factory.js";
-import { createTokenRpc } from "./swap/uniswap-v3/token-rpc.js";
+import { createUniswapTokenLaneRuntime, createUniswapTokenRuntime } from "./swap/uniswap-v3/token-runtime-factory.js";
+import { createBnbTokenRpc, createTokenRpc } from "./swap/uniswap-v3/token-rpc.js";
+import { BNB_UNISWAP_TOKEN_LANE } from "./swap/uniswap-bnb/token-lane.js";
 import { UNISWAP_TOKEN_EXECUTE_PLAN, uniswapTokenProbedCap } from "./swap/uniswap-v3/token-runtime.js";
 import { tokenPrimaryCandidates } from "./swap/uniswap-v3/token-rpc-pool.js";
 import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
@@ -262,6 +263,13 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       foreground: bound.request.command === "swap.uniswap-token.approve" ? "approve" :
         isUniswapTokenCleanup(bound.request.command) ? "cleanup" : "refuse" })
     : undefined);
+  // The BNB Smart Chain token lane over APN_BNB_RPC_URL, with the Ethereum token lane's per-command request caps.
+  const uniswapBnbTokenRuntime = options.uniswapBnbTokenRuntime ?? (runtimeCommand.startsWith("swap.uniswap-bnb-token.")
+    ? createUniswapTokenLaneRuntime(BNB_UNISWAP_TOKEN_LANE, { state, wrapping: wrappingSecret, call: createBnbTokenRpc({ environment: process.env, state,
+      now: () => clock.now().getTime(), ...uniswapBnbTokenRpcBudget(runtimeCommand) }), clock,
+      foreground: bound.request.command === "swap.uniswap-bnb-token.approve" ? "approve" :
+        bound.request.command === "swap.uniswap-bnb-token.cleanup" ? "cleanup" : "refuse" })
+    : undefined);
   // Keyless SunSwap likewise, over APN_TRON_RPC_URL and the profile's encrypted local TRON wallet.
   const sunswapRuntime = options.sunswapRuntime ?? (runtimeCommand.startsWith("swap.sunswap.")
     ? createSunSwapKeylessRuntime({ state, rpc: tronRpc, accounts: chainAccounts, clock,
@@ -300,6 +308,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(uniswapRuntime === undefined ? {} : { uniswapRuntime }),
     ...(uniswapBnbRuntime === undefined ? {} : { uniswapBnbRuntime }),
     ...(uniswapTokenRuntime === undefined ? {} : { uniswapTokenRuntime }),
+    ...(uniswapBnbTokenRuntime === undefined ? {} : { uniswapBnbTokenRuntime }),
     ...(sunswapRuntime === undefined ? {} : { sunswapRuntime }),
     ...(orcaRuntime === undefined ? {} : { orcaRuntime }),
     // Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10).
@@ -403,6 +412,20 @@ function uniswapTokenRpcBudget(command: string): { readonly maxHttpRequests: num
   // then the deciding batch and its receipt route: 3 more), plus an allowance read and retry headroom.
   if (command === "swap.uniswap-token.status") return { maxHttpRequests: 11 + overhead, deadlineMs: 45_000 };
   return { maxHttpRequests: 14 + overhead, deadlineMs: 90_000 };
+}
+/**
+ * The BNB token lane's caps: the Ethereum lane's single-primary numbers (its reads have the same shape: four pin batches,
+ * one state batch, simulation, gas, fees, send, observation). It has no primary pool.
+ */
+function uniswapBnbTokenRpcBudget(command: string): { readonly maxHttpRequests: number; readonly deadlineMs: number } {
+  if (command === "swap.uniswap-bnb-token.inventory") return { maxHttpRequests: 1, deadlineMs: 1_000 };
+  if (command === "swap.uniswap-bnb-token.quote") return { maxHttpRequests: 8, deadlineMs: 60_000 };
+  if (command === "swap.uniswap-bnb-token.prepare") return { maxHttpRequests: 9, deadlineMs: 60_000 };
+  if (command === "swap.uniswap-bnb-token.approve") return { maxHttpRequests: 14, deadlineMs: 90_000 };
+  if (command === "swap.uniswap-bnb-token.execute") return { maxHttpRequests: UNISWAP_TOKEN_EXECUTE_PLAN, deadlineMs: 150_000 };
+  if (command === "swap.uniswap-bnb-token.status") return { maxHttpRequests: 11, deadlineMs: 45_000 };
+  if (command === "swap.uniswap-bnb-token.cleanup") return { maxHttpRequests: 14, deadlineMs: 90_000 };
+  throw new ApnError("APN_INVALID_INPUT", "The command names no BNB Uniswap token-input request budget.");
 }
 
 /**
