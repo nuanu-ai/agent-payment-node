@@ -4,7 +4,8 @@ import { releasedX402Pair } from "./x402-network.js";
 
 /**
  * What an owner reads beside an x402 policy's token address: the released USDC of Base, Ethereum or Arbitrum, or the
- * symbol and decimals APN's frozen token list names for that exact chain and contract; null when the list has no row.
+ * symbol and decimals that APN's frozen token list or its Binance-Peg supplement names for that exact chain and contract;
+ * null when neither has a row.
  */
 export function x402TokenUnit(chainId: number, token: string): { readonly symbol: string; readonly decimals: number } | null {
   if (releasedX402Pair(chainId, token)) return { symbol: "USDC", decimals: 6 };

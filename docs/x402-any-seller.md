@@ -240,8 +240,8 @@ names it (`x402_rpc_required`).
 
 ## Limits
 
-- Allowlist admission (Permit2, Solana) is limited to assets in the frozen allowlist inventory; on Solana that is USDC
-  and USDT.
+- Allowlist admission (Permit2, Solana) is limited to assets in the frozen allowlist inventory or a reviewed
+  supplement; on Solana that is USDC and USDT, on BNB Smart Chain the Binance-Peg USDT and USDC.
 - Token-2022 mints, native SOL and wSOL are not payable on Solana.
 - Permit2 is available to the local wallet only.
 - APN never sends an unattended approval to Permit2.

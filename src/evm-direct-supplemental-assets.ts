@@ -26,7 +26,10 @@ export function directEvmSupplementalAsset(chain: string, identifier: string | n
   return DIRECT_EVM_SUPPLEMENTAL_ASSETS.find((row) => row.chain === chain && row.identifier === identifier);
 }
 
-/** Only a direct policy admission can resolve a supplemental identity. */
+/**
+ * A policy admission's asset: merchant pins and reviewed WBTC by their exact mechanism, the Binance-Peg USDT and USDC of
+ * BNB Smart Chain on any rail, the direct-only supplements on the direct rail only, and otherwise the frozen inventory.
+ */
 export function resolveDirectPolicyAsset(input: { readonly chain: string; readonly kind: "native" | "token";
   readonly identifier?: string; readonly rail: string; readonly mechanism?: unknown; readonly mechanisms?: unknown }, inventory: AllowlistInventory): CandidateAsset {
   const merchant = merchantPolicyAsset(input);
