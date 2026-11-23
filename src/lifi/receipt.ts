@@ -236,7 +236,13 @@ export function previousCurrentBridgeReceipt(op: BridgeOperationRecord): Record<
   return { ...previous, receipt_hash: hashObject(previous) };
 }
 export function currentBridgeReceiptCandidates(op: BridgeOperationRecord): readonly unknown[] {
-  const current = bridgeReceipt(op), previous = previousCurrentBridgeReceipt(op);
+  const current = bridgeReceipt(op);
+  // A pair with two precisions exists only since 0.5.114, which always wrote asset_bounds: no receipt in the
+  // previous form was ever written for it, and its mixed-unit loss bound must not be accepted.
+  if (bridgeRequestScale(op.intent.materialization.request).scaled) {
+    return op.observationTelemetry === undefined ? [current, receiptWithoutObservationTelemetry(current)] : [current];
+  }
+  const previous = previousCurrentBridgeReceipt(op);
   // PR217 added an always-present projection of the optional journal telemetry. A transition written by an older
   // writer has no journal field at all, so accept only its exact receipt forms with the empty projection omitted.
   // Once a transition binds [] or any telemetry rows, omission is no longer a candidate.

@@ -492,7 +492,9 @@ apn swap bnb uniswap status --operation $OP
 - The recipient must be an account. The router sentinels `0x…01` and `0x…02`,
   the router and WBNB refuse with `APN_INVALID_INPUT`.
 - BNB charges no base fee. A zero priority fee refuses with
-  `uniswap_zero_gas_price`.
+  `uniswap_zero_gas_price`. A nonzero tip below what BSC validators accept
+  (0.05 gwei on 2026-11-23) is not refused: the swap does not land and ends
+  `expired_unlanded` after its deadline.
 - Blocks come about every 0.45 s. The quote's head drift bound is 256 blocks
   (the swap quote schema maximum), about two minutes. An approval after that
   refuses with `uniswap_execution_drift` before signing and releases the
