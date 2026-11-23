@@ -43,6 +43,8 @@ async function pegRun(root: string, pair: "bsc-usdc-eth" | "eth-usdc-bsc", key: 
   const s = await lifiFixture(root, "eth-base", { now: NOW, provider });
   s.provider.statusValue = "completed_observed";
   s.source.balance = 100n * 10n ** BigInt(from);
+  // The fresh bridge estimate must fit the captured gas limit (271110 on Ethereum, 307460 on BSC), as on chain.
+  s.source.estimateGas = "200000";
   const request: BridgeRouteRequest = { fromChainId: a.fromChainId, toChainId: a.toChainId, fromToken: getAddress(a.fromToken.address),
     toToken: getAddress(a.toToken.address), amountAtomic: a.fromAmount, recipient: LIFI_RECIPIENT,
     minOutputAtomic: (19n * 10n ** BigInt(to)).toString(), maxNativeDebitWei: "20000000000000000",
@@ -91,7 +93,7 @@ test("BSC Binance-Peg USDC to Ethereum USDC completes: 18-decimal debit, 6-decim
   const completed = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(completed.ok, true, completed.error?.message);
   const record = (await findStored(s.core.bridges.records, id))!;
-  assert.equal(record.state, "completed");
+  assert.equal(record.state, "completed", JSON.stringify(record.failure));
   assert.doesNotThrow(() => validateBridgeOperation(record));
   assert.deepEqual([record.destinationProof?.chainId, record.destinationProof?.token, record.destinationProof?.amountAtomic],
     [1, ETHEREUM_USDC, "19912833"]);
@@ -117,7 +119,7 @@ test("Ethereum USDC to BSC Binance-Peg USDC completes: 6-decimal debit, 18-decim
   const completed = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(completed.ok, true, completed.error?.message);
   const record = (await findStored(s.core.bridges.records, id))!;
-  assert.equal(record.state, "completed");
+  assert.equal(record.state, "completed", JSON.stringify(record.failure));
   assert.deepEqual([record.destinationProof?.chainId, record.destinationProof?.token, record.destinationProof?.amountAtomic],
     [56, BSC_USDC, "19944584000000000000"]);
   assert.equal(record.destinationProof?.nativeTransfer, null);

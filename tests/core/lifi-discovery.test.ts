@@ -210,6 +210,9 @@ test("LI.FI public provider API contract uses fixed endpoints, finite tools, one
   await assert.rejects(new BridgeHttps().request("https://li.quest/v1/advanced/routes", "POST", "x".repeat(256 * 1024 + 1), 512 * 1024, "APN_HTTP_CONFIG"), { code: "APN_PROVIDER_UNAVAILABLE" });
 });
 
+/** One connection probe per admitted (asset, peer) row on every bridge chain: 16 since BSC's Binance-Peg rows. */
+const ADMITTED_PAIRS = BRIDGE_CHAINS.reduce((sum, id) => sum + BRIDGE_ASSET_REGISTRY[id].tokens.reduce((rows, asset) => rows + asset.peers.length, 0), 0);
+
 test("a failed discovery-only Solana probe remains unavailable while admitted EVM inventory succeeds", async (t) => {
   for (const failure of ["transport", "malformed", "non-200", "combined-size", "deep", "large-array"] as const) await t.test(failure, async () => {
     const provider = new LifiProvider({ async request(endpoint) {
@@ -228,7 +231,7 @@ test("a failed discovery-only Solana probe remains unavailable while admitted EV
     } });
     const responses = await provider.inventory();
     const pairs = JSON.parse(responses.connections.body).pairs as Array<Record<string, unknown>>;
-    assert.equal(pairs.length, 10);
+    assert.equal(pairs.length, ADMITTED_PAIRS + 2);
     assert.ok(pairs.slice(0, -2).every((pair) => pair.status === 200 && pair.responseHash !== null));
     assert.deepEqual(pairs.at(-2), { fromChainId: BASE_SOLANA_USDC_CANDIDATE.fromChainId,
       toChainId: BASE_SOLANA_USDC_CANDIDATE.toChainId, fromToken: BASE_SOLANA_USDC_CANDIDATE.fromToken,
@@ -267,7 +270,7 @@ test("TRON NEAR candidate needs matching TVM chain, canonical token, tool and co
       return { status: 200, body: "{}" };
     } });
     const pairs = JSON.parse((await provider.inventory()).connections.body).pairs as Array<Record<string, unknown>>;
-    assert.equal(pairs.length, 10);
+    assert.equal(pairs.length, ADMITTED_PAIRS + 2);
     assert.equal(pairs.at(-1)?.status, failure === "none" ? 200 : "unavailable");
     assert.equal(pairs.at(-1)?.tool, "near");
     assert.ok(pairs.slice(0, -2).every((pair) => pair.status === 200));
@@ -284,7 +287,7 @@ test("an optional unavailable marker is omitted when admitted-only inventory fit
       && query.get("fromToken") === BRIDGE_USDC[1] ? JSON.stringify({ name: filler }) : "{}" };
   } });
   const baseline = JSON.parse((await provider.inventory()).connections.body).pairs as Array<Record<string, unknown>>;
-  assert.equal(baseline.length, 10);
+  assert.equal(baseline.length, ADMITTED_PAIRS + 2);
   const admitted = baseline.slice(0, -2);
   const admittedBytes = Buffer.byteLength(canonicalJson({ pairs: admitted }));
   const markerBytes = Buffer.byteLength(canonicalJson({ pairs: [...admitted, baseline.at(-2)] })) - admittedBytes;
@@ -292,7 +295,7 @@ test("an optional unavailable marker is omitted when admitted-only inventory fit
   const responses = await provider.inventory();
   const bodyBytes = Buffer.byteLength(responses.connections.body);
   const pairs = JSON.parse(responses.connections.body).pairs as Array<Record<string, unknown>>;
-  assert.equal(pairs.length, 8);
+  assert.equal(pairs.length, ADMITTED_PAIRS);
   assert.ok(bodyBytes <= LIFI_INVENTORY_RESPONSE_BYTES);
   assert.ok(bodyBytes + markerBytes > LIFI_INVENTORY_RESPONSE_BYTES);
   assert.equal((bridgeInventory(responses) as any).observed.connections.executable_capability, false);
