@@ -1,6 +1,6 @@
 # Guarded Uniswap swap (Ethereum and BNB Smart Chain)
 
-APN has two Uniswap V3 swap families on Ethereum mainnet and one on BNB Smart
+APN has two Uniswap V3 swap families on Ethereum mainnet and two on BNB Smart
 Chain. None uses an API key, an off-chain quote service or the Uniswap Trading
 API: every price fact comes from the chain, the transaction is encoded
 locally, and the owner's local wallet signs, so APN never takes custody.
@@ -10,9 +10,11 @@ locally, and the owner's local wallet signs, so APN never takes custody.
 | `apn swap ethereum uniswap` (native input) | native ETH to canonical USDC or USDT; native ETH to WBTC with its own admission | Universal Router 2.2.0 |
 | `apn swap ethereum uniswap-token` (token input) | canonical USDC to USDT and USDT to USDC | original V3 SwapRouter |
 | `apn swap bnb uniswap` (native input) | native BNB to Binance-Peg USDT or USDC | SwapRouter02 |
+| `apn swap bnb uniswap-token` (token input) | Binance-Peg USDT or USDC to native BNB; USDT to USDC and USDC to USDT | SwapRouter02 |
 
-The BNB family is described in
-[BNB Smart Chain native input](#bnb-smart-chain-native-input-swap-bnb-uniswap).
+The BNB families are described in
+[BNB Smart Chain native input](#bnb-smart-chain-native-input-swap-bnb-uniswap) and
+[BNB Smart Chain token input](#bnb-smart-chain-token-input-swap-bnb-uniswap-token).
 
 ## Setup
 
@@ -431,7 +433,8 @@ cost one more probe.
 The BNB family has the model of the Ethereum native-input family: owner
 admission by route, one pinned pool per pair, an on-chain quote, a foreground
 approval, one send and a receipt proof. It swaps native BNB only. Token input
-(USDT or USDC to BNB, USDT to USDC) is not available on BNB Smart Chain.
+(USDT or USDC to BNB, USDT to USDC and back) is the separate family
+[`swap bnb uniswap-token`](#bnb-smart-chain-token-input-swap-bnb-uniswap-token).
 
 `APN_BNB_RPC_URL` is required. `APN_BNB_ARCHIVE_RPC_URL` is optional; when it
 is set, the reads pinned to one block go to it. Public endpoints that need no
@@ -506,6 +509,122 @@ apn swap bnb uniswap status --operation $OP
   the router's single WBNB `Deposit` of the input.
 - `apn operation status` and `apn operation abandon` route a BNB swap to
   `apn swap bnb uniswap status`.
+
+## BNB Smart Chain token input: `swap bnb uniswap-token`
+
+This family has the model of the Ethereum token-input family: an exact ERC-20
+approval of one pinned router, one swap, and an explicit cleanup of any
+residual allowance. The phases, the allowance and success rules, the signing
+guard, recovery, principal release and the foreground consent are the same.
+The differences are below.
+
+| Direction | Pool | Fee |
+| --- | --- | --- |
+| Binance-Peg USDT to native BNB | USDT/WBNB `0x6fe9E9de56356F7eDBfcBB29FAB7cd69471a4869` | 500 |
+| Binance-Peg USDC to native BNB | USDC/WBNB `0x5289A8Dbf7029eE0b0498a84777ed3941D9acfEc` | 500 |
+| Binance-Peg USDT to USDC | USDT/USDC `0x2C3c320D49019D4f9A92352e947c7e5AcFE47D68` | 100 |
+| Binance-Peg USDC to USDT | the same USDT/USDC pool | 100 |
+
+`APN_BNB_RPC_URL` is required; `APN_BNB_ARCHIVE_RPC_URL` and
+`APN_BNB_RECEIPT_RPC_URL` are optional, as `APN_ETHEREUM_ARCHIVE_RPC_URL` and
+`APN_ETHEREUM_RECEIPT_RPC_URL` are for the Ethereum family. The primary pool
+`APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS` is the Ethereum family's only; this
+family does not read it. Use `https://bsc-rpc.publicnode.com`: in our case it
+served state about 10 000 blocks (about 75 minutes) back, and the `safe` and
+`finalized` tags. `https://bsc-dataseed.bnbchain.org` served state for about
+127 blocks (about one minute) and refused state at `safe` and `finalized`.
+
+### BNB token pins
+
+The router, quoter, factory, WBNB, both tokens and the two WBNB pools are the
+pins of the native BNB family. The USDT/USDC 0.01% pool
+`0x2C3c320D49019D4f9A92352e947c7e5AcFE47D68` is pinned to its runtime code hash
+`0xb64a9a26…6479c03c1`. Every pin was read again on chain 56 on 2026-11-24,
+each read pinned to one block hash.
+
+- The 0.01% pool is the deepest USDT/USDC pool by in-range liquidity. In our
+  case (block 135304384): 0.01% 3.38e25, 0.05% 5.13e24, 0.3% 6.67e22, 1%
+  2.09e21. The 0.01% pool held 239 264 USDT and 39 671 USDC.
+- The USDT/WBNB and USDC/WBNB 0.05% pools stay the deepest WBNB pools of their
+  pairs. The USDC/WBNB pool held only 1 609 USDC and 5.22 WBNB.
+- QuoterV2 in our case (block 135304528), for 10 units in: USDT gave 0.017659
+  BNB, USDC 0.017680 BNB, USDT 9.98996 USDC, USDC 10.00804 USDT. 1000 USDC gave
+  1.7074 BNB against 1.7658 for 1000 USDT, and 10 000 USDC only 4.886 BNB. Set
+  `--minimum-output` from a fresh quote: it is the only floor.
+
+The owner admits the input token and the output asset (the other token, or
+native BNB) on `eip155:56` for the `swap` rail with the route that
+`apn swap bnb uniswap-token inventory` prints. That route lists SwapRouter02,
+the factory, WBNB and the three pools. It is not the native family's route: an
+admission of one does not admit the other.
+
+A quote and the signing guard before every approval, swap and cleanup check,
+at one block they just read: the chain is 56; the runtime code hash of
+SwapRouter02, WBNB, USDT, the USDC proxy and its implementation, and the three
+pools; the USDC proxy implementation slot; `decimals()` of both tokens is 18.
+Any other decimals refuse with `uniswap_bnb_decimals_mismatch`; any other
+drift refuses with `uniswap_code_pin_drift`.
+
+### BNB token commands and rules
+
+The seven commands and their options are those of `swap ethereum uniswap-token`.
+`--source-token` is the Binance-Peg USDT or USDC address. `--output-token` is
+`native` (BNB) or the other Binance-Peg address. `--amount` and
+`--minimum-output` are atomic at 18 decimals; for a native output the minimum is
+in wei of BNB.
+
+```sh
+QUOTE=$(apn swap bnb uniswap-token quote --profile <profile> --account <account-address> --to <recipient-address> --source-token 0x55d398326f99059fF775485246999027B3197955 --output-token native --amount 10000000000000000000 --minimum-output 17000000000000000 --approval-cap 10000000000000000000 --deadline <unix-seconds-within-30-minutes> --max-approval-gas-limit 80000 --max-swap-gas-limit 300000 --max-cleanup-gas-limit 80000 --max-fee-per-gas 1000000000 --max-priority-fee-per-gas 100000000 --max-native-debit 460000000000000 | jq -r .data.quoteHash)
+OP=$(apn swap bnb uniswap-token prepare --profile <profile> --quote $QUOTE --idempotency-key bnb-token-swap-0001 | jq -r .operation.operationId)
+apn swap bnb uniswap-token approve --operation $OP
+apn swap bnb uniswap-token execute --operation $OP
+apn swap bnb uniswap-token status --operation $OP
+```
+
+- The approval is `approve(SwapRouter02, amount)` on the input token. The
+  allowance must start at zero or at exactly the input amount; cleanup sets it
+  to zero. Both tokens return `true` from `approve`.
+- The swap is SwapRouter02 `multicall(deadline, calls)` with value zero. For a
+  token output the one call is `exactInputSingle(input, output, 100,
+  recipient, amountIn, amountOutMinimum, 0)`. For native BNB the calls are
+  `exactInputSingle(input, WBNB, 500, 0x…02, amountIn, amountOutMinimum, 0)`,
+  which pays the WBNB to the router, and `unwrapWETH9(amountOutMinimum,
+  recipient)`, which unwraps all of it and sends that BNB to the recipient.
+  This is Uniswap's own encoding of a native output. The floor binds both
+  calls. The decoder refuses any other call, a third call, another fee tier, a
+  price limit, or a swap of a native output that pays anyone but the router.
+- The recipient must be an account. The router sentinels `0x…01` and `0x…02`,
+  the router and WBNB refuse with `APN_INVALID_INPUT`.
+- BNB charges no base fee. A zero `--max-priority-fee-per-gas` refuses at quote
+  with `uniswap_zero_gas_price`. In our case `eth_maxPriorityFeePerGas` was
+  0.05 gwei (50 000 000 wei); the signing guard refuses a priority cap below the
+  node's value with `uniswap_token_fee_cap`.
+- In our case `eth_estimateGas` from a zero allowance gave: approve USDT 46 576,
+  approve USDC 54 235; swap USDT to BNB 182 317, USDC to BNB 200 046, USDT to
+  USDC 143 700, USDC to USDT 144 357.
+- A successful swap proves the exact input debit from the input token balances
+  just before and at the swap block, and zero residual allowance. A token
+  output is proven by the recipient's balance of the output token. A native
+  output is proven by the router's one WBNB `Withdrawal` in the swap's receipt:
+  any other count, sender or contract refuses with
+  `uniswap_token_unwrap_conflict`.
+- `status` reads the effect's block state. Without `APN_BNB_ARCHIVE_RPC_URL` a
+  primary that refuses a block more than 128 blocks behind the safe head (about
+  one minute on BNB) refuses with `uniswap_token_status_archive_required`.
+- The family has its own nonce reservations (`uniswap-bnb-token-nonces`). A
+  BNB nonce never excludes an Ethereum nonce of the same account, nor the
+  reverse. A direct BNB transfer never reuses a nonce a BNB token effect holds.
+- Records share the token-swap journal with the Ethereum family. A record
+  names its family by its route schema
+  (`apn.uniswap-v3.bnb.swap-router-02.multicall.v1`). The other family's
+  runtime refuses it with `uniswap_token_lane_mismatch` before any read, and a
+  quote of the other family refuses at `prepare` with
+  `uniswap_token_quote_binding`. `apn operation status` and
+  `apn operation resume` name the BNB commands for a BNB record.
+- Request caps per command are the Ethereum family's single-primary caps:
+  quote 8, prepare 9, approve 14, execute 15, status 11, cleanup 14.
+- MCP serves `inventory`, `quote`, `prepare` and `status`. `approve`,
+  `execute` and `cleanup` are reachable only through `apn_foreground_handoff`.
 
 ## Compatibility
 

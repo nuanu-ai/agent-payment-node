@@ -16,7 +16,7 @@ This section was moved from the APN README without changes to its text.
 | Relay bridges | `relay prepare/execute/observe/status/retire` | [Relay](relay.md) |
 | Circle CCTP V2 | `circle evm *`; `circle approval *`, `circle source submit` (Base to Solana) | [Circle V2 EVM](circle-v2-evm-fast.md); [Base to Solana](lifi.md#circle-cctp-v2-base-usdc-to-solana-approval-and-delivery-status) |
 | Stargate V2 direct | `stargate native *`, `stargate token *` | [quote](stargate-v2-direct-quote.md), [native](stargate-v2-native-execution.md), [token](stargate-v2-token-native-drop.md) |
-| Swaps | `swap ethereum uniswap[-token] *`, `swap bnb uniswap *`, `swap tron sunswap *`, `swap solana jupiter/orca *` | [Uniswap](uniswap.md), [SunSwap](sunswap.md), [Jupiter](jupiter.md), [Orca](orca.md) |
+| Swaps | `swap ethereum uniswap[-token] *`, `swap bnb uniswap[-token] *`, `swap tron sunswap *`, `swap solana jupiter/orca *` | [Uniswap](uniswap.md), [SunSwap](sunswap.md), [Jupiter](jupiter.md), [Orca](orca.md) |
 | x402 | `x402 inspect`, `x402 fetch *`, `x402 permit2 *`, `x402 solana *`, `x402 merchant *` | [above](x402-purchases.md) |
 
 Each guide states its commands, recovery rules and which mainnet acceptance rows are proven or still open. Source tests
