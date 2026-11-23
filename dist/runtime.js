@@ -24,6 +24,7 @@ export class RuntimeContext {
     uniswapRuntime;
     uniswapBnbRuntime;
     uniswapTokenRuntime;
+    uniswapBnbTokenRuntime;
     sunswapRuntime;
     orcaRuntime;
     /** Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10). */
@@ -115,6 +116,8 @@ export class RuntimeContext {
             this.uniswapBnbRuntime = dependencies.uniswapBnbRuntime;
         if (dependencies.uniswapTokenRuntime !== undefined)
             this.uniswapTokenRuntime = dependencies.uniswapTokenRuntime;
+        if (dependencies.uniswapBnbTokenRuntime !== undefined)
+            this.uniswapBnbTokenRuntime = dependencies.uniswapBnbTokenRuntime;
         if (dependencies.sunswapRuntime !== undefined)
             this.sunswapRuntime = dependencies.sunswapRuntime;
         if (dependencies.orcaRuntime !== undefined)

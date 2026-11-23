@@ -178,7 +178,7 @@ function publicRelease(entry) {
         proof_class: "owner_acknowledgement_only", claims_released: true, record_unchanged: true, ledger_unchanged: true, next_actions: [] };
 }
 function familyActions(found, use) {
-    const commands = found.adapter.commands, id = found.entry.operationId;
+    const commands = found.adapter.commandsFor?.(found.record) ?? found.adapter.commands, id = found.entry.operationId;
     const template = use === "exit" ? commands?.exit ?? commands?.resume ?? commands?.status
         : use === "resume" ? commands?.resume ?? commands?.status : commands?.status;
     return template === undefined ? [] : [template.replaceAll("<operation-id>", id)];

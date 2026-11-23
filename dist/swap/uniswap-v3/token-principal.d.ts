@@ -51,7 +51,7 @@ export declare function abandonedPrincipalCandidate(op: UniswapTokenOperation): 
 } | null;
 /**
  * One primary batch, so one node answers all three: the account's nonce at the finalized tag, the cleanup transaction by
- * its own hash, and the finalized head. Proven only when that node has the cleanup (signed by the account, chain 1, the
+ * its own hash, and the finalized head. Proven only when that node has the cleanup (signed by the account, the lane's chain, the
  * swap marker's nonce) in a block at or below the finalized head, the finalized nonce is past it, and the canonical block
  * at the cleanup's height is the one the transaction names (read next on the same primary: the height is known only from
  * the transaction, and a block at or below the finalized head is final): the finalized chain then holds this cleanup at

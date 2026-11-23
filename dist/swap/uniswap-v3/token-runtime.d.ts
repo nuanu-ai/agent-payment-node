@@ -1,8 +1,9 @@
 import type { CommandRequest } from "../../commands.js";
-import type { UniswapTokenQuoteBuilder } from "./token-builder.js";
+import type { UniswapTokenLaneQuoteBuilder } from "./token-builder.js";
 import { type TokenCleanupFees, type UniswapTokenCommandRuntime, type UniswapTokenExecutionPorts } from "./token-execution.js";
 import type { SavedUniswapTokenMaterialStore, UniswapTokenMaterial } from "./token-material.js";
 import { UniswapTokenJournal } from "./token-operation.js";
+import { type UniswapTokenLane } from "./token-lane.js";
 import { UniswapTokenRpcBudgetJournal } from "./token-rpc-budget.js";
 import type { TokenRpcCall } from "./token-rpc.js";
 /**
@@ -18,12 +19,18 @@ export declare const UNISWAP_TOKEN_EXECUTE_PLAN = 15;
 /** The plan's cap for a command whose first primary batch may probe each candidate of a pooled primary once. */
 export declare function uniswapTokenProbedCap(plan: number, poolCandidates: number): number;
 type Prepare = Extract<CommandRequest, {
-    readonly command: "swap.uniswap-token.prepare";
+    readonly command: "swap.uniswap-token.prepare" | "swap.uniswap-bnb-token.prepare";
 }>;
 export interface UniswapTokenRuntimePorts extends UniswapTokenExecutionPorts {
     confirm(material: UniswapTokenMaterial): Promise<void>;
 }
-export declare class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime {
+/**
+ * One lane's token-input commands over the shared journal: its quotes, prepares and operations only. A quote, a saved
+ * quote or an operation of the other lane refuses (`uniswap_token_quote_binding`, `uniswap_token_lane_mismatch`) and
+ * names that lane's own command, so an RPC of one chain never reads or signs for another.
+ */
+export declare class InstalledUniswapTokenLaneRuntime implements UniswapTokenCommandRuntime {
+    private readonly lane;
     private readonly builder;
     private readonly materials;
     private readonly journal;
@@ -31,20 +38,10 @@ export declare class InstalledUniswapTokenRuntime implements UniswapTokenCommand
     private readonly rpcBudget?;
     private readonly rpc?;
     private readonly execution;
-    constructor(builder: UniswapTokenQuoteBuilder, materials: SavedUniswapTokenMaterialStore, journal: UniswapTokenJournal, ports: UniswapTokenRuntimePorts, rpcBudget?: UniswapTokenRpcBudgetJournal | undefined, rpc?: TokenRpcCall | undefined);
-    inventory(): {
-        chain: string;
-        router: "0xE592427A0AEce92De3Edee1F18E0157C05861564";
-        pair: string;
-        fee: number;
-        mechanism: import("../pin.js").SwapMechanismPin;
-        route: import("../route-admission.js").SwapRouteAdmission;
-        routeDigest: string;
-        approval: string;
-        transactionValue: string;
-    };
+    constructor(lane: UniswapTokenLane, builder: UniswapTokenLaneQuoteBuilder, materials: SavedUniswapTokenMaterialStore, journal: UniswapTokenJournal, ports: UniswapTokenRuntimePorts, rpcBudget?: UniswapTokenRpcBudgetJournal | undefined, rpc?: TokenRpcCall | undefined);
+    inventory(): unknown;
     quote(request: Extract<CommandRequest, {
-        readonly command: "swap.uniswap-token.quote";
+        readonly command: "swap.uniswap-token.quote" | "swap.uniswap-bnb-token.quote";
     }>): Promise<{
         readonly quoteHash: string;
     }>;
@@ -57,7 +54,13 @@ export declare class InstalledUniswapTokenRuntime implements UniswapTokenCommand
     residualAllowance(op: import("./token-operation.js").UniswapTokenOperation): Promise<string | null>;
     cleanup(id: string, fees?: TokenCleanupFees): Promise<import("./token-operation.js").UniswapTokenOperation>;
     private budgeted;
+    /** An operation of the other lane refuses before any of its reads, naming that lane's own status command. */
+    private ownLane;
     private poolCap;
     private probedCap;
+}
+/** The Ethereum token lane's runtime: canonical USDC and USDT through the original SwapRouter. */
+export declare class InstalledUniswapTokenRuntime extends InstalledUniswapTokenLaneRuntime {
+    constructor(builder: UniswapTokenLaneQuoteBuilder, materials: SavedUniswapTokenMaterialStore, journal: UniswapTokenJournal, ports: UniswapTokenRuntimePorts, rpcBudget?: UniswapTokenRpcBudgetJournal, rpc?: TokenRpcCall);
 }
 export {};

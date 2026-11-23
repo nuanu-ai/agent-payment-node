@@ -59,13 +59,14 @@ export interface UniswapTokenExecutionPorts {
     /** One finalized batch: past the route's deadline the account's nonce is at or below `fromNonce`; null: not proven. */
     swapNonceUnused?(operation: UniswapTokenOperation, fromNonce: string): Promise<TokenNonceUnused | null>;
 }
+/** One lane's token-input runtime; a request or record of another lane refuses. */
 export interface UniswapTokenCommandRuntime {
     inventory(): unknown;
     quote(request: Extract<import("../../commands.js").CommandRequest, {
-        readonly command: "swap.uniswap-token.quote";
+        readonly command: "swap.uniswap-token.quote" | "swap.uniswap-bnb-token.quote";
     }>): Promise<unknown>;
     prepare(request: Extract<import("../../commands.js").CommandRequest, {
-        readonly command: "swap.uniswap-token.prepare";
+        readonly command: "swap.uniswap-token.prepare" | "swap.uniswap-bnb-token.prepare";
     }>): Promise<UniswapTokenOperation>;
     approve(id: string): Promise<UniswapTokenOperation>;
     execute(id: string): Promise<UniswapTokenOperation>;
