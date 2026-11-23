@@ -3,8 +3,10 @@ import test, { type TestContext } from "node:test";
 import { decodeFunctionData, parseAbi, parseTransaction, type Hex } from "viem";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { BNB_UNISWAP_MECHANISM_PIN, BNB_UNISWAP_SWAP_ROUTER_02, BNB_USDC, BNB_USDT, BNB_WBNB } from "../../src/swap/uniswap-bnb/pins.js";
+import { BNB_UNISWAP_TOKEN_LANE } from "../../src/swap/uniswap-bnb/token-lane.js";
 import { occupiedBnbUniswapTokenNonces, occupiedUniswapTokenNonces } from "../../src/swap/uniswap-v3/token-nonce-ownership.js";
-import { createUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runtime-factory.js";
+import { createBnbTokenRpc, tokenBatch, type TokenRpcCall, type TokenRpcItem } from "../../src/swap/uniswap-v3/token-rpc.js";
+import { createUniswapTokenLaneRuntime, createUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runtime-factory.js";
 import { UniswapTokenJournal, type UniswapTokenOperation } from "../../src/swap/uniswap-v3/token-operation.js";
 import { uniswapTokenNextActions } from "../../src/swap/uniswap-command-service.js";
 import { temporaryState } from "./helpers.js";
@@ -149,4 +151,29 @@ test("a BNB token runtime refuses a chain-1 RPC before it reads anything else", 
     { code: "APN_CHAIN_MISMATCH" });
   assert.deepEqual(chain.chainCalls, ["eth_chainId", "eth_getBlockByNumber"]);
   assert.equal((chain.sends as Hex[]).length, 0);
+});
+
+test("the BNB token transport serves a quote over APN_BNB_RPC_URL in strict batches within the quote's eight requests", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const now = new Date(); await activateBnbTokenPolicy(temporary.root, now); const { state, wrapping } = await bnbTokenWallet(temporary.root);
+  const chain = new BnbTokenChain(BNB_USDT, BNB_WBNB, BNB_TOKEN_QUOTES.usdtToBnb), endpoints: string[] = [];
+  let rpcNow = now.getTime();
+  const call = createBnbTokenRpc({ environment: { APN_BNB_RPC_URL: "https://bsc.example", APN_ETHEREUM_RPC_URL: "https://ethereum.example" }, state,
+    now: () => rpcNow, pacingNow: () => rpcNow, wait: async (milliseconds) => { rpcNow += milliseconds; }, maxHttpRequests: 8, deadlineMs: 300_000,
+    transport: { request: async (url, _method, body) => {
+      endpoints.push(String(url)); const request = JSON.parse(body!), rows = Array.isArray(request) ? request : [request];
+      assert.ok(rows.length <= 3);
+      const response = await Promise.all(rows.map(async (row: any) => ({ jsonrpc: "2.0", id: row.id, result: await chain.raw(row.method, row.params) })));
+      return { status: 200, body: JSON.stringify(Array.isArray(request) ? response : response[0]) }; } } });
+  // The shape of the real pin check (four batches, the chain id first); its code bytes are not in this fixture.
+  const pins = async (rpc: TokenRpcCall, tag: Hex) => {
+    const item = (address: string): TokenRpcItem => ({ method: "eth_getCode", params: [address, tag], cachePolicy: "immutable", decoder: (value) => value });
+    await tokenBatch(rpc, "archive", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: (value) => value }, item(BNB_UNISWAP_SWAP_ROUTER_02), item(BNB_WBNB)]);
+    for (const batch of [[BNB_USDT, BNB_USDC, BNB_WBNB], [BNB_USDT, BNB_USDC, BNB_WBNB], [BNB_USDT, BNB_USDC, BNB_WBNB]]) await tokenBatch(rpc, "archive", batch.map(item));
+  };
+  const runtime = createUniswapTokenLaneRuntime(BNB_UNISWAP_TOKEN_LANE, { state, wrapping, clock: { now: () => now }, call, foreground: "refuse", verifyPins: pins });
+  const quote = await runtime.quote(bnbTokenQuoteRequest(now, BNB_USDT, "native", "17000000000000000")) as { readonly quoteHash: string };
+  assert.match(quote.quoteHash, /^[a-f0-9]{64}$/u);
+  assert.ok(endpoints.length > 0 && endpoints.every((url) => url.startsWith("https://bsc.example")), endpoints.join(","));
+  assert.ok(call.telemetry!()!.httpAttempts <= 8);
 });
