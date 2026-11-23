@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
+import { BINANCE_PEG_POLICY_ASSETS } from "../../src/binance-peg-policy-assets.js";
 import { AssetPortfolioReader, type BatchBalanceAvailable, type BatchBalanceRequest, type BatchBalanceResult, type FamilyBalanceBatchPort,
   type PortfolioAccount } from "../../src/asset-portfolio-reader.js";
 import { portfolioEndpoint, type PortfolioEndpoint } from "../../src/portfolio/registry.js";
@@ -188,4 +189,16 @@ test("account states are exact and canonical", async () => {
     accounts: { evm: accounts.evm, solana: accounts.solana } as never }), { code: "APN_INVALID_INPUT" });
   assert.throws(() => new AssetPortfolioReader({ ...ports(), tron: new Port("solana", (request) => available(request)) },
     now, async () => "elapsed"), { code: "APN_INVALID_INPUT" });
+});
+
+test("supplement rows are read after the frozen rows of their network; a native, duplicate or foreign row is refused", async () => {
+  const p = ports();
+  const result = await reader(p).read({ inventory, accounts, endpoint: defaults, supplements: BINANCE_PEG_POLICY_ASSETS });
+  assert.deepEqual(network(result, BNB).rows.map((row) => [row.symbol, row.status]), [["BNB", "ok"], ["USDT", "ok"], ["USDC", "ok"]]);
+  const request = p.evm.requests.find((entry) => entry.chain === BNB)!;
+  assert.deepEqual(request.assets.map((asset) => asset.identifier), [null, ...BINANCE_PEG_POLICY_ASSETS.map((asset) => asset.identifier)]);
+  const usdt = BINANCE_PEG_POLICY_ASSETS[0]!;
+  for (const bad of [{ ...usdt, kind: "native" as const }, { ...usdt, family: "solana" as const }, inventory.assets.find((asset) => asset.chain === ETHEREUM && asset.kind === "token")!]) {
+    await assert.rejects(reader(ports()).read({ inventory, accounts, endpoint: defaults, supplements: [bad] }), { code: "APN_INVALID_INPUT" }, JSON.stringify(bad));
+  }
 });
