@@ -7,6 +7,7 @@ import { abandonedPrincipalCandidate, principalReleaseCandidate, proveSwapNonces
 import type { TokenUsageBinding } from "./token-usage.js";
 import { sanitizeUniswapTokenFailureField, swapMarkerNonces, tokenAttempt, transitionUniswapToken, UniswapTokenJournal,
   validateUniswapTokenOperation } from "./token-operation.js";
+import { tokenLaneOf } from "./token-lane.js";
 
 export type TokenEffectKind = "approval" | "swap" | "cleanup";
 export interface TokenSealedEffect { readonly transactionHash: string; readonly envelopeHash: string }
@@ -45,9 +46,11 @@ export interface UniswapTokenExecutionPorts {
   /** One finalized batch: past the route's deadline the account's nonce is at or below `fromNonce`; null: not proven. */
   swapNonceUnused?(operation: UniswapTokenOperation, fromNonce: string): Promise<TokenNonceUnused | null>;
 }
+/** One lane's token-input runtime; a request or record of another lane refuses. */
 export interface UniswapTokenCommandRuntime {
-  inventory(): unknown; quote(request: Extract<import("../../commands.js").CommandRequest, { readonly command: "swap.uniswap-token.quote" }>): Promise<unknown>;
-  prepare(request: Extract<import("../../commands.js").CommandRequest, { readonly command: "swap.uniswap-token.prepare" }>): Promise<UniswapTokenOperation>;
+  inventory(): unknown;
+  quote(request: Extract<import("../../commands.js").CommandRequest, { readonly command: "swap.uniswap-token.quote" | "swap.uniswap-bnb-token.quote" }>): Promise<unknown>;
+  prepare(request: Extract<import("../../commands.js").CommandRequest, { readonly command: "swap.uniswap-token.prepare" | "swap.uniswap-bnb-token.prepare" }>): Promise<UniswapTokenOperation>;
   approve(id: string): Promise<UniswapTokenOperation>; execute(id: string): Promise<UniswapTokenOperation>;
   status(id: string): Promise<UniswapTokenOperation>; cleanup(id: string, fees?: TokenCleanupFees): Promise<UniswapTokenOperation>;
   /** The live allowance a terminal record may leave standing (an expired approval cleaned without a swap, an owner abandon); null otherwise. */
@@ -140,7 +143,7 @@ export class UniswapTokenExecution {
     // sealed effect, and recovery never opens custody (none was sent: a send needs the public effect). The forward command
     // (execute; cleanup for a cleanup) opens custody under the account lock and settles the marker (resumeUnsigned).
     if (recovered === null) throw new ApnError("APN_OPERATION_BLOCKED", "Started token effect has no public transaction evidence.", {
-      reason: "uniswap_token_public_effect_missing", nextActions: [`apn swap ethereum uniswap-token ${kind === "cleanup" ? "cleanup" : "execute"} --operation ${op.operationId}`] });
+      reason: "uniswap_token_public_effect_missing", nextActions: [`${tokenLaneOf(op.route).commandPrefix} ${kind === "cleanup" ? "cleanup" : "execute"} --operation ${op.operationId}`] });
     // A sealed transaction may or may not have reached the provider. Recovery observes it only.
     const usage = kind === "swap" ? await this.ports.followUsage(op, "unknown_finality") : null;
     return await this.persist(transitionUniswapToken(op, unknown(kind), {

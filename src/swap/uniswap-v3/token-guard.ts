@@ -8,23 +8,26 @@ import type { StateStore } from "../../state.js";
 import type { TokenEffectKind } from "./token-execution.js";
 import type { UniswapTokenMaterial } from "./token-material.js";
 import type { UniswapTokenOperation } from "./token-operation.js";
-import { UNISWAP_V3_QUOTER_V2 } from "./pins.js";
-import { encodeUniswapTokenApproval, verifyUniswapTokenRoutePins } from "./token-route.js";
+import { tokenLaneOf, type UniswapTokenLane } from "./token-lane.js";
 import type { UniswapTokenUsage } from "./token-usage.js";
-import { tokenBatch, tokenBlock, tokenChain, tokenHex, tokenQuantity, type TokenRpcCall } from "./token-rpc.js";
+import { tokenBatch, tokenBlock, tokenHex, tokenQuantity, type TokenRpcCall } from "./token-rpc.js";
 
 const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)", "function balanceOf(address owner) view returns (uint256)"]);
 const QUOTER = parseAbi(["function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)"]);
+/**
+ * Every pre-sign check of one effect at one fresh block of its lane's chain, the lane chosen by the record's own route:
+ * its chain, its pins (an injected verifier replaces the lane's own), its router, quoter and approval encoding.
+ */
 export class UniswapTokenSigningGuard {
   private readonly wallets: EncryptedWalletStore;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly call: EvmRpcCall,
     private readonly usage: UniswapTokenUsage, private readonly now: () => Date,
-    private readonly verifyPins: (call: EvmRpcCall, tag: Hex) => Promise<void> = verifyUniswapTokenRoutePins) { this.wallets = new EncryptedWalletStore(state, wrapping); }
+    private readonly verifyPins?: (call: EvmRpcCall, tag: Hex) => Promise<void>) { this.wallets = new EncryptedWalletStore(state, wrapping); }
 
   async confirm(material: UniswapTokenMaterial): Promise<void> {
     await this.usage.confirmMaterial(material); await this.wallet(material.profile, material.account);
     const at = this.now(); if (at.getTime() >= material.route.deadline * 1000) blocked("Token quote expired.", "uniswap_token_quote_expired");
-    const block = await this.common(material.account, material.route.inputToken, material.route.router, material.route.deadline);
+    const lane = tokenLaneOf(material.route), block = await this.common(lane, material.account, material.route.inputToken, material.route.router, material.route.deadline);
     const [rawAllowance, rawBalance] = await tokenBatch(this.call as TokenRpcCall, "archive", [
       request("allowance", material.account, material.route.inputToken, material.route.router, block.tag),
       request("balanceOf", material.account, material.route.inputToken, material.route.router, block.tag),
@@ -32,7 +35,7 @@ export class UniswapTokenSigningGuard {
     const allowance = word(rawAllowance);
     if (allowance !== 0n && allowance !== BigInt(material.route.amountIn)) blocked("Token allowance changed.", "uniswap_token_allowance_drift");
     if (word(rawBalance) < BigInt(material.route.amountIn)) blocked("Source token balance is below the exact input.", "uniswap_token_source_balance");
-    const tx = allowance === 0n ? encodeUniswapTokenApproval(material.route.inputToken, material.route.amountIn) :
+    const tx = allowance === 0n ? lane.encodeApproval(material.route.inputToken, material.route.amountIn) :
       { to: material.route.router, data: material.route.calldata };
     await simulate(this.call, { from: material.account, to: tx.to, data: tx.data, value: "0x0" }, block.tag,
       allowance === 0n ? material.approvalGas.gasLimit : material.swapGas.gasLimit, allowance === 0n);
@@ -44,31 +47,31 @@ export class UniswapTokenSigningGuard {
     if (kind === "cleanup") await this.usage.confirmCleanup(op); else await this.usage.confirmReserved(op); await this.wallet(op.profile, op.account);
     if (kind !== "cleanup" && this.now().getTime() >= op.route.deadline * 1000) blocked("Token route expired before signing.", "uniswap_token_deadline");
     const gas = kind === "approval" ? op.approvalGas : kind === "swap" ? op.swapGas : op.cleanupGas;
-    const block = await this.common(op.account, op.route.inputToken, op.route.router, op.route.deadline), pending = block.pending;
+    const lane = tokenLaneOf(op.route), block = await this.common(lane, op.account, op.route.inputToken, op.route.router, op.route.deadline), pending = block.pending;
     if (BigInt(nonce) < pending) blocked("Reserved nonce is stale.", "uniswap_token_nonce_drift");
     // Every read below is at the block whose chain and code pins were just verified: the swap's fresh quote rides in the
     // same batch as its allowance and balance, so nothing is read twice.
     const reads = [request("allowance", op.account, op.route.inputToken, op.route.router, block.tag),
-      ...(kind === "cleanup" ? [] : [request("balanceOf", op.account, op.route.inputToken, op.route.router, block.tag)]), ...(kind === "swap" ? [quote(op, block.tag)] : [])];
+      ...(kind === "cleanup" ? [] : [request("balanceOf", op.account, op.route.inputToken, op.route.router, block.tag)]), ...(kind === "swap" ? [quote(lane, op, block.tag)] : [])];
     const values = await tokenBatch(this.call as TokenRpcCall, "archive", reads), allowance = word(values[0]);
     if (kind === "approval" && allowance !== 0n || kind === "swap" && allowance !== BigInt(op.route.amountIn) || kind === "cleanup" && allowance === 0n) {
       blocked("Token allowance changed before signing.", "uniswap_token_allowance_drift");
     }
     if (kind !== "cleanup" && word(values[1]) < BigInt(op.route.amountIn)) blocked("Source token balance is below the exact input.", "uniswap_token_source_balance");
     if (kind === "swap") await swapAt(this.call, op, values[2], block);
-    else { const approval = encodeUniswapTokenApproval(op.route.inputToken, kind === "approval" ? op.route.amountIn : "0");
+    else { const approval = lane.encodeApproval(op.route.inputToken, kind === "approval" ? op.route.amountIn : "0");
       await simulate(this.call, { from: op.account, to: approval.to, data: approval.data, value: "0x0" }, block.tag, gas.gasLimit, true); }
     await finish(this.call, block, op.account, (BigInt(op.maximumNativeDebitWei) - BigInt(op.accumulatedNativeDebitWei)).toString(), gas.maxFeePerGas, gas.maxPriorityFeePerGas);
   }
 
-  private async common(account: string, token: string, router: string, deadline: number) {
+  private async common(lane: UniswapTokenLane, account: string, token: string, router: string, deadline: number) {
     const [chain, rawBlock, rawPending] = await tokenBatch(this.call as TokenRpcCall, "primary", [
-      { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+      { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: lane.chainDecoder },
       { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: tokenBlock },
       { method: "eth_getTransactionCount", params: [account, "pending"], cachePolicy: "none", decoder: tokenQuantity },
     ]);
-    if (evmRpcQuantity(chain) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token signing requires Ethereum chain 1.");
-    const block = decodedBlock(rawBlock), pending = evmRpcQuantity(rawPending); await this.verifyPins(this.call, block.tag);
+    if (evmRpcQuantity(chain) !== BigInt(lane.chainId)) throw new ApnError("APN_CHAIN_MISMATCH", `Uniswap token signing requires ${lane.chainLabel}.`);
+    const block = decodedBlock(rawBlock), pending = evmRpcQuantity(rawPending); await (this.verifyPins ?? lane.verifyPins)(this.call, block.tag);
     if (router === token || !Number.isSafeInteger(deadline)) corrupt("Uniswap token signing material changed.");
     return { ...block, pending };
   }
@@ -80,9 +83,10 @@ function request(kind: "allowance" | "balanceOf", owner: string, token: string, 
   functionName: kind, args: kind === "allowance" ? [owner as Hex, router as Hex] : [owner as Hex] });
   return { method: "eth_call", params: [{ to: token, data }, tag], cachePolicy: "snapshot" as const,
     decoder: (value: unknown) => { decodeFunctionResult({ abi: ERC20, functionName: kind, data: evmRpcHex(value, 32) }); return value; } }; }
-function quote(op: UniswapTokenOperation, tag: Hex) { const data = encodeFunctionData({ abi: QUOTER, functionName: "quoteExactInputSingle",
-  args: [{ tokenIn: op.route.inputToken as Hex, tokenOut: op.route.outputToken as Hex, amountIn: BigInt(op.route.amountIn), fee: 100, sqrtPriceLimitX96: 0n }] });
-  return { method: "eth_call", params: [{ to: UNISWAP_V3_QUOTER_V2, data }, tag], cachePolicy: "none" as const,
+/** The fresh quote of the route's own pool: its input, the token the pool pays (WBNB for a native output) and its fee. */
+function quote(lane: UniswapTokenLane, op: UniswapTokenOperation, tag: Hex) { const data = encodeFunctionData({ abi: QUOTER, functionName: "quoteExactInputSingle",
+  args: [{ tokenIn: op.route.inputToken as Hex, tokenOut: op.route.outputToken as Hex, amountIn: BigInt(op.route.amountIn), fee: op.route.fee, sqrtPriceLimitX96: 0n }] });
+  return { method: "eth_call", params: [{ to: lane.quoter, data }, tag], cachePolicy: "none" as const,
     decoder: (value: unknown) => { decodeFunctionResult({ abi: QUOTER, functionName: "quoteExactInputSingle", data: evmRpcHex(value) }); return value; } }; }
 /** The swap at the guard's block: the fresh quote meets the approved minimum, the exact transaction simulates, its gas fits. */
 async function swapAt(call: EvmRpcCall, op: UniswapTokenOperation, rawQuote: unknown, block: ReturnType<typeof decodedBlock>) {
