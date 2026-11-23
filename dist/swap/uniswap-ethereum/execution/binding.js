@@ -3,8 +3,7 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord, sha256 } from "../
 import { ApnError } from "../../../errors.js";
 import { parseAtomic } from "../../../money.js";
 import { validateSwapOperation } from "../../model.js";
-import { UNISWAP_CHAIN, UNISWAP_ROUTER } from "../../uniswap-pin.js";
-import { decodeUniswapRouterCalldataFor } from "../../uniswap-router.js";
+import { uniswapNativeLaneOf } from "../../uniswap-v3/native-lane.js";
 const BINDING_VERSION = "apn.uniswap-ethereum.execution-binding.v1";
 const APPROVAL_VERSION = "apn.uniswap-ethereum.execution-approval.v1";
 const HASH = /^[a-f0-9]{64}$/u;
@@ -14,7 +13,7 @@ const MAX_UINT256 = (1n << 256n) - 1n;
 const MAX_UINT64 = (1n << 64n) - 1n;
 const MAX_FRESHNESS_AGE_MS = 30_000;
 export function createUniswapApprovalRequest(operationValue, envelope, freshness, now) {
-    const operation = validateSwapOperation(operationValue);
+    const operation = validateSwapOperation(operationValue), lane = laneOf(operation);
     validateEnvelope(operation, envelope, Math.floor(Date.parse(operation.quote.expiresAt) / 1000));
     validateFreshness(operation, envelope, freshness, now);
     const maxFee = envelope.maxFeePerGas ?? envelope.gasPrice;
@@ -23,15 +22,15 @@ export function createUniswapApprovalRequest(operationValue, envelope, freshness
         expectedOutputAtomic: operation.quote.expectedOutputAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic,
         slippageBps: operation.quote.slippageBps, gasLimit: envelope.gasLimit, maxFeePerGas: maxFee,
         maxPriorityFeePerGas: envelope.maxPriorityFeePerGas ?? "0",
-        maximumGasCostAtomic: (BigInt(envelope.gasLimit) * BigInt(maxFee)).toString(), chainId: 1,
-        router: UNISWAP_ROUTER, envelopeHash: operation.quote.unsignedTransactionPayloadHash, nonce: freshness.nonce,
+        maximumGasCostAtomic: (BigInt(envelope.gasLimit) * BigInt(maxFee)).toString(), chainId: lane.chainId,
+        router: lane.router, envelopeHash: operation.quote.unsignedTransactionPayloadHash, nonce: freshness.nonce,
         executionHeadNumber: freshness.headBlockNumber, executionHeadHash: freshness.headBlockHash,
         policyDigest: operation.policyDigest, mechanismDigest: operation.mechanismDigest,
         protocolRegistryDigest: operation.protocolRegistryDigest, expiresAt: operation.quote.expiresAt };
     return { ...body, approvalHash: domainHash(APPROVAL_VERSION, canonicalJson(body)) };
 }
 export function createUniswapExecutionBinding(input) {
-    const operation = validateSwapOperation(input.operation);
+    const operation = validateSwapOperation(input.operation), lane = laneOf(operation);
     if (operation.state !== "submitting" || operation.submissionMarker === null)
         blocked("Uniswap execution requires a durable submission marker.", "uniswap_marker_missing");
     const deadline = Math.floor(Date.parse(operation.quote.expiresAt) / 1000);
@@ -50,7 +49,7 @@ export function createUniswapExecutionBinding(input) {
     const body = { schemaVersion: BINDING_VERSION, operationId: operation.operationId,
         operationIntegrityHash: operation.submissionMarker.operationIntegrityHash, profileHash: operation.ownerProfileHash,
         account: operation.quote.account, walletBindingHash: input.admission.walletBindingHash,
-        walletCreatedAt: input.admission.walletCreatedAt, ownerAdmissionHash: input.admission.admissionHash, chainId: 1,
+        walletCreatedAt: input.admission.walletCreatedAt, ownerAdmissionHash: input.admission.admissionHash, chainId: lane.chainId,
         envelope: input.envelope, envelopeHash: sha256(canonicalJson(input.envelope)), nonce: input.freshness.nonce,
         executionHeadNumber: input.freshness.headBlockNumber, executionHeadHash: input.freshness.headBlockHash,
         freshnessCheckedAt: input.freshness.checkedAt, deadline,
@@ -61,7 +60,7 @@ export function createUniswapExecutionBinding(input) {
     return { ...body, bindingHash: domainHash(BINDING_VERSION, canonicalJson(body)) };
 }
 export function validateUniswapExecutionBinding(value, operationValue) {
-    const operation = validateSwapOperation(operationValue);
+    const operation = validateSwapOperation(operationValue), lane = laneOf(operation);
     if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "operationIntegrityHash", "profileHash", "account",
         "walletBindingHash", "walletCreatedAt", "ownerAdmissionHash", "chainId", "envelope", "envelopeHash", "nonce",
         "executionHeadNumber", "executionHeadHash", "freshnessCheckedAt", "deadline",
@@ -71,7 +70,7 @@ export function validateUniswapExecutionBinding(value, operationValue) {
     const binding = value, { bindingHash, ...body } = binding;
     if (!HASH.test(bindingHash) || bindingHash !== domainHash(BINDING_VERSION, canonicalJson(body)) || operation.submissionMarker === null ||
         binding.operationId !== operation.operationId || binding.operationIntegrityHash !== operation.submissionMarker.operationIntegrityHash ||
-        binding.profileHash !== operation.ownerProfileHash || binding.account !== operation.quote.account || binding.chainId !== 1 ||
+        binding.profileHash !== operation.ownerProfileHash || binding.account !== operation.quote.account || binding.chainId !== lane.chainId ||
         binding.envelopeHash !== operation.quote.unsignedTransactionPayloadHash || binding.envelopeHash !== sha256(canonicalJson(binding.envelope)) ||
         binding.quoteHash !== operation.quote.quoteHash || binding.simulationRequestHash !== operation.quote.simulation.requestHash ||
         binding.simulationResultHash !== operation.quote.simulation.resultHash || binding.policyDigest !== operation.policyDigest ||
@@ -84,7 +83,7 @@ export function validateUniswapExecutionBinding(value, operationValue) {
     validateEnvelope(operation, binding.envelope, binding.deadline);
     decimal(binding.nonce, false);
     decimal(binding.executionHeadNumber, false);
-    const freshness = { chainId: 1, account: binding.account, nonce: binding.nonce,
+    const freshness = { chainId: lane.chainId, account: binding.account, nonce: binding.nonce,
         gasLimit: binding.envelope.gasLimit, maxFeePerGas: binding.envelope.maxFeePerGas ?? binding.envelope.gasPrice,
         maxPriorityFeePerGas: binding.envelope.maxPriorityFeePerGas ?? "0",
         simulationBlockNumber: operation.quote.simulation.blockNumber,
@@ -98,11 +97,11 @@ export function validateUniswapExecutionBinding(value, operationValue) {
     return binding;
 }
 export function validateFreshness(operationValue, envelope, fresh, now) {
-    const operation = validateSwapOperation(operationValue);
+    const operation = validateSwapOperation(operationValue), lane = laneOf(operation);
     const at = instant(now);
     if (!isPlainRecord(fresh) || !exactKeys(fresh, ["chainId", "account", "nonce", "gasLimit", "maxFeePerGas", "maxPriorityFeePerGas",
         "simulationBlockNumber", "simulationBlockHash", "headBlockNumber", "headBlockHash", "checkedAt"]) ||
-        fresh.chainId !== 1 || getAddress(fresh.account) !== operation.quote.account || fresh.account !== operation.quote.account || !canonicalInstant(fresh.checkedAt) ||
+        fresh.chainId !== lane.chainId || getAddress(fresh.account) !== operation.quote.account || fresh.account !== operation.quote.account || !canonicalInstant(fresh.checkedAt) ||
         fresh.gasLimit !== envelope.gasLimit || fresh.maxFeePerGas !== (envelope.maxFeePerGas ?? envelope.gasPrice) ||
         fresh.maxPriorityFeePerGas !== (envelope.maxPriorityFeePerGas ?? "0") ||
         fresh.simulationBlockNumber !== operation.quote.simulation.blockNumber ||
@@ -122,12 +121,12 @@ export function validateFreshness(operationValue, envelope, fresh, now) {
     }
 }
 export async function verifySignedUniswapTransaction(raw, bindingValue, operationValue) {
-    const operation = validateSwapOperation(operationValue), binding = validateUniswapExecutionBinding(bindingValue, operation);
+    const operation = validateSwapOperation(operationValue), binding = validateUniswapExecutionBinding(bindingValue, operation), lane = laneOf(operation);
     try {
         const tx = parseTransaction(raw), recovered = getAddress(await recoverTransactionAddress({ serializedTransaction: raw }));
         const envelope = binding.envelope, legacy = envelope.gasPrice !== undefined;
-        if ((legacy ? tx.type !== "legacy" : tx.type !== "eip1559") || tx.chainId !== 1 || recovered !== binding.account ||
-            tx.to === null || tx.to === undefined || getAddress(tx.to) !== UNISWAP_ROUTER || (tx.data ?? "0x").toLowerCase() !== envelope.data.toLowerCase() ||
+        if ((legacy ? tx.type !== "legacy" : tx.type !== "eip1559") || tx.chainId !== lane.chainId || recovered !== binding.account ||
+            tx.to === null || tx.to === undefined || getAddress(tx.to) !== lane.router || (tx.data ?? "0x").toLowerCase() !== envelope.data.toLowerCase() ||
             (tx.value ?? 0n).toString() !== envelope.value || (tx.nonce ?? -1).toString() !== binding.nonce ||
             tx.gas?.toString() !== envelope.gasLimit || (legacy ? tx.gasPrice?.toString() !== envelope.gasPrice :
             tx.maxFeePerGas?.toString() !== envelope.maxFeePerGas || tx.maxPriorityFeePerGas?.toString() !== envelope.maxPriorityFeePerGas) ||
@@ -143,14 +142,14 @@ export async function verifySignedUniswapTransaction(raw, bindingValue, operatio
     }
 }
 function validateEnvelope(operation, envelope, deadline) {
+    const lane = laneOf(operation);
     if (!isPlainRecord(envelope))
         invalid("Uniswap execution envelope schema is invalid.");
     const keys = Object.keys(envelope), base = ["from", "to", "data", "value", "gasLimit", "chainId"], expected = keys.includes("gasPrice") ? [...base, "gasPrice"] : [...base, "maxFeePerGas", "maxPriorityFeePerGas"];
     if (!exactKeys(envelope, expected) || typeof envelope.from !== "string" || typeof envelope.to !== "string" ||
         typeof envelope.data !== "string" || !HEX_BYTES.test(envelope.data) || envelope.data.length > 131_074 ||
         getAddress(envelope.from) !== envelope.from || getAddress(envelope.to) !== envelope.to ||
-        operation.quote.sourceAsset.chain !== UNISWAP_CHAIN || operation.quote.destinationAsset.chain !== UNISWAP_CHAIN ||
-        envelope.chainId !== 1 || envelope.from !== operation.quote.account || envelope.to !== UNISWAP_ROUTER ||
+        envelope.chainId !== lane.chainId || envelope.from !== operation.quote.account || envelope.to !== lane.router ||
         envelope.value !== operation.quote.inputAmountAtomic || sha256(canonicalJson(envelope)) !== operation.quote.unsignedTransactionPayloadHash ||
         deadline !== Math.floor(Date.parse(operation.quote.expiresAt) / 1000) || !Number.isSafeInteger(deadline) ||
         deadline <= 0 || deadline > 4_294_967_295)
@@ -173,11 +172,19 @@ function validateEnvelope(operation, envelope, deadline) {
     if (operation.quote.destinationAsset.kind !== "token" || operation.quote.destinationAsset.identifier === null) {
         blocked("Uniswap output must be an exact pinned token.", "uniswap_envelope_binding");
     }
-    const decoded = decodeUniswapRouterCalldataFor(envelope.data, { recipient: operation.quote.recipient,
+    const decoded = lane.decode(envelope.data, { recipient: operation.quote.recipient,
         inputAmountAtomic: operation.quote.inputAmountAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic, deadline,
         outputToken: operation.quote.destinationAsset.identifier });
     if (decoded.routeHash !== operation.quote.routeHash)
         blocked("Uniswap router route changed after quote validation.", "uniswap_route_drift");
+}
+/** The native-input lane of the operation's own chain; source and destination must both be on it. */
+function laneOf(operation) {
+    const lane = uniswapNativeLaneOf(operation.quote.sourceAsset.chain);
+    if (lane === undefined || operation.quote.destinationAsset.chain !== lane.chain) {
+        blocked("Uniswap envelope does not match the validated quote.", "uniswap_envelope_binding");
+    }
+    return lane;
 }
 function decimal(value, positive) {
     try {

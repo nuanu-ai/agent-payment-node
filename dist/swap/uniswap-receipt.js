@@ -1,7 +1,6 @@
 import { encodeEventTopics, getAddress, parseAbi } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { UNISWAP_ROUTER } from "./uniswap-pin.js";
 const TRANSFER = parseAbi(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
 const TRANSFER_TOPIC = encodeEventTopics({ abi: TRANSFER, eventName: "Transfer" })[0];
 export function uniswapReceiptFee(receipt) {
@@ -31,7 +30,7 @@ export function validateUniswapReceipt(evidence, envelope, expected) {
     const hash = expected.transactionHash.toLowerCase(), tx = evidence.transaction, receipt = evidence.receipt;
     const beforeNative = quantity(evidence.beforeNative), afterNative = quantity(evidence.afterNative), beforeOutput = quantity(evidence.beforeOutput), afterOutput = quantity(evidence.afterOutput), inputAmount = quantity(expected.inputAmountAtomic), minimumOutput = quantity(expected.minimumOutputAtomic), transactionValue = quantity(tx.value), transactionBlock = quantity(tx.blockNumber), receiptBlock = quantity(receipt.blockNumber), finalizedBlock = quantity(evidence.finalizedHead.number);
     if (evidence.transactionHash.toLowerCase() !== hash || tx.hash.toLowerCase() !== hash || receipt.transactionHash.toLowerCase() !== hash ||
-        address(tx.from) !== expected.account || address(tx.to) !== UNISWAP_ROUTER || tx.input.toLowerCase() !== envelope.data.toLowerCase() ||
+        address(tx.from) !== expected.account || address(tx.to) !== address(envelope.to) || tx.input.toLowerCase() !== envelope.data.toLowerCase() ||
         transactionValue !== quantity(envelope.value) || transactionBlock !== receiptBlock ||
         tx.blockHash.toLowerCase() !== receipt.blockHash.toLowerCase() || beforeNative < afterNative || beforeNative - afterNative < inputAmount ||
         afterOutput < beforeOutput || afterOutput - beforeOutput < minimumOutput || finalizedBlock < receiptBlock)

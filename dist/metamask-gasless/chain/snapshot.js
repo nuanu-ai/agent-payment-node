@@ -1,4 +1,5 @@
 import { keccak256 } from "viem";
+import { MM_ZERO_ADDRESS } from "../model.js";
 import { mmProtocolPins } from "../single-protocol.js";
 import { mmRegistry } from "../registry.js";
 import { mmFail } from "../reasons.js";
@@ -32,13 +33,15 @@ export async function readMetaMaskChainState(call, deployment, owner, block, del
     if (proxyCode === "0x" || keccak256(proxyCode) !== deployment.tokenProxyCodeHash) {
         mmEvidenceFail("mm_gasless_evidence_invalid", "token_proxy_code_pin", "eth_getCode");
     }
-    if (decimals !== 6n)
+    if (decimals !== BigInt(deployment.decimals))
         mmEvidenceFail("mm_gasless_evidence_invalid", "token_decimals", "eth_call");
     const implementationAddress = storageAddress(implementationSlot);
     if (implementationAddress !== deployment.tokenImplementationAddress)
         mmEvidenceFail("mm_gasless_evidence_invalid", "token_implementation_address", "eth_getStorageAt");
-    const implementationCode = rpcHex(await call("eth_getCode", [implementationAddress, pinned]), 256 * 1024);
-    if (implementationCode === "0x" || keccak256(implementationCode) !== deployment.tokenImplementationCodeHash) {
+    // A token that is no proxy pins the zero implementation: its slot reads zero, so it runs only its own pinned runtime.
+    const plain = deployment.tokenImplementationAddress === MM_ZERO_ADDRESS;
+    const implementationCode = plain ? "0x" : rpcHex(await call("eth_getCode", [implementationAddress, pinned]), 256 * 1024);
+    if ((!plain && implementationCode === "0x") || keccak256(implementationCode) !== deployment.tokenImplementationCodeHash) {
         mmEvidenceFail("mm_gasless_evidence_invalid", "token_implementation_code_pin", "eth_getCode");
     }
     const expectedDesignation = `0xef0100${deployment.protocol.delegate.address.slice(2)}`;
@@ -52,7 +55,7 @@ export async function readMetaMaskChainState(call, deployment, owner, block, del
     const common = {
         protocolCodeHashes: Object.fromEntries(protocolPairs),
         tokenProxyCodeHash: keccak256(proxyCode), tokenImplementationAddress: implementationAddress,
-        tokenImplementationCodeHash: keccak256(implementationCode), tokenDecimals: 6,
+        tokenImplementationCodeHash: keccak256(implementationCode), tokenDecimals: deployment.decimals,
         ownerCodeHash: keccak256(ownerCode), designation, usdcBalanceAtomic: balance.toString(),
     };
     return counter === null ? common : { ...common, counterAtomic: counter.toString() };
@@ -71,15 +74,15 @@ export function validateMetaMaskGaslessSnapshot(value, expected) {
             (safeBlock.hash !== headBlock.hash || safeBlock.timestampAtomic !== headBlock.timestampAtomic))) {
         mmEvidenceFail("mm_gasless_evidence_invalid", "snapshot_block_order");
     }
-    const gross = mmUint(expected.grossAtomic, true, "mm_gasless_evidence_invalid"), row = mmRegistry(expected.chainId).row;
+    const gross = mmUint(expected.grossAtomic, true, "mm_gasless_evidence_invalid"), row = mmRegistry(expected.chainId, expected.token).row;
     const safeState = mmEvidenceStateAt("safe", () => validateState(snapshot.safeState, row, expected.feeMode));
     const headState = mmEvidenceStateAt("latest", () => validateState(snapshot.headState, row, expected.feeMode));
-    // Every pin and shape above passed, so a balance below the debit is the owner's USDC shortfall on APN's own reads,
+    // Every pin and shape above passed, so a balance below the debit is the owner's token shortfall on APN's own reads,
     // refused with both numbers; corrupt evidence never reaches this line and stays a protocol refusal.
     for (const [tag, block, state] of [["safe", safeBlock, safeState], ["latest", headBlock, headState]]) {
         const balance = BigInt(state.usdcBalanceAtomic);
         if (balance < gross)
-            throw mmUsdcShortfall(expected.chainId, balance, gross, `at its ${tag} block ${block.numberAtomic}`, { usdc_block_tag: tag, usdc_block_number: block.numberAtomic });
+            throw mmUsdcShortfall(expected.chainId, balance, gross, `at its ${tag} block ${block.numberAtomic}`, { usdc_block_tag: tag, usdc_block_number: block.numberAtomic }, expected.token);
     }
     return { chainId: expected.chainId, endpointHash: expected.endpointHash, endpointOrigin: expected.endpointOrigin,
         observedAt: snapshot.observedAt, safeBlock, headBlock, safeState, headState };
@@ -104,7 +107,7 @@ function validateState(value, row, feeMode) {
     if (mmHex(state.tokenProxyCodeHash, 32, "mm_gasless_evidence_invalid") !== row.tokenProxyCodeHash ||
         mmCanonicalAddress(state.tokenImplementationAddress, "mm_gasless_evidence_invalid") !== row.tokenImplementationAddress ||
         mmHex(state.tokenImplementationCodeHash, 32, "mm_gasless_evidence_invalid") !== row.tokenImplementationCodeHash ||
-        state.tokenDecimals !== 6)
+        state.tokenDecimals !== row.decimals)
         mmEvidenceFail("mm_gasless_evidence_invalid", "snapshot_state_binding");
     if (state.counterAtomic !== "0")
         mmEvidenceFail("mm_gasless_evidence_invalid", "counter", "eth_call");

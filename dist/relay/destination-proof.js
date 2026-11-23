@@ -2,6 +2,7 @@ import { validateRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { verifyDepositObservation } from "./deposit-effect.js";
 import { BNB_NATIVE } from "./quote.js";
 import { relayNativeRouteByReference, RELAY_MEGA_USDM } from "./native-routes.js";
+import { relayTokenRouteByReference } from "./token-routes.js";
 const HASH = /^0x[0-9a-fA-F]{64}$/u;
 const same = (left, right) => left.toLowerCase() === right.toLowerCase();
 const pending = (reason) => ({ status: "pending", reason,
@@ -107,6 +108,21 @@ export async function proveRelayNativeDestination(operation, sourceHash, candida
         return mismatch("native_candidate_hashes_invalid");
     return inspectCandidate(op, sourceHash.toLowerCase(), candidateHashes[0].toLowerCase(), ports, op.destinationChainId);
 }
+/** A token route's credit: one Transfer of the route's pinned destination token to the operation's own recipient, in the
+ * destination token's own decimals, at the destination chain's safe (Polygon: milestone-finalized) checkpoint. */
+export async function proveRelayTokenDestination(operation, sourceHash, candidateHashes, ports) {
+    const op = validateRelayUnsignedOperation(operation), quote = op.tokenQuote;
+    const route = quote === undefined ? null : relayTokenRouteByReference(quote.routeReference);
+    if (!quote || route === null || op.sourceChainId !== route.source.chainId || op.destinationChainId !== route.destination.chainId ||
+        quote.recipient !== op.recipient.toLowerCase() || quote.orderData.output.payments.length !== 1 ||
+        !same(quote.orderData.output.payments[0].currency, route.destination.address) ||
+        !same(quote.orderData.output.payments[0].recipient, op.recipient) || quote.destinationDecimals !== route.destination.decimals ||
+        BigInt(quote.minimumOutputAtomic) < BigInt(op.minOutputAtomic))
+        return mismatch("saved_token_quote_binding");
+    if (!HASH.test(sourceHash) || candidateHashes.length !== 1 || !HASH.test(candidateHashes[0]))
+        return mismatch("token_candidate_hashes_invalid");
+    return inspectCandidate(op, sourceHash.toLowerCase(), candidateHashes[0].toLowerCase(), ports, route.destination.chainId);
+}
 async function inspectCandidate(op, sourceHash, hash, ports, expectedChainId) {
     // One proof per destination chain (OWNR R2): Polygon is always proven at its milestone-finalized checkpoint and the
     // credit is always filtered by this operation's own recipient, whatever the source chain.
@@ -143,7 +159,16 @@ async function inspectCandidate(op, sourceHash, hash, ports, expectedChainId) {
         return pending("destination_not_safe");
     const minimum = BigInt(op.minOutputAtomic);
     let credited, method;
-    if (expectedChainId === 4326) {
+    const tokenRoute = op.tokenQuote === undefined ? null : relayTokenRouteByReference(op.tokenQuote.routeReference);
+    if (op.tokenQuote !== undefined) {
+        if (tokenRoute === null || tokenRoute.destination.chainId !== expectedChainId)
+            return mismatch("saved_token_quote_binding");
+        credited = tokenTransferCredit(receipt, tokenRoute.destination.address, op.recipient);
+        if (credited === null)
+            return unproven("token_credit_missing_or_ambiguous");
+        method = "pinned_erc20_transfer_event";
+    }
+    else if (expectedChainId === 4326) {
         credited = tokenTransferCredit(receipt, RELAY_MEGA_USDM, op.recipient);
         if (credited === null)
             return unproven("mega_token_credit_missing_or_ambiguous");
@@ -163,7 +188,7 @@ async function inspectCandidate(op, sourceHash, hash, ports, expectedChainId) {
         return mismatch("destination_value_below_minimum");
     return { status: "recipient_credit_proven", relayOrderFulfillmentProven: false, paidAcceptance: false, proof: {
             operationId: op.operationId, operationIntegrityHash: op.integrityHash, quoteDigest: op.quoteDigest,
-            orderId: op.nativeQuote?.orderId ?? op.quote.orderId, sourceDepositHash: sourceHash === "" ? null : sourceHash, destinationTransactionHash: hash,
+            orderId: op.tokenQuote?.orderId ?? op.nativeQuote?.orderId ?? op.quote.orderId, sourceDepositHash: sourceHash === "" ? null : sourceHash, destinationTransactionHash: hash,
             destinationBlockNumber: receipt.blockNumber.toString(), destinationBlockHash: receipt.blockHash.toLowerCase(),
             ...(polygonMilestone ? { finalityKind: "polygon_milestone_finalized" } : {}),
             finalityBlockNumber: safe.number.toString(), finalityBlockHash: safe.hash.toLowerCase(),

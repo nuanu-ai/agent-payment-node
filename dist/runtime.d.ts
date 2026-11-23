@@ -50,8 +50,8 @@ import type { FinalizedReader } from "./evm-finalized-proof.js";
 import type { CircleSolanaDeliveryReader } from "./lifi/circle-v2-solana-delivery.js";
 export interface RelayExecutionConfirmationSummary {
     readonly operationId: string;
-    readonly sourceChainId: 1;
-    readonly destinationChainId: 56 | 8453;
+    readonly sourceChainId: number;
+    readonly destinationChainId: number;
     readonly sourceAccount: string;
     readonly sourceToken: string;
     readonly amountAtomic: string;
@@ -62,6 +62,12 @@ export interface RelayExecutionConfirmationSummary {
     readonly quoteDigest: string;
     readonly approvalNetworkFeeCeilingWei: string;
     readonly depositNetworkFeeCeilingWei: string;
+    /** Token routes only: the destination token and each side's decimals. */
+    readonly tokenRoute?: Readonly<{
+        destinationToken: string;
+        sourceDecimals: number;
+        destinationDecimals: number;
+    }>;
 }
 export type RelayExecuteConfirmation = (summary: RelayExecutionConfirmationSummary) => Promise<boolean>;
 export interface RelayExecuteHandler {
@@ -86,6 +92,9 @@ export interface CoreDependencies {
     readonly portfolio?: PortfolioDependencies;
     readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.uniswap.quote";
+    }>>;
+    readonly uniswapBnbRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
+        readonly command: "swap.uniswap-bnb.quote";
     }>>;
     readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
     readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
@@ -164,6 +173,9 @@ export declare class RuntimeContext {
     readonly portfolio?: PortfolioDependencies;
     readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.uniswap.quote";
+    }>>;
+    readonly uniswapBnbRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
+        readonly command: "swap.uniswap-bnb.quote";
     }>>;
     readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
     readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {

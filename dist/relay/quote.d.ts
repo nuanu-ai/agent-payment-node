@@ -81,7 +81,7 @@ export declare function relayStatusLocator(requestId: unknown, endpoint?: unknow
 /** One keyless quote POST, no API key or retry, for the route's own reason prefix. Relay declines a route or amount it
  * will not quote (AMOUNT_TOO_LOW, NO_SWAP_ROUTES_FOUND, AMOUNT_TOO_HIGH) with a 4xx and its own code: a refusal carrying
  * both. No answer, HTTP 429 or 5xx is unavailable; a body that is not JSON is the route's invalid quote. */
-export declare function postRelayQuote(request: Record<string, unknown>, fetcher: typeof fetch, route: "relay_quote" | "relay_native_quote", invalid: (check: string) => never): Promise<unknown>;
+export declare function postRelayQuote(request: Record<string, unknown>, fetcher: typeof fetch, route: "relay_quote" | "relay_native_quote" | "relay_token_quote", invalid: (check: string) => never): Promise<unknown>;
 export interface RelayQuoteTransaction {
     readonly from: string;
     readonly to: string;

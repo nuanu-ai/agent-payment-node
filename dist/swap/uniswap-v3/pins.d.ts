@@ -76,3 +76,5 @@ export declare function verifyCodePins(call: EvmRpcCall, tag: Hex, pins: readonl
     readonly slot: Hex;
     readonly pin: UniswapV3CodePin;
 }): Promise<readonly UniswapV3CodePin[]>;
+/** One pinned runtime: present, within the EIP-170 size and hashing to the pinned code hash, or the quote fails closed. */
+export declare function verifyCodeValue(value: unknown, pin: UniswapV3CodePin): void;

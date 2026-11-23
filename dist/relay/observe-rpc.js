@@ -52,7 +52,9 @@ export class RelayEthereumFinalityRpc {
     /** P2: the finality head is read with the receipt, before the inclusion block; a canonical inclusion block at or
      * below that head is final, so neither header is re-read. */
     async finalizedDeposit(hash) {
-        const guard = this.guardFactory(), finalityTag = this.expectedChainId === 1 ? "finalized" : this.expectedChainId === 8453 ? "safe" : "latest";
+        // Ethereum and Polygon at finalized, Base and Arbitrum at safe, BNB at 15 blocks under the latest head.
+        const guard = this.guardFactory(), finalityTag = this.expectedChainId === 1 || this.expectedChainId === 137 ? "finalized"
+            : this.expectedChainId === 8453 || this.expectedChainId === 42161 ? "safe" : "latest";
         const [chain, rawTx, rawReceipt, rawFinalized] = await this.read(guard, [
             { method: "eth_chainId", params: [] },
             { method: "eth_getTransactionByHash", params: [hash] },
@@ -163,7 +165,8 @@ export class RelayBnbReadOnlyRpc {
         return block(await this.read("eth_getBlockByNumber", [tag, false]), tag);
     }
     async finalityCheckpoint() {
-        if (this.expectedChainId === 56 || this.expectedChainId === 8453 || this.expectedChainId === 4326)
+        if (this.expectedChainId === 1 || this.expectedChainId === 56 || this.expectedChainId === 8453 || this.expectedChainId === 4326 ||
+            this.expectedChainId === 42161)
             return block(await this.read("eth_getBlockByNumber", ["safe", false]), "safe");
         if (this.expectedChainId === 137)
             return this.polygonFinalizedCheckpoint();

@@ -28,17 +28,18 @@ export declare function gaslessCapabilities(profile?: string): {
     provider_networks: {
         local: import("./model.js").GaslessChainId[];
         "metamask-agent-wallet": {
-            chain_id: 1 | 10 | 8453 | 42161 | 137 | 59144 | 143 | 1329;
-            name: string;
-            token: `0x${string}`;
-            symbol: string;
-            decimals: number;
-            rpc_environment: string;
-            finality_tag: "safe" | "finalized";
-            deployment_evidence_hash: string;
             executable_adapter: boolean;
             action_time_verification_required: boolean;
             mainnet_acceptance: string;
+            asset_required?: boolean;
+            chain_id: 1 | 10 | 8453 | 42161 | 137 | 56 | 59144 | 143 | 1329;
+            name: string;
+            token: `0x${string}`;
+            symbol: import("../metamask-gasless/registry.js").MetaMaskGaslessSymbol;
+            decimals: 18 | 6;
+            rpc_environment: string;
+            finality_tag: "safe" | "finalized";
+            deployment_evidence_hash: string;
         }[];
         "metamask-smart-account": {
             chain_id: number;
@@ -72,6 +73,7 @@ export declare function gaslessCapabilities(profile?: string): {
         "metamask-agent-wallet": {
             amount: string;
             fee: string;
+            tokens: string;
             unused_gross_atomic: string;
             refund_atomic: string;
             terminal_states: string[];

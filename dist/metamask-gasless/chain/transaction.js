@@ -1,7 +1,7 @@
 import { getAddress, keccak256, recoverTransactionAddress, serializeTransaction } from "viem";
 import { recoverAuthorizationAddress } from "viem/utils";
 import { exactKeys } from "../../canonical.js";
-import { mmRegistry } from "../registry.js";
+import { mmChainFacts } from "../registry.js";
 import { mmFail } from "../reasons.js";
 import { rpcAddress, rpcHex, rpcQuantity, rpcRecord } from "./abi.js";
 const CURVE_ORDER = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
@@ -102,7 +102,7 @@ async function parseAuthorization(value, intent) {
     const address = rpcAddress(row.address), nonce = safeNumber(rpcQuantity(row.nonce));
     const r = rpcSignatureScalar(row.r), s = rpcSignatureScalar(row.s), yParity = safeNumber(rpcQuantity(row.yParity));
     if (chainId === 0 || chainId !== intent.request.chainId ||
-        address !== mmRegistry(intent.request.chainId).row.protocol.delegate.address || (yParity !== 0 && yParity !== 1)) {
+        address !== mmChainFacts(intent.request.chainId).protocol.delegate.address || (yParity !== 0 && yParity !== 1)) {
         mmFail("mm_gasless_evidence_invalid");
     }
     assertSignatureParts(r, s);

@@ -11,8 +11,10 @@ const LEGACY_IMPLEMENTATION = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a7
 const LEGACY_ADMIN = "0x10d6a54a4754c8869d6886b5f5d7fbfa5b4522237ea5c60d11bc4e7a1ff9390b";
 const TRUE_WORD = `0x${"0".repeat(63)}1`;
 const FEE_FORWARDER_OWNER = getAddress("0x08647cc950813966142a416d40c382e2c5db73bb");
+/** BNB Smart Chain's Diamond runs the same bytecode as Ethereum's and Arbitrum's (read 2026-11-23 at BSC block 135272274). */
 const DIAMOND_HASH = {
     1: "0x828f8a0694bfba25c80a406283f149d701cdc944acbbc18b57315cf157db9220",
+    56: "0x828f8a0694bfba25c80a406283f149d701cdc944acbbc18b57315cf157db9220",
     8453: "0x5efa2ebe1ed041ce83c069f1cedc04945f1438680dacf5f88068ef6c7d94110a",
     42161: "0x828f8a0694bfba25c80a406283f149d701cdc944acbbc18b57315cf157db9220",
 };
@@ -32,7 +34,16 @@ const ACROSS = {
         spoke: code("0xe35e9842fceaCA96570B734083f4a58e8F7C5f2A", "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75"),
         implementation: code("0xcfcda84333431bcc9155f2368b8362f0d1dff8c9", "0xa860f20748abfdf98f4e55411b5db7630457bec1abfb5d88f1ecd5f25b4ec24b"),
     },
-    56: { spoke: code("0x4e8e101924ede233c13e2d8622dc8aed2872d505", "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75") },
+    /**
+     * The BSC AcrossFacetV4 is Ethereum's facet bytecode with its two immutables (SPOKEPOOL, WRAPPED_NATIVE = WBNB) set for
+     * BSC: equal byte for byte once those words are masked. Read 2026-11-23 at BSC block 135272274, with the SpokePool's
+     * EIP-1967 implementation; the Ethereum to BNB composite keeps its own exact pins below.
+     */
+    56: {
+        facet: code("0xAd3f1634a917924cBb54A0F76e43ca035D2B6BCd", "0xc4d421a71c7be08e990bd0b88fdf61afb6ed1b3c60afed6899cad8deebb42e5e"),
+        spoke: code("0x4e8e101924ede233c13e2d8622dc8aed2872d505", "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75"),
+        implementation: code("0xc7b7029373f504949553106c9eb2dafdd48ef086", "0x536bd9288be6c656bfc28f182d249a6483cbaa3c645190eaa71a17ea6aca9dfa"),
+    },
     143: {
         spoke: code("0xd2ecb3afe598b746F8123CaE365a598DA831A449", "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75"),
         implementation: code("0x3266a6de0f3533b042ffdb1a8183168422be7349", "0x67f63f0bce352f1c92ead8a198ebf1b2861659d75524f6a0fc0fdf4cd73fc5c3"),
@@ -59,8 +70,9 @@ export function bridgeDeployment(chainId, peerChainId, tool, token) {
         bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_direction");
     if (tool !== "across" && tool !== "stargateV2")
         bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_tool");
-    if (chainId === 56) {
-        if (peerChainId !== 1 || tool !== "across" || token !== BRIDGE_ZERO_ADDRESS)
+    // Native BNB is reached only by the Ethereum ETH composite; a BSC token leg takes the ordinary path below.
+    if (chainId === 56 && token === BRIDGE_ZERO_ADDRESS) {
+        if (peerChainId !== 1 || tool !== "across")
             bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "bnb_composite_finite_direction");
         const spoke = getAddress("0x4e8e101924ede233c13e2d8622dc8aed2872d505");
         return { chainId, peerChainId, tool, diamond: BRIDGE_DIAMOND, feeForwarder: FEE_FORWARDER, feeRecipient: FEE_RECIPIENT,

@@ -1,4 +1,4 @@
-/** Internal Ethereum Relay source deposit. All money and observation ports are injected. */
+/** Internal Relay ERC-20 source deposit (Ethereum USDC or a token route). All money and observation ports are injected. */
 import { randomBytes } from "node:crypto";
 import { decodeFunctionData, encodeFunctionData, keccak256, parseAbi, parseTransaction, recoverTransactionAddress } from "viem";
 import { canonicalJson, domainHash } from "../canonical.js";
@@ -8,8 +8,8 @@ import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRe
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
-import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, relayStatusLocator } from "./quote.js";
-import { relayExecutionRoute } from "./execution-route.js";
+import { relayStatusLocator } from "./quote.js";
+import { relayErc20Reference, relayErc20SourceLeg } from "./erc20-source-leg.js";
 import { relayEnvelopeFeeAdmitted, relaySignedNonce, verifyApprovalObservation } from "./approval-effect.js";
 const DEPOSIT_ABI = parseAbi(["function depositErc20(address depositor, address token, uint256 amount, bytes32 id)"]);
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
@@ -17,7 +17,7 @@ function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", "Relay de
 function corrupt(reason) { throw new ApnError("APN_STATE_CORRUPT", `Relay deposit effect is invalid: ${reason}.`); }
 function depositBinding(op) {
     return domainHash("apn.relay-deposit-envelope.v1", canonicalJson({ operationId: op.operationId,
-        quoteDigest: op.quoteDigest, deposit: op.quote.deposit }));
+        quoteDigest: op.quoteDigest, deposit: op.tokenQuote?.deposit ?? op.quote.deposit }));
 }
 function depositKey(op) {
     return domainHash("apn.relay-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
@@ -116,21 +116,21 @@ async function verifySignedEnvelope(op, raw, claimedHash, expectedNonce) {
     catch {
         corrupt("signed transaction decode");
     }
-    const expected = op.quote.deposit;
-    if (tx.type !== "eip1559" || tx.chainId !== 1 || !same(signer, op.sourceAccount) ||
+    const leg = relayErc20SourceLeg(op), expected = leg.deposit;
+    if (tx.type !== "eip1559" || tx.chainId !== leg.chainId || !same(signer, op.sourceAccount) ||
         !same(tx.to ?? "", expected.to) || !same(tx.data ?? "0x", expected.data) || (tx.value ?? 0n) !== 0n ||
         tx.gas !== BigInt(expected.gas) || tx.maxFeePerGas !== BigInt(expected.maxFeePerGas) ||
-        tx.maxPriorityFeePerGas !== BigInt(expected.maxPriorityFeePerGas) || tx.nonce === undefined ||
+        (tx.maxPriorityFeePerGas ?? 0n) !== BigInt(expected.maxPriorityFeePerGas) || tx.nonce === undefined ||
         (expectedNonce !== undefined && BigInt(tx.nonce) !== expectedNonce) ||
         (tx.accessList?.length ?? 0) !== 0 || tx.gas * tx.maxFeePerGas > BigInt(op.depositNetworkFeeCeilingWei))
         corrupt("signed envelope drift");
     return signed;
 }
 export function verifyDepositObservation(op, hash, value) {
-    const { transaction: tx, receipt, canonicalBlockHash } = value;
-    if (!same(tx.hash, hash) || !same(receipt.transactionHash, hash) || tx.chainId !== 1 ||
-        !same(tx.from, op.sourceAccount) || !same(tx.to ?? "", ETHEREUM_DEPOSITORY) ||
-        !same(tx.input, op.quote.deposit.data) || tx.value !== 0n || receipt.blockNumber < 0n ||
+    const { transaction: tx, receipt, canonicalBlockHash } = value, leg = relayErc20SourceLeg(op);
+    if (!same(tx.hash, hash) || !same(receipt.transactionHash, hash) || tx.chainId !== leg.chainId ||
+        !same(tx.from, op.sourceAccount) || !same(tx.to ?? "", leg.depository) ||
+        !same(tx.input, leg.deposit.data) || tx.value !== 0n || receipt.blockNumber < 0n ||
         !/^0x[0-9a-fA-F]{64}$/u.test(canonicalBlockHash) || !same(receipt.blockHash, canonicalBlockHash)) {
         corrupt("transaction or canonical inclusion");
     }
@@ -138,8 +138,8 @@ export function verifyDepositObservation(op, hash, value) {
     try {
         const decoded = decodeFunctionData({ abi: DEPOSIT_ABI, data: tx.input });
         if (decoded.functionName !== "depositErc20" || !same(decoded.args[0], op.sourceAccount) ||
-            !same(decoded.args[1], ETHEREUM_USDC) || decoded.args[2] !== BigInt(op.amountAtomic) ||
-            !same(decoded.args[3], op.quote.orderId) ||
+            !same(decoded.args[1], leg.token) || decoded.args[2] !== BigInt(op.amountAtomic) ||
+            !same(decoded.args[3], leg.orderId) ||
             !same(encodeFunctionData({ abi: DEPOSIT_ABI, functionName: "depositErc20", args: [...decoded.args] }), tx.input))
             corrupt("deposit order binding");
     }
@@ -247,22 +247,22 @@ export class RelayDepositEffectService {
     }
     assertEnvelope(op) {
         validateRelayUnsignedOperation(op);
-        relayExecutionRoute(op);
-        const quote = op.quote, deposit = quote?.deposit;
-        if (!quote || !deposit || !op.policyDigest || !op.policyRevision || !op.depositNetworkFeeCeilingWei ||
-            op.sourceChainId !== 1 || quote.quoteDigest !== op.quoteDigest ||
+        relayErc20Reference(op);
+        const leg = relayErc20SourceLeg(op), quote = op.tokenQuote ?? op.quote, deposit = leg.deposit;
+        if (!quote || !op.policyDigest || !op.policyRevision || !op.depositNetworkFeeCeilingWei ||
+            op.sourceChainId !== leg.chainId || quote.quoteDigest !== op.quoteDigest ||
             !quote.statusLocator || !op.statusLocator ||
             relayStatusLocator(quote.statusLocator.requestId, quote.statusLocator.endpoint).requestId !== op.statusLocator.requestId ||
-            !same(deposit.from, op.sourceAccount) || !same(deposit.to, ETHEREUM_DEPOSITORY) || deposit.chainId !== 1 ||
-            !same(quote.paymentDetails.depository, ETHEREUM_DEPOSITORY) || deposit.value !== "0" ||
+            !same(deposit.from, op.sourceAccount) || !same(deposit.to, leg.depository) || deposit.chainId !== leg.chainId ||
+            !same(quote.paymentDetails.depository, leg.depository) || deposit.value !== "0" ||
             BigInt(deposit.gas) * BigInt(deposit.maxFeePerGas) > BigInt(op.depositNetworkFeeCeilingWei) ||
             BigInt(deposit.maxPriorityFeePerGas) > BigInt(deposit.maxFeePerGas))
             blocked("saved_deposit_envelope");
         try {
             const decoded = decodeFunctionData({ abi: DEPOSIT_ABI, data: deposit.data });
             if (decoded.functionName !== "depositErc20" || !same(decoded.args[0], op.sourceAccount) ||
-                !same(decoded.args[1], ETHEREUM_USDC) || decoded.args[2] !== BigInt(op.amountAtomic) ||
-                !same(decoded.args[3], quote.orderId) ||
+                !same(decoded.args[1], leg.token) || decoded.args[2] !== BigInt(op.amountAtomic) ||
+                !same(decoded.args[3], leg.orderId) ||
                 !same(encodeFunctionData({ abi: DEPOSIT_ABI, functionName: "depositErc20", args: [...decoded.args] }), deposit.data))
                 blocked("saved_deposit_order_binding");
         }
@@ -285,12 +285,11 @@ export class RelayDepositEffectService {
             blocked("active_policy_or_owner");
         if (!same(await this.ports.publicAccount(profile) ?? "", op.sourceAccount))
             blocked("public_owner");
-        const admission = evaluateAssetPolicy(active.registry, { chain: "eip155:1",
-            asset: { kind: "token", identifier: ETHEREUM_USDC }, rail: "bridge", amountAtomic: op.amountAtomic,
+        const leg = relayErc20SourceLeg(op), mechanism = { provider: "relay", reference: relayErc20Reference(op) };
+        const admission = evaluateAssetPolicy(active.registry, { chain: leg.chain,
+            asset: { kind: "token", identifier: leg.token }, rail: "bridge", amountAtomic: op.amountAtomic,
             dailyUsageAtomic: await this.ports.dailyUsage(op.sourceAccount, now),
-            asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString(),
-            mechanism: { provider: "relay", reference: relayExecutionRoute(op) } });
-        const mechanism = { provider: "relay", reference: relayExecutionRoute(op) };
+            asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString(), mechanism });
         if (!bridgeMechanismAdmitted(admission, mechanism))
             blocked("route_pin");
         assertRecipientAdmitted({ admission, mechanism, recipient: op.recipient });
@@ -299,9 +298,9 @@ export class RelayDepositEffectService {
             execution.operationIntegrityHash !== op.integrityHash || execution.quoteDigest !== op.quoteDigest)
             blocked("saved_request_id_execution_admission_required");
         const funding = await this.ports.funding(op);
-        if (funding.chainId !== 1 || funding.nativeBalanceWei < BigInt(op.depositNetworkFeeCeilingWei) ||
+        if (funding.chainId !== leg.chainId || funding.nativeBalanceWei < BigInt(op.depositNetworkFeeCeilingWei) ||
             funding.tokenBalanceAtomic < BigInt(op.amountAtomic) || funding.allowanceAtomic < BigInt(op.amountAtomic) ||
-            !relayEnvelopeFeeAdmitted(funding.baseFeePerGasWei, op.quote.deposit) ||
+            !relayEnvelopeFeeAdmitted(funding.baseFeePerGasWei, leg.deposit) ||
             funding.nextNonce < 0n)
             blocked("source_funding_or_fee");
         const after = this.ports.now();

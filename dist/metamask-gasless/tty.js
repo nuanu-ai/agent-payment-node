@@ -9,15 +9,18 @@ export class TtyMetaMaskGaslessApproval {
     }
     async confirm(input) {
         const s = input.summary, t = s.transfer;
-        const usdc = (amount) => `${mmFormat(amount)} USDC (${amount} atomic)`;
+        // Every amount at the transfer token's own scale and symbol (USDC 6, chain 56 USDT and USDC 18).
+        const usdc = (amount) => `${mmFormat(amount, t.decimals)} ${t.symbol} (${amount} atomic)`;
         const beside = input.summary.unresolved_beside;
         const siblings = beside === undefined ? [] : [...beside.operations.map(other => `Earlier unresolved transfer: operation ` +
-                `${other.operation_id}; state ${other.state}; recipient ${other.recipient}; dispatched gross ${usdc(other.dispatched_gross_atomic)}`),
+                `${other.operation_id}; state ${other.state}; recipient ${other.recipient}; dispatched gross ${other.symbol === undefined ||
+                    other.decimals === undefined ? usdc(other.dispatched_gross_atomic) : `${mmFormat(other.dispatched_gross_atomic, other.decimals)} ${other.symbol} ` +
+                    `(${other.dispatched_gross_atomic} atomic)`}`),
             beside.warning];
-        const lines = ["Agent Payment Node — MetaMask gasless USDC approval",
+        const lines = [`Agent Payment Node — MetaMask gasless ${t.symbol} approval`,
             `Profile: ${s.profile}; provider: metamask-agent-wallet; custody: provider-managed server wallet`,
             `Chain: eip155:${t.chain_id}; network: ${String(input.summary.network)}`,
-            `USDC contract: ${t.token}; decimals: 6`, `Sender: ${t.sender}`, `Recipient: ${t.recipient}`,
+            `${t.symbol} contract: ${t.token}; decimals: ${t.decimals}`, `Sender: ${t.sender}`, `Recipient: ${t.recipient}`,
             `Fee recipient: ${t.fee_recipient}`,
             ...(t.requested_fixed_net_atomic === undefined ? [] : [
                 `Fixed recipient net: ${usdc(t.requested_fixed_net_atomic)}`,

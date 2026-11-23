@@ -1,6 +1,6 @@
 import { type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { SecureStateStore } from "../secure-state-store.js";
-import type { RelayQuoteTransaction } from "./quote.js";
+import type { RelayErc20Envelope } from "./erc20-source-leg.js";
 export type RelayEffectRole = "approval" | "deposit";
 export type RelayEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "confirmed" | "failed" | "abandoned_unsent";
 /** Every phase of a token-lane effect, and the observed ones no transition leaves (a confirmed approval is followed by its deposit). */
@@ -26,8 +26,8 @@ export interface RelayEffectJournal {
     readonly sourceOwner: string;
     readonly quoteDigest: string;
     readonly orderId: string;
-    readonly approvalEnvelope: RelayQuoteTransaction;
-    readonly depositEnvelope: RelayQuoteTransaction;
+    readonly approvalEnvelope: RelayErc20Envelope;
+    readonly depositEnvelope: RelayErc20Envelope;
     readonly effects: readonly [RelayEffect, RelayEffect];
     readonly createdAt: string;
     readonly integrityHash: string;

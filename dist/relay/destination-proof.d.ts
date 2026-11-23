@@ -91,3 +91,6 @@ export declare function proveRelayBnbDestination(input: Readonly<{
 export declare function proveRelayBaseDestination(operation: RelayUnsignedOperation, candidateHashes: readonly string[], ports: RelayBnbProofPorts): Promise<RelayBnbProofResult>;
 /** A provider candidate is only a discovery hint; even a real native credit is not causal proof. */
 export declare function proveRelayNativeDestination(operation: RelayUnsignedOperation, sourceHash: string, candidateHashes: readonly string[], ports: RelayBnbProofPorts): Promise<RelayBnbProofResult>;
+/** A token route's credit: one Transfer of the route's pinned destination token to the operation's own recipient, in the
+ * destination token's own decimals, at the destination chain's safe (Polygon: milestone-finalized) checkpoint. */
+export declare function proveRelayTokenDestination(operation: RelayUnsignedOperation, sourceHash: string, candidateHashes: readonly string[], ports: RelayBnbProofPorts): Promise<RelayBnbProofResult>;

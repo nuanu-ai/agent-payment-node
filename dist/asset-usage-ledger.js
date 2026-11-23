@@ -19,12 +19,16 @@ export class AssetUsageLedger extends SecureStateStore {
     /** Relay and this ledger hash idempotency keys in separate domains. Hold the
      * exact source asset bucket lock through the caller's retirement write. */
     async withNoMatchingRelayReservation(account, policyDigest, amountAtomic, action, sourceChainId = 1, allowFailedBeforeEffectReservationId) {
-        if (policyDigest !== undefined)
-            digest(policyDigest, "Policy digest");
-        const identity = validateIdentity(sourceChainId !== 1
+        return this.withNoMatchingRelayReservationIn(sourceChainId !== 1
             ? { account: getAddress(account), chain: `eip155:${sourceChainId}`, asset: { kind: "native", identifier: null } }
             : { account: getAddress(account), chain: "eip155:1",
-                asset: { kind: "token", identifier: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" } });
+                asset: { kind: "token", identifier: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" } }, policyDigest, amountAtomic, action, allowFailedBeforeEffectReservationId);
+    }
+    /** The same guard over an explicit source bucket (a Relay token route's own chain and source token). */
+    async withNoMatchingRelayReservationIn(bucket, policyDigest, amountAtomic, action, allowFailedBeforeEffectReservationId) {
+        if (policyDigest !== undefined)
+            digest(policyDigest, "Policy digest");
+        const identity = validateIdentity(bucket);
         await this.ready();
         return this.withLocks([this.bucketLock(identity)], async () => {
             const records = await this.loadBucket(identity);

@@ -19,6 +19,6 @@ export declare class RelayRetireService {
         readonly operationId: string;
     }): Promise<import("../relay-unsigned-operation.js").PublicRelayUnsignedOperation>;
     private abandonConsent;
-    /** Ethereum and Arbitrum token lanes. The principal hold is released only after the source state is re-proven. */
+    /** Ethereum USDC, token-route and Arbitrum lanes. The principal hold is released only after the source state is re-proven. */
     private retireTokenLane;
 }

@@ -55,7 +55,7 @@ export declare class BridgeService {
                     tools: string[];
                     approval: "standard" | "zero_first";
                     transfer_fee: "none" | "tether_fee_zero";
-                    listing: "frozen_list" | "legacy_pinned";
+                    listing: "frozen_list" | "legacy_pinned" | "reviewed_supplement";
                     peers: string[];
                 }[];
             }[];
@@ -307,6 +307,11 @@ export declare class BridgeService {
         provider_observation: import("./model.js").BridgeProviderObservation | null;
         residual_allowance: import("./model.js").BridgeResidualAllowance | null;
         asset_bounds?: {
+            scaled_precision?: {
+                finer_decimals: number;
+                token_loss_bound_source_atomic: string;
+                rounding: "loss_rounded_up_to_source_atomic";
+            };
             binding: "intent.materialization.request";
             same_denomination: boolean;
             source: {
@@ -535,6 +540,11 @@ export declare class BridgeService {
         provider_observation: import("./model.js").BridgeProviderObservation | null;
         residual_allowance: import("./model.js").BridgeResidualAllowance | null;
         asset_bounds?: {
+            scaled_precision?: {
+                finer_decimals: number;
+                token_loss_bound_source_atomic: string;
+                rounding: "loss_rounded_up_to_source_atomic";
+            };
             binding: "intent.materialization.request";
             same_denomination: boolean;
             source: {

@@ -5,28 +5,30 @@ import { evmRpcBlock, evmRpcHex, evmRpcQuantity, recheckEvmBlock } from "../../e
 import { parseAtomic } from "../../money.js";
 import { swapMechanismDigest } from "../pin.js";
 import { createSwapQuote } from "../quote.js";
-import { UNISWAP_CHAIN, UNISWAP_ROUTER } from "../uniswap-pin.js";
-import { encodeUniswapV3ExactInput } from "./encoder.js";
+import { ETHEREUM_UNISWAP_NATIVE_LANE } from "./native-lane.js";
 import { readUniswapV3Quote } from "./onchain.js";
-import { ETHEREUM_WBTC, UNISWAP_WBTC_MECHANISM_PIN, UNISWAP_V3_KEYLESS_MECHANISM_PIN, uniswapV3Pair } from "./pins.js";
+import { ETHEREUM_WBTC } from "./pins.js";
 import { SavedUniswapQuoteStore, UNISWAP_KEYLESS_EXECUTION_SCHEMA, uniswapEvidenceHash, uniswapGasDisplay } from "./material.js";
 import { nativeReads } from "./native-rpc.js";
-const MAX_HEAD_DRIFT = 64, GAS_MARGIN_NUMERATOR = 5n, GAS_MARGIN_DENOMINATOR = 4n;
+const GAS_MARGIN_NUMERATOR = 5n, GAS_MARGIN_DENOMINATOR = 4n;
 /**
- * Keyless read-only builder: price, output, slippage floor and impact come from the pinned pool and QuoterV2 by eth_call;
- * the Universal Router calldata is encoded locally and simulated at the same block. No API key or off-chain quote is used.
+ * Keyless read-only builder of one native-input lane: price, output, slippage floor and impact come from the pinned pool
+ * and QuoterV2 by eth_call; the lane's router calldata is encoded locally and simulated at the same block. No API key or
+ * off-chain quote is used.
  */
-export class KeylessUniswapQuoteBuilder {
+export class UniswapNativeQuoteBuilder {
+    lane;
     call;
     quotes;
     verifyPins;
-    constructor(call, quotes, verifyPins) {
+    constructor(lane, call, quotes, verifyPins) {
+        this.lane = lane;
         this.call = call;
         this.quotes = quotes;
         this.verifyPins = verifyPins;
     }
     async quote(input) {
-        const request = validateRequest(input), now = Math.floor(input.now.getTime() / 1000);
+        const lane = this.lane, request = validateRequest(input, lane), now = Math.floor(input.now.getTime() / 1000);
         if (request.deadline <= now || request.deadline - now > 1_800)
             invalid("Uniswap quote deadline must be in the next 30 minutes.");
         const grouped = this.call.batch !== undefined;
@@ -45,7 +47,7 @@ export class KeylessUniswapQuoteBuilder {
         }
         const baseFee = evmRpcQuantity(block.raw.baseFeePerGas);
         const codePins = await this.verifyPins(this.call, block.tag), pair = request.pair;
-        const pool = await readUniswapV3Quote(this.call, pair, request.amount, block.tag);
+        const pool = await readUniswapV3Quote(this.call, pair, request.amount, block.tag, lane);
         if (pool.priceImpactBps > request.ownerSlippageCapBps)
             blocked("Pool price impact exceeds the owner slippage cap.", "uniswap_price_impact");
         const expected = BigInt(pool.amountOutAtomic), minimum = (expected * BigInt(10_000 - request.slippageBps) + 9999n) / 10000n;
@@ -53,9 +55,9 @@ export class KeylessUniswapQuoteBuilder {
             blocked("WBTC acquisition requires at least 1000 atomic output.", "uniswap_wbtc_output_floor");
         if (minimum <= 0n)
             blocked("Uniswap output floor is zero.", "uniswap_output_floor");
-        const encoded = encodeUniswapV3ExactInput({ recipient: request.recipient, inputAmountAtomic: request.amount.toString(),
+        const encoded = lane.encode({ recipient: request.recipient, inputAmountAtomic: request.amount.toString(),
             minimumOutputAtomic: minimum.toString(), deadline: request.deadline, pair });
-        const tx = { from: request.account, to: UNISWAP_ROUTER, data: encoded.data, value: `0x${request.amount.toString(16)}` };
+        const tx = { from: request.account, to: lane.router, data: encoded.data, value: `0x${request.amount.toString(16)}` };
         let callResult, gasEstimate;
         let groupedBalance;
         try {
@@ -77,13 +79,16 @@ export class KeylessUniswapQuoteBuilder {
                 !(error.code === "APN_RPC_PROTOCOL" && error.details?.rpcSubcallId !== undefined &&
                     (error.details?.rpcMethod === "eth_call" || error.details?.rpcMethod === "eth_estimateGas")))
                 throw error;
-            return blocked("Exact Universal Router simulation reverted or was unavailable.", "uniswap_simulation");
+            return blocked(`Exact ${lane.routerLabel} simulation reverted or was unavailable.`, "uniswap_simulation");
         }
         const gasLimit = (gasEstimate * GAS_MARGIN_NUMERATOR + GAS_MARGIN_DENOMINATOR - 1n) / GAS_MARGIN_DENOMINATOR;
         if (gasLimit > request.maxGasLimit)
             blocked("Simulated gas with margin exceeds the owner gas cap.", "uniswap_gas_cap");
         if (baseFee + request.maxPriorityFeePerGas > request.maxFeePerGas)
             blocked("Owner fee cap is below the current base fee plus priority fee.", "uniswap_fee_cap");
+        // BNB Smart Chain charges no base fee, so a zero tip is a zero price that validators never include.
+        if (baseFee + request.maxPriorityFeePerGas === 0n)
+            blocked("A zero total gas price never lands; set a positive priority fee.", "uniswap_zero_gas_price");
         const balance = evmRpcQuantity(grouped ? groupedBalance : await this.call("eth_getBalance", [request.account, block.tag]));
         if (balance < request.amount + gasLimit * request.maxFeePerGas)
             blocked("Account balance does not cover input plus the maximum network fee.", "uniswap_native_balance");
@@ -105,26 +110,26 @@ export class KeylessUniswapQuoteBuilder {
             head = await evmRpcBlock(this.call, "latest");
         }
         const drift = BigInt(head.number) - BigInt(block.number);
-        if (drift < 0n || drift > BigInt(MAX_HEAD_DRIFT))
+        if (drift < 0n || drift > BigInt(lane.maxHeadDrift))
             blocked("Quote block is outside the allowed head drift.", "uniswap_head_drift");
-        // Chain 1 was proved at the start of this quote on the same transport; the re-read block hash binds the same chain.
-        const envelope = { from: request.account, to: UNISWAP_ROUTER, data: encoded.data,
-            value: request.amount.toString(), gasLimit: gasLimit.toString(), chainId: 1, maxFeePerGas: request.maxFeePerGas.toString(),
+        // The lane's chain was proved at the start of this quote on the same transport; the re-read block hash binds the same chain.
+        const envelope = { from: request.account, to: lane.router, data: encoded.data,
+            value: request.amount.toString(), gasLimit: gasLimit.toString(), chainId: lane.chainId, maxFeePerGas: request.maxFeePerGas.toString(),
             maxPriorityFeePerGas: request.maxPriorityFeePerGas.toString() };
-        const evidence = { chainId: 1, blockNumber: block.number, blockHash: block.hash, baseFeePerGas: baseFee.toString(),
+        const evidence = { chainId: lane.chainId, blockNumber: block.number, blockHash: block.hash, baseFeePerGas: baseFee.toString(),
             accountBalanceWei: balance.toString(), codePins, pool };
-        const simulationRequest = { chainId: 1, blockNumber: block.number, blockHash: block.hash, transaction: tx };
+        const simulationRequest = { chainId: lane.chainId, blockNumber: block.number, blockHash: block.hash, transaction: tx };
         const simulationResult = { callResult, gasEstimate: gasEstimate.toString(), blockNumber: block.number, blockHash: block.hash, headBlockNumber: head.number };
         const quote = createSwapQuote({ profile: request.profile, account: request.account, recipient: request.recipient,
-            sourceAsset: { chain: UNISWAP_CHAIN, kind: "native", identifier: null },
-            destinationAsset: { chain: UNISWAP_CHAIN, kind: "token", identifier: pair.outputToken },
+            sourceAsset: { chain: lane.chain, kind: "native", identifier: null },
+            destinationAsset: { chain: lane.chain, kind: "token", identifier: pair.outputToken },
             inputAmountAtomic: request.amount.toString(), expectedOutputAtomic: expected.toString(), minimumOutputAtomic: minimum.toString(),
             slippageBps: request.slippageBps, effectiveAt: input.now.toISOString(), expiresAt: new Date(request.deadline * 1000).toISOString(),
             providerResponseHash: uniswapEvidenceHash(evidence), routeHash: encoded.route.routeHash,
             unsignedTransactionPayloadHash: sha256(canonicalJson(envelope)),
             simulation: { requestHash: domainHash("apn.uniswap-simulation-request.v1", canonicalJson(simulationRequest)),
                 resultHash: domainHash("apn.uniswap-simulation-result.v1", canonicalJson(simulationResult)), success: true,
-                blockNumber: block.number, blockHash: block.hash, headBlockNumber: head.number, maxHeadDrift: MAX_HEAD_DRIFT,
+                blockNumber: block.number, blockHash: block.hash, headBlockNumber: head.number, maxHeadDrift: lane.maxHeadDrift,
                 gasEstimate: gasEstimate.toString() } });
         const material = { quote, approvalCapAtomic: "0", gasOrEnergy: uniswapGasDisplay(envelope),
             execution: { schemaVersion: UNISWAP_KEYLESS_EXECUTION_SCHEMA, envelope, deadline: request.deadline, evidence } };
@@ -134,7 +139,7 @@ export class KeylessUniswapQuoteBuilder {
                 blockHash: block.hash, sqrtPriceX96: pool.sqrtPriceX96, spotOutputPerEthAtomic: pool.spotOutputPerEthAtomic,
                 expectedOutputAtomic: expected.toString(), minimumOutputAtomic: minimum.toString(), slippageBps: request.slippageBps,
                 priceImpactBps: pool.priceImpactBps, outputSymbol: pair.outputSymbol, outputDecimals: pair.outputDecimals },
-            mechanism: { pin: pair.outputToken === ETHEREUM_WBTC ? UNISWAP_WBTC_MECHANISM_PIN : UNISWAP_V3_KEYLESS_MECHANISM_PIN, digest: swapMechanismDigest(pair.outputToken === ETHEREUM_WBTC ? UNISWAP_WBTC_MECHANISM_PIN : UNISWAP_V3_KEYLESS_MECHANISM_PIN) },
+            mechanism: { pin: lane.mechanismPin(pair), digest: swapMechanismDigest(lane.mechanismPin(pair)) },
             codePins: codePins.map((pin) => ({ role: pin.role, address: pin.address, codeHash: pin.codeHash })), signed: false, broadcast: false };
     }
     async load(quoteHash) { return await this.quotes.load(quoteHash); }
@@ -142,14 +147,20 @@ export class KeylessUniswapQuoteBuilder {
         this.checkChain(await this.call("eth_chainId", []));
     }
     checkChain(value) {
-        if (evmRpcQuantity(value) !== 1n)
-            throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap requires exact Ethereum chain 1 RPC.");
+        if (evmRpcQuantity(value) !== BigInt(this.lane.chainId))
+            throw new ApnError("APN_CHAIN_MISMATCH", `Uniswap requires exact ${this.lane.networkName} chain ${this.lane.chainId} RPC.`);
     }
 }
-function validateRequest(input) {
+/** The Ethereum mainnet lane: native ETH through Universal Router 2.2.0 into USDC, USDT or separately admitted WBTC. */
+export class KeylessUniswapQuoteBuilder extends UniswapNativeQuoteBuilder {
+    constructor(call, quotes, verifyPins) {
+        super(ETHEREUM_UNISWAP_NATIVE_LANE, call, quotes, verifyPins);
+    }
+}
+function validateRequest(input, lane) {
     if (!(input.now instanceof Date) || !Number.isFinite(input.now.getTime()))
         invalid("Uniswap quote time is invalid.");
-    const account = canonical(input.account), recipient = canonical(input.recipient), pair = uniswapV3Pair(canonical(input.outputToken));
+    const account = canonical(input.account), recipient = canonical(input.recipient), pair = lane.pair(canonical(input.outputToken));
     if (!Number.isSafeInteger(input.slippageBps) || !Number.isSafeInteger(input.ownerSlippageCapBps) || input.slippageBps < 0 ||
         input.ownerSlippageCapBps < 0 || input.ownerSlippageCapBps > 10_000 || input.slippageBps > input.ownerSlippageCapBps ||
         input.slippageBps >= 10_000)

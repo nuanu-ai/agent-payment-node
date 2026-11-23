@@ -184,6 +184,19 @@ export type CommandRequest = {
     readonly minOutputAtomic: string;
     readonly maxDepositNetworkFeeWei: string;
     readonly idempotencyKey: string;
+} | {
+    readonly command: "relay.token.prepare";
+    readonly profile: string;
+    readonly sourceChain: string;
+    readonly asset: string;
+    readonly destinationChain: string;
+    readonly destinationAsset: string;
+    readonly recipient: string;
+    readonly amountAtomic: string;
+    readonly minOutputAtomic: string;
+    readonly maxApprovalNetworkFeeWei: string;
+    readonly maxDepositNetworkFeeWei: string;
+    readonly idempotencyKey: string;
 }
 /** `relay execute` and `relay observe` before the saved operation names their route (relay/command-route.ts). */
  | {
@@ -259,6 +272,29 @@ export type CommandRequest = {
     readonly idempotencyKey: string;
 } | {
     readonly command: "swap.uniswap.status" | "swap.uniswap.approve" | "swap.uniswap.execute";
+    readonly operationId: string;
+} | {
+    readonly command: "swap.uniswap-bnb.inventory";
+} | {
+    readonly command: "swap.uniswap-bnb.quote";
+    readonly profile: string;
+    readonly account: string;
+    readonly recipient: string;
+    readonly outputToken: string;
+    readonly amountAtomic: string;
+    readonly slippageBps: number;
+    readonly ownerSlippageCapBps: number;
+    readonly deadline: number;
+    readonly maxGasLimit: string;
+    readonly maxFeePerGas: string;
+    readonly maxPriorityFeePerGas: string;
+} | {
+    readonly command: "swap.uniswap-bnb.prepare";
+    readonly profile: string;
+    readonly quoteHash: string;
+    readonly idempotencyKey: string;
+} | {
+    readonly command: "swap.uniswap-bnb.status" | "swap.uniswap-bnb.approve" | "swap.uniswap-bnb.execute";
     readonly operationId: string;
 } | {
     readonly command: "swap.uniswap-token.inventory";
@@ -437,10 +473,13 @@ export type CommandRequest = {
 } | {
     readonly command: "gasless.capabilities";
     readonly profile?: string;
-} | {
+}
+/** `asset`: the MetaMask server-wallet transfer token, required on chain 56 (USDT or USDC); no other provider takes one. */
+ | {
     readonly command: "gasless.balance";
     readonly profile: string;
     readonly chainId: GaslessCommandChainId;
+    readonly asset?: Address;
 } | {
     readonly command: "gasless.transfer.quote";
     readonly profile: string;
@@ -452,6 +491,7 @@ export type CommandRequest = {
     readonly profile: string;
     readonly request: GaslessCommandRequest;
     readonly idempotencyKey: string;
+    readonly asset?: Address;
 } | {
     readonly command: "gasless.transfer.approve" | "gasless.transfer.approve-sealed" | "gasless.transfer.revoke";
     readonly operationId: string;

@@ -2,7 +2,7 @@ import { mmAssertStableQuote, mmEconomics, mmQuote } from "./economics.js";
 import { mmRegistry } from "./registry.js";
 import { mmFail } from "./reasons.js";
 export async function metaMaskGaslessQuote(provider, binding, request, rpcUrl, clock) {
-    const { gross, initialNet } = mmEconomics(request), token = mmRegistry(request.chainId).row.token;
+    const { gross, initialNet } = mmEconomics(request), token = mmRegistry(request.chainId, request.token).row.token;
     let netAtomic = initialNet.toString();
     for (let attempt = 0; attempt < 3; attempt++) {
         clock.check();

@@ -14,6 +14,8 @@ export class TtyRelayExecuteConfirmation {
     }
     async confirm(summary) {
         const expiresAt = new Date(Math.min(Date.parse(summary.deadline), Date.now() + TTY_APPROVAL_DEADLINE_MS)).toISOString();
+        if (summary.tokenRoute !== undefined)
+            return this.confirmTokenRoute(summary, summary.tokenRoute, expiresAt);
         try {
             await exactChainConsent([
                 "Agent Payment Node Relay Ethereum source execution",
@@ -39,7 +41,36 @@ export class TtyRelayExecuteConfirmation {
             throw error;
         }
     }
+    /** A token route names both tokens and both decimals: the amount and the minimum are each atomic in their own token. */
+    async confirmTokenRoute(summary, route, expiresAt) {
+        try {
+            await exactChainConsent([
+                "Agent Payment Node Relay token-route source execution",
+                `Operation: ${summary.operationId}`,
+                `Source chain: ${RELAY_CHAIN_NAMES[summary.sourceChainId] ?? "EVM"} (eip155:${summary.sourceChainId})`,
+                `Destination chain: ${RELAY_CHAIN_NAMES[summary.destinationChainId] ?? "EVM"} (eip155:${summary.destinationChainId})`,
+                `Source account: ${summary.sourceAccount}`,
+                `Source token: ${summary.sourceToken} (${route.sourceDecimals} decimals)`,
+                `Amount: ${summary.amountAtomic} source token atomic`,
+                `Recipient: ${summary.recipient}`,
+                `Destination token: ${route.destinationToken} (${route.destinationDecimals} decimals)`,
+                `Minimum output: ${summary.minOutputAtomic} destination token atomic`,
+                `Quote deadline: ${summary.deadline}`,
+                `Approval network fee ceiling: ${summary.approvalNetworkFeeCeilingWei} wei`,
+                `Deposit network fee ceiling: ${summary.depositNetworkFeeCeilingWei} wei`,
+                `Quote digest: ${summary.quoteDigest}`,
+                "This confirms the source-chain approval and deposit effects only; destination delivery is separate.",
+            ], approvalCode("bridge", summary.operationId, summary.quoteDigest), expiresAt, this.options);
+            return true;
+        }
+        catch (error) {
+            if (error instanceof ApnError && error.code === "APN_NATIVE_REJECTED")
+                return false;
+            throw error;
+        }
+    }
 }
+const RELAY_CHAIN_NAMES = { 1: "Ethereum", 56: "BNB Smart Chain", 137: "Polygon", 8453: "Base", 42161: "Arbitrum One" };
 /** The challenge identifies the single Arbitrum ERC20 approval and its exact saved quote. */
 export class TtyRelayArbitrumApprovalConfirmation {
     options;

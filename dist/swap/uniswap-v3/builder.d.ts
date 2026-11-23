@@ -1,5 +1,6 @@
 import type { EvmRpcCall } from "../../evm-ports.js";
 import type { GuardedSwapReadOnlyBuilder } from "../runtime.js";
+import { type UniswapNativeLane } from "./native-lane.js";
 import { type UniswapV3PinVerifier } from "./pins.js";
 import { SavedUniswapQuoteStore, type UniswapKeylessMaterial } from "./material.js";
 export interface UniswapKeylessQuoteRequest {
@@ -16,18 +17,24 @@ export interface UniswapKeylessQuoteRequest {
     readonly maxPriorityFeePerGas: string;
 }
 /**
- * Keyless read-only builder: price, output, slippage floor and impact come from the pinned pool and QuoterV2 by eth_call;
- * the Universal Router calldata is encoded locally and simulated at the same block. No API key or off-chain quote is used.
+ * Keyless read-only builder of one native-input lane: price, output, slippage floor and impact come from the pinned pool
+ * and QuoterV2 by eth_call; the lane's router calldata is encoded locally and simulated at the same block. No API key or
+ * off-chain quote is used.
  */
-export declare class KeylessUniswapQuoteBuilder implements GuardedSwapReadOnlyBuilder<UniswapKeylessQuoteRequest> {
+export declare class UniswapNativeQuoteBuilder implements GuardedSwapReadOnlyBuilder<UniswapKeylessQuoteRequest> {
+    private readonly lane;
     private readonly call;
     private readonly quotes;
     private readonly verifyPins;
-    constructor(call: EvmRpcCall, quotes: SavedUniswapQuoteStore, verifyPins: UniswapV3PinVerifier);
+    constructor(lane: UniswapNativeLane, call: EvmRpcCall, quotes: SavedUniswapQuoteStore, verifyPins: UniswapV3PinVerifier);
     quote(input: UniswapKeylessQuoteRequest & {
         readonly now: Date;
     }): Promise<unknown>;
     load(quoteHash: string): Promise<UniswapKeylessMaterial | null>;
     private assertChain;
     private checkChain;
+}
+/** The Ethereum mainnet lane: native ETH through Universal Router 2.2.0 into USDC, USDT or separately admitted WBTC. */
+export declare class KeylessUniswapQuoteBuilder extends UniswapNativeQuoteBuilder {
+    constructor(call: EvmRpcCall, quotes: SavedUniswapQuoteStore, verifyPins: UniswapV3PinVerifier);
 }

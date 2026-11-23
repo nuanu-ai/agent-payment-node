@@ -1,6 +1,6 @@
 import { encodeFunctionData, parseAbi } from "viem";
 import { hashObject } from "../canonical.js";
-import { MM_ZERO_ADDRESS } from "./model.js";
+import { MM_TOKEN_DECIMALS, MM_ZERO_ADDRESS } from "./model.js";
 import { mmRegistry } from "./registry.js";
 import { mmRecordedDeployment } from "./recorded.js";
 import { mmFail } from "./reasons.js";
@@ -26,7 +26,7 @@ export function mmQuoteHash(quote) {
         ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode, sponsorshipHash: quote.sponsorshipHash } : {}) });
 }
 /** Validate each quote independently; convergence and final G=N+F are separate checks. */
-export function mmQuote(value, request, binding, requestedNet, reason = "mm_gasless_quote_invalid", row = mmRegistry(request.chainId).row) {
+export function mmQuote(value, request, binding, requestedNet, reason = "mm_gasless_quote_invalid", row = mmRegistry(request.chainId, request.token).row) {
     const sponsored = value !== null && typeof value === "object" && "feeMode" in value;
     const q = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash",
         ...(sponsored ? ["feeMode", "sponsorshipHash"] : [])], reason);
@@ -74,7 +74,7 @@ export function mmAssertStableQuote(request, quote, reason = "mm_gasless_quote_i
  * The owner approves a maximum, not one exact price. A quote taken after that approval is admissible when its fee
  * stays inside the effective cap, the recipient still clears the floor and the gross still splits exactly.
  */
-export function mmRepriceWithinCap(value, request, binding, reason = "mm_gasless_quote_invalid", row = mmRegistry(request.chainId).row) {
+export function mmRepriceWithinCap(value, request, binding, reason = "mm_gasless_quote_invalid", row = mmRegistry(request.chainId, request.token).row) {
     const candidate = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash",
         ...(value !== null && typeof value === "object" && "feeMode" in value ? ["feeMode", "sponsorshipHash"] : [])], reason);
     const netAtomic = typeof candidate.netAtomic === "string" ? candidate.netAtomic : mmFail(reason);
@@ -82,7 +82,7 @@ export function mmRepriceWithinCap(value, request, binding, reason = "mm_gasless
     mmAssertStableQuote(request, quote, reason);
     return quote;
 }
-export function mmPolicyHash(profileHash, binding, request, token = mmRegistry(request.chainId).row.token) {
+export function mmPolicyHash(profileHash, binding, request, token = mmRegistry(request.chainId, request.token).row.token) {
     return hashObject({ purpose: "apn.metamask-gasless.policy.v1", profileHash, binding,
         chainId: request.chainId, token, recipient: request.recipient,
         grossAtomic: request.grossAtomic, maxFeeAtomic: request.maxFeeAtomic, minReceivedAtomic: request.minReceivedAtomic,
@@ -92,7 +92,8 @@ export function mmPolicyHash(profileHash, binding, request, token = mmRegistry(r
 export function mmAssertIntentEconomics(intent, profileHash) {
     const r = mmRequest(intent.request, "mm_gasless_state_corrupt");
     const deployment = mmRecordedDeployment(intent);
-    if (intent.decimals !== 6 || intent.policyHash !== mmPolicyHash(profileHash, intent.binding, r, deployment.token)) {
+    if (!MM_TOKEN_DECIMALS.includes(intent.decimals) || (r.token !== undefined && r.token !== deployment.token) ||
+        intent.policyHash !== mmPolicyHash(profileHash, intent.binding, r, deployment.token)) {
         mmFail("mm_gasless_state_corrupt");
     }
     mmQuote(intent.quote, r, intent.binding, intent.quote.netAtomic, "mm_gasless_state_corrupt", deployment);
