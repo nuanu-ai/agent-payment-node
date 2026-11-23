@@ -11,12 +11,12 @@ const FILL: Readonly<Record<string, string>> = {
   "<operation-id>": "a".repeat(64), "<quote-hash>": "b".repeat(64), "<profile>": "default", "<source-profile>": "default",
   "<destination-gas-profile>": "gas", "<beneficiary-address>": EVM, "<account-address>": EVM, "<recipient-address>": EVM,
   "<usdc-usdt-or-wbtc-address>": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "<usdc-or-usdt-address>": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-  "<the-other-usdc-or-usdt-address>": "0xdAC17F958D2ee523a2206206994597C13D831ec7", "<destination-mint-transaction-hash>": `0x${"c".repeat(64)}`,
+  "<the-other-usdc-or-usdt-address>": "0xdAC17F958D2ee523a2206206994597C13D831ec7", "<bnb-usdt-or-usdc-address>": "0x55d398326f99059fF775485246999027B3197955", "<destination-mint-transaction-hash>": `0x${"c".repeat(64)}`,
   "<unix-seconds-within-30-minutes>": "1900000000", "<unix-seconds-within-10-minutes>": "1900000000", "<unix-seconds>": "1900000000",
   "<tron-address>": TRON, "<same-tron-address>": TRON, "<solana-address>": SOLANA, "<solana-recipient-address>": SOLANA,
   "<solana-address-of-the-profile>": SOLANA,
 };
-const FAMILIES = ["circle evm", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron sunswap", "swap solana jupiter", "swap solana orca"];
+const FAMILIES = ["circle evm", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap bnb uniswap", "swap tron sunswap", "swap solana jupiter", "swap solana orca"];
 const inFamilies = (path: readonly string[]) => FAMILIES.some(family => path.join(" ").startsWith(`${family} `));
 const filled = (example: string) => example.split(" ").slice(1).map(word => {
   if (!word.startsWith("<")) return word;
@@ -35,9 +35,9 @@ test("every help example is a --help discovery line or names every required opti
   assert.ok(checked >= COMMANDS.length - 2, `${checked} of ${COMMANDS.length}`);
 });
 
-test("Circle, Uniswap, Uniswap token, SunSwap, Jupiter and Orca examples bind once their placeholders are filled", () => {
+test("Circle, Uniswap, Uniswap token, BNB Uniswap, SunSwap, Jupiter and Orca examples bind once their placeholders are filled", () => {
   const commands = COMMANDS.filter(command => inFamilies(command.path));
-  assert.equal(commands.length, 43, "38 formerly path-only examples and five inventories");
+  assert.equal(commands.length, 49, "38 formerly path-only examples, five inventories and the six BNB Uniswap commands");
   for (const command of commands) {
     const [example] = command.examples; assert.ok(example !== undefined);
     assert.doesNotThrow(() => bindArgv(filled(example)), example);

@@ -5,7 +5,7 @@ import { address as solanaAddress } from "@solana/kit";
 import { tronAddress } from "../tron/codec.js";
 
 export const SWAP_MECHANISM_PIN_SCHEMA = "apn.swap-mechanism-pin.v1" as const;
-export type SwapProtocolFamily = "uniswap_ethereum" | "sunswap_tron" | "jupiter_solana" | "orca_solana";
+export type SwapProtocolFamily = "uniswap_ethereum" | "uniswap_bnb" | "sunswap_tron" | "jupiter_solana" | "orca_solana";
 export type SwapNetworkFamily = "evm" | "tron" | "solana";
 
 export interface SwapMechanismPin {
@@ -30,6 +30,7 @@ const VERSION = /^(?=[A-Za-z0-9._+-]{1,64}$)(?=.*[0-9])[A-Za-z0-9][A-Za-z0-9._+-
 /** Exact network of each protocol family. Shared with route admissions, which carry no network family of their own. */
 export const SWAP_PROTOCOL_NETWORKS: Readonly<Record<SwapProtocolFamily, { family: SwapNetworkFamily; chain: string }>> = {
   uniswap_ethereum: { family: "evm", chain: "eip155:1" },
+  uniswap_bnb: { family: "evm", chain: "eip155:56" },
   sunswap_tron: { family: "tron", chain: "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc" },
   jupiter_solana: { family: "solana", chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" },
   orca_solana: { family: "solana", chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" },

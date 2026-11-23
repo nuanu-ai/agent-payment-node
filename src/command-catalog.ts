@@ -11,6 +11,7 @@ import { X402_HTTP_OPTIONS, X402_HTTP_SYNOPSIS } from "./x402-http-catalog-optio
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { EVM_COMMANDS } from "./evm-command-catalog.js";import { BRIDGE_COMMANDS, includeBridgeRecovery } from "./lifi/command-catalog.js";import { ONECLICK_COMMANDS } from "./lifi/near-oneclick-command-catalog.js";import { CIRCLE_COMMANDS } from "./lifi/circle-command-catalog.js";import { GASLESS_COMMANDS, includeGaslessRecovery } from "./gasless/command-catalog.js";import { ALLOWLIST_COMMANDS, ALLOWLIST_COMMAND_GROUPS } from "./allowlist-command-catalog.js";import { UNISWAP_COMMANDS, UNISWAP_COMMAND_GROUPS } from "./swap/uniswap-command-catalog.js";import { SUNSWAP_COMMANDS, SUNSWAP_COMMAND_GROUPS } from "./swap/sunswap-tron/command-catalog.js";import { JUPITER_COMMANDS, JUPITER_COMMAND_GROUPS } from "./swap/jupiter-solana/command-catalog.js";import { ORCA_COMMANDS, ORCA_COMMAND_GROUPS } from "./swap/orca-solana/command-catalog.js";import { CHAIN_COMMANDS, includeRailRecovery } from "./chain-command-catalog.js";import { PORTFOLIO_COMMANDS } from "./portfolio/command-catalog.js";
 import { removedV1Commands } from "./command-manifest-migration.js";
 import { UNISWAP_TOKEN_COMMANDS, UNISWAP_TOKEN_COMMAND_GROUPS } from "./swap/uniswap-token-command-catalog.js";
+import { UNISWAP_BNB_COMMANDS, UNISWAP_BNB_COMMAND_GROUPS } from "./swap/uniswap-bnb/command-catalog.js";
 import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
 import type { CommandDefinition, CommandGroup } from "./command-catalog-types.js";
 export { renderHelp, renderReadmeCommandReference };
@@ -71,7 +72,7 @@ const policyAssetOptional = option("--asset", "string", false, noDefault, ["exac
 const httpOptions = X402_HTTP_OPTIONS;
 const httpSynopsis = X402_HTTP_SYNOPSIS;
 export const COMMAND_GROUPS: readonly CommandGroup[] = [
-  ...ALLOWLIST_COMMAND_GROUPS, ...UNISWAP_COMMAND_GROUPS, ...UNISWAP_TOKEN_COMMAND_GROUPS,
+  ...ALLOWLIST_COMMAND_GROUPS, ...UNISWAP_COMMAND_GROUPS, ...UNISWAP_TOKEN_COMMAND_GROUPS, ...UNISWAP_BNB_COMMAND_GROUPS,
   ...SUNSWAP_COMMAND_GROUPS, ...JUPITER_COMMAND_GROUPS, ...ORCA_COMMAND_GROUPS,
   ...RELAY_COMMAND_GROUPS,
   { path: ["mega"], summary: "Finite Mega native funding.", kind: "group" },
@@ -421,7 +422,7 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
   ),
   command(["receipt", "get"], "apn receipt get --operation <operation-id>", "Inspect one durable receipt of any family; gasless, bridge and Solana/TRON receipts are derived from their operation.", [operationRequired], "local_write", "May initialize local state, index saved operations and repair saved operation or direct receipt records; never signs, submits, or resumes a payment effect.", "none", "Never.", { terminal: allOperationStates.terminal, non_terminal: [] }, [], ["apn receipt get --operation <operation-id>"]),
 ] as const;
-export const COMMANDS: readonly CommandDefinition[] = [...includeGaslessRecovery(includeBridgeRecovery(includeRailRecovery(BASE_COMMANDS))), ...CHAIN_COMMANDS, ...PORTFOLIO_COMMANDS, ...BRIDGE_COMMANDS, ...CIRCLE_COMMANDS, ...SEI_FUNDING_COMMANDS, ...CIRCLE_EVM_COMMANDS, ...MEGA_FUNDING_COMMANDS, ...ONECLICK_COMMANDS, ...GASLESS_COMMANDS, ...ALLOWLIST_COMMANDS, ...UNISWAP_COMMANDS, ...UNISWAP_TOKEN_COMMANDS, ...SUNSWAP_COMMANDS, ...JUPITER_COMMANDS, ...ORCA_COMMANDS];
+export const COMMANDS: readonly CommandDefinition[] = [...includeGaslessRecovery(includeBridgeRecovery(includeRailRecovery(BASE_COMMANDS))), ...CHAIN_COMMANDS, ...PORTFOLIO_COMMANDS, ...BRIDGE_COMMANDS, ...CIRCLE_COMMANDS, ...SEI_FUNDING_COMMANDS, ...CIRCLE_EVM_COMMANDS, ...MEGA_FUNDING_COMMANDS, ...ONECLICK_COMMANDS, ...GASLESS_COMMANDS, ...ALLOWLIST_COMMANDS, ...UNISWAP_COMMANDS, ...UNISWAP_TOKEN_COMMANDS, ...UNISWAP_BNB_COMMANDS, ...SUNSWAP_COMMANDS, ...JUPITER_COMMANDS, ...ORCA_COMMANDS];
 export const COMMAND_MANIFEST = {
   schema_version: "apn.command-manifest.v2",
   product: "agent-payment-node",

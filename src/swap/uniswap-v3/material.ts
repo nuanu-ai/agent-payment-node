@@ -5,18 +5,18 @@ import { SecureStateStore, stateIdentifier } from "../../secure-state-store.js";
 import { validateSwapQuote, type SwapQuoteSnapshot } from "../quote.js";
 import type { GuardedSwapPreparedMaterial } from "../runtime.js";
 import type { UniswapTransactionEnvelope } from "./envelope.js";
-import { UNISWAP_CHAIN, UNISWAP_ROUTER } from "../uniswap-pin.js";
-import { decodeUniswapRouterCalldataFor } from "../uniswap-router.js";
+import { UNISWAP_CHAIN } from "../uniswap-pin.js";
 import { encodeUniswapV3ExactInput } from "./encoder.js";
+import { uniswapNativeLaneOf, type UniswapNativeChainId } from "./native-lane.js";
 import type { UniswapV3PoolQuote } from "./onchain.js";
-import { ETHEREUM_WBTC, UNISWAP_WBTC_CODE_PINS, uniswapV3Pair, type UniswapV3CodePin } from "./pins.js";
+import { ETHEREUM_WBTC, UNISWAP_WBTC_CODE_PINS, type UniswapV3CodePin } from "./pins.js";
 
 export const UNISWAP_KEYLESS_EXECUTION_SCHEMA = "apn.uniswap-v3-keyless-execution.v1" as const;
 export const UNISWAP_KEYLESS_EVIDENCE_DOMAIN = "apn.uniswap-v3-onchain-evidence.v1" as const;
 
 /** Read-only chain facts behind one quote. Its domain hash is the quote's providerResponseHash. */
 export interface UniswapKeylessEvidence {
-  readonly chainId: 1;
+  readonly chainId: UniswapNativeChainId;
   readonly blockNumber: string;
   readonly blockHash: Hex;
   readonly baseFeePerGas: string;
@@ -40,7 +40,10 @@ export function uniswapEvidenceHash(evidence: UniswapKeylessEvidence): string {
   return domainHash(UNISWAP_KEYLESS_EVIDENCE_DOMAIN, canonicalJson(evidence));
 }
 
-/** Proves the stored unsigned transaction, gas display and chain evidence are exactly the ones the quote hash binds. */
+/**
+ * Proves the stored unsigned transaction, gas display and chain evidence are exactly the ones the quote hash binds, on the
+ * native-input lane of the quote's own chain (Ethereum or BNB Smart Chain): its router, chain id, pinned pair and decoder.
+ */
 export function validateUniswapKeylessMaterial(value: unknown, mode: "input" | "stored" = "stored"): UniswapKeylessMaterial {
   const fail = (message: string): never => { throw new ApnError(mode === "input" ? "APN_INVALID_INPUT" : "APN_STATE_CORRUPT", message); };
   if (!isPlainRecord(value) || !exactKeys(value, ["quote", "approvalCapAtomic", "gasOrEnergy", "execution"]) ||
@@ -51,24 +54,25 @@ export function validateUniswapKeylessMaterial(value: unknown, mode: "input" | "
       !isPlainRecord(execution.envelope) || !isPlainRecord(execution.evidence) || typeof execution.deadline !== "number") fail("Uniswap execution material is invalid.");
   const envelope = execution.envelope as unknown as UniswapTransactionEnvelope, deadline = execution.deadline as number;
   const evidence = execution.evidence as unknown as UniswapKeylessEvidence;
-  if (quote.sourceAsset.chain !== UNISWAP_CHAIN || quote.sourceAsset.kind !== "native" || quote.destinationAsset.kind !== "token" ||
-      quote.destinationAsset.identifier === null) fail("Uniswap material is not a pinned native exact-input pair.");
-  const pair = uniswapV3Pair(quote.destinationAsset.identifier!);
+  const lane = uniswapNativeLaneOf(quote.sourceAsset.chain);
+  if (lane === undefined || quote.destinationAsset.chain !== lane.chain || quote.sourceAsset.kind !== "native" ||
+      quote.destinationAsset.kind !== "token" || quote.destinationAsset.identifier === null) fail("Uniswap material is not a pinned native exact-input pair.");
+  const pair = lane!.pair(quote.destinationAsset.identifier!);
   if (pair.outputToken === ETHEREUM_WBTC && BigInt(quote.minimumOutputAtomic) < 1000n) fail("WBTC output floor is below 1000 atomic.");
   if (!exactKeys(envelope as unknown as Record<string, unknown>, ["from", "to", "data", "value", "gasLimit", "chainId", "maxFeePerGas", "maxPriorityFeePerGas"]) ||
-      envelope.from !== quote.account || envelope.to !== UNISWAP_ROUTER || envelope.chainId !== 1 || envelope.value !== quote.inputAmountAtomic ||
+      envelope.from !== quote.account || envelope.to !== lane!.router || envelope.chainId !== lane!.chainId || envelope.value !== quote.inputAmountAtomic ||
       typeof envelope.data !== "string" || !/^0x(?:[0-9a-f]{2})+$/u.test(envelope.data) || envelope.data.length > 131_074 ||
       sha256(canonicalJson(envelope)) !== quote.unsignedTransactionPayloadHash || !Number.isSafeInteger(deadline) ||
       deadline !== Math.floor(Date.parse(quote.expiresAt) / 1000)) fail("Uniswap unsigned transaction is not bound to its quote.");
   const gasLimit = uint(envelope.gasLimit, fail), maxFee = uint(envelope.maxFeePerGas, fail), priority = uint(envelope.maxPriorityFeePerGas ?? "", fail, false);
   if (priority > maxFee || BigInt(quote.simulation.gasEstimate) > gasLimit) fail("Uniswap gas envelope is inconsistent.");
   if (canonicalJson(record.gasOrEnergy) !== canonicalJson(uniswapGasDisplay(envelope))) fail("Uniswap gas display is not bound to the envelope.");
-  const route = decodeUniswapRouterCalldataFor(envelope.data, { recipient: quote.recipient, inputAmountAtomic: quote.inputAmountAtomic,
+  const route = lane!.decode(envelope.data, { recipient: quote.recipient, inputAmountAtomic: quote.inputAmountAtomic,
     minimumOutputAtomic: quote.minimumOutputAtomic, deadline, outputToken: pair.outputToken });
   if (pair.outputToken === ETHEREUM_WBTC && (quote.destinationAsset.chain !== UNISWAP_CHAIN || envelope.data !== encodeUniswapV3ExactInput({ recipient: quote.recipient, inputAmountAtomic: quote.inputAmountAtomic, minimumOutputAtomic: quote.minimumOutputAtomic, deadline, pair }).data)) fail("WBTC requires the exact single pinned V3 path.");
   if (route.routeHash !== quote.routeHash || route.minimumOutputAtomic !== quote.minimumOutputAtomic) fail("Uniswap route is not bound to its quote.");
   if (!exactKeys(evidence as unknown as Record<string, unknown>, ["chainId", "blockNumber", "blockHash", "baseFeePerGas", "accountBalanceWei", "codePins", "pool"]) ||
-      evidence.chainId !== 1 || evidence.blockNumber !== quote.simulation.blockNumber || evidence.blockHash !== quote.simulation.blockHash ||
+      evidence.chainId !== lane!.chainId || evidence.blockNumber !== quote.simulation.blockNumber || evidence.blockHash !== quote.simulation.blockHash ||
       !isPlainRecord(evidence.pool) || evidence.pool.pool !== pair.pool || evidence.pool.fee !== pair.fee ||
       evidence.pool.amountOutAtomic !== quote.expectedOutputAtomic || uniswapEvidenceHash(evidence) !== quote.providerResponseHash) {
     fail("Uniswap on-chain quote evidence is not bound to its quote.");

@@ -35,7 +35,9 @@ which have 18; WETH has 18.
   direct-only identities. The Binance-Peg USDT and USDC of BNB Smart Chain are a reviewed supplement (since 0.5.113):
   Binance, not Tether or Circle, issues them 1:1 against reserves it holds, and the frozen dataset refuses them as not
   issuer-issued. The owner admitted both: a policy may name them on any rail, and x402 Permit2 and direct transfers
-  use them, and the LI.FI bridge moves them over Across ([lifi.md](lifi.md)); swap still refuses them at quote and prepare. Any other contract is refused with `APN_ALLOWLIST_REFUSED` (`allowlist_asset_unlisted`)
+  use them, the LI.FI bridge moves them over Across ([lifi.md](lifi.md)), Relay routes them ([relay.md](relay.md)),
+  MetaMask gasless sends them ([gasless.md](gasless.md)), and `swap bnb uniswap` buys them with native BNB
+  ([Uniswap](uniswap.md)). Any other contract is refused with `APN_ALLOWLIST_REFUSED` (`allowlist_asset_unlisted`)
   before any RPC call.
 - A symbol is not an identity: select a token by its exact contract.
 - Decimals come from the pinned row. `--decimals` is optional and, when given, must equal it. A contract that reports

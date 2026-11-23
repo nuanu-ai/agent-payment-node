@@ -96,6 +96,7 @@ export interface CoreDependencies {
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
+  readonly uniswapBnbRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap-bnb.quote" }>>;
   readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly orcaRuntime?: OrcaRuntimeSelector;
@@ -169,6 +170,7 @@ export class RuntimeContext {
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
+  readonly uniswapBnbRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap-bnb.quote" }>>;
   readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly orcaRuntime?: OrcaRuntimeSelector;
@@ -241,6 +243,7 @@ export class RuntimeContext {
     if (dependencies.stargateToken !== undefined) this.stargateToken = dependencies.stargateToken;
     if (dependencies.portfolio !== undefined) this.portfolio = dependencies.portfolio;
     if (dependencies.uniswapRuntime !== undefined) this.uniswapRuntime = dependencies.uniswapRuntime;
+    if (dependencies.uniswapBnbRuntime !== undefined) this.uniswapBnbRuntime = dependencies.uniswapBnbRuntime;
     if (dependencies.uniswapTokenRuntime !== undefined) this.uniswapTokenRuntime = dependencies.uniswapTokenRuntime;
     if (dependencies.sunswapRuntime !== undefined) this.sunswapRuntime = dependencies.sunswapRuntime;
     if (dependencies.orcaRuntime !== undefined) this.orcaRuntime = dependencies.orcaRuntime;

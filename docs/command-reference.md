@@ -142,6 +142,12 @@ apn swap ethereum uniswap-token status --operation <operation_id>
 apn swap ethereum uniswap-token approve --operation <operation_id>
 apn swap ethereum uniswap-token execute --operation <operation_id>
 apn swap ethereum uniswap-token cleanup --operation <operation_id> [--max-fee-per-gas <wei>] [--max-priority-fee-per-gas <wei>]
+apn swap bnb uniswap inventory
+apn swap bnb uniswap quote --profile <profile> --account <address> --to <address> --output-token <address> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --deadline <string> --max-gas-limit <wei> --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>
+apn swap bnb uniswap prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
+apn swap bnb uniswap status --operation <operation_id>
+apn swap bnb uniswap approve --operation <operation_id>
+apn swap bnb uniswap execute --operation <operation_id>
 apn swap tron sunswap inventory
 apn swap tron sunswap quote --profile <profile> --account <string> --to <string> --amount <sun> --slippage-bps <string> --owner-slippage-cap-bps <string> --fee-limit-sun <sun> --deadline <string>
 apn swap tron sunswap prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>

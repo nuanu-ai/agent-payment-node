@@ -14,6 +14,8 @@ const SELECTED_PATHS = [
   "swap ethereum uniswap status", "swap ethereum uniswap approve", "swap ethereum uniswap execute",
   "swap ethereum uniswap-token inventory", "swap ethereum uniswap-token quote", "swap ethereum uniswap-token prepare",
   "swap ethereum uniswap-token status", "swap ethereum uniswap-token approve", "swap ethereum uniswap-token execute", "swap ethereum uniswap-token cleanup",
+  "swap bnb uniswap inventory", "swap bnb uniswap quote", "swap bnb uniswap prepare",
+  "swap bnb uniswap status", "swap bnb uniswap approve", "swap bnb uniswap execute",
   "swap tron sunswap inventory", "swap tron sunswap quote", "swap tron sunswap prepare",
   "swap tron sunswap status", "swap tron sunswap approve", "swap tron sunswap execute",
   "swap solana jupiter inventory", "swap solana jupiter quote", "swap solana jupiter prepare",

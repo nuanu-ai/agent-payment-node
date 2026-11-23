@@ -1,14 +1,18 @@
-# Guarded Ethereum Uniswap swap
+# Guarded Uniswap swap (Ethereum and BNB Smart Chain)
 
-APN has two Uniswap V3 swap families on Ethereum mainnet. Neither uses an API
-key, an off-chain quote service or the Uniswap Trading API: every price fact
-comes from the chain, the transaction is encoded locally, and the owner's
-local wallet signs, so APN never takes custody.
+APN has two Uniswap V3 swap families on Ethereum mainnet and one on BNB Smart
+Chain. None uses an API key, an off-chain quote service or the Uniswap Trading
+API: every price fact comes from the chain, the transaction is encoded
+locally, and the owner's local wallet signs, so APN never takes custody.
 
 | Family | Swaps | Router |
 | --- | --- | --- |
 | `apn swap ethereum uniswap` (native input) | native ETH to canonical USDC or USDT; native ETH to WBTC with its own admission | Universal Router 2.2.0 |
 | `apn swap ethereum uniswap-token` (token input) | canonical USDC to USDT and USDT to USDC | original V3 SwapRouter |
+| `apn swap bnb uniswap` (native input) | native BNB to Binance-Peg USDT or USDC | SwapRouter02 |
+
+The BNB family is described in
+[BNB Smart Chain native input](#bnb-smart-chain-native-input-swap-bnb-uniswap).
 
 ## Setup
 
@@ -421,6 +425,87 @@ An `execute` that resumes an approval plans for: allowance 1, nonce 1,
 block 1, pins 4, state 1, simulation 1, gas 1, fees 1, send 1 and first
 observation up to 3. A swap needs one fewer; each further pooled candidate may
 cost one more probe.
+
+## BNB Smart Chain native input: `swap bnb uniswap`
+
+The BNB family has the model of the Ethereum native-input family: owner
+admission by route, one pinned pool per pair, an on-chain quote, a foreground
+approval, one send and a receipt proof. It swaps native BNB only. Token input
+(USDT or USDC to BNB, USDT to USDC) is not available on BNB Smart Chain.
+
+`APN_BNB_RPC_URL` is required. `APN_BNB_ARCHIVE_RPC_URL` is optional; when it
+is set, the reads pinned to one block go to it. Public endpoints that need no
+account: `https://bsc-rpc.publicnode.com`, `https://bsc-dataseed.bnbchain.org`.
+
+### BNB pinned contracts
+
+The addresses are Uniswap's published BNB deployment. Each one was read on
+chain 56 on 2026-11-23 and is pinned to its runtime code hash.
+
+| Role | Address |
+| --- | --- |
+| SwapRouter02 | `0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2` |
+| QuoterV2 | `0x78D78E420Da98ad378D7799bE8f4AF69033EB077` |
+| V3 factory | `0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7` |
+| WBNB | `0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c` |
+| Binance-Peg USDT (18 decimals) | `0x55d398326f99059fF775485246999027B3197955` |
+| Binance-Peg USDC proxy and implementation (18 decimals) | `0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d`, `0xBA5Fe23f8a3a24BEd3236F05F2FcF35fd0BF0B5C` |
+| USDT/WBNB 0.05% pool | `0x6fe9E9de56356F7eDBfcBB29FAB7cd69471a4869` |
+| USDC/WBNB 0.05% pool | `0x5289A8Dbf7029eE0b0498a84777ed3941D9acfEc` |
+
+- In both pools token0 is the stable token and token1 is WBNB.
+- Each pool is the WBNB pool of its pair with the most in-range liquidity
+  (fee tiers 100, 500, 3000 and 10000 were read).
+- QuoterV2 and SwapRouter02 report the pinned factory and WBNB.
+- The USDC/WBNB pool is thin. In our case 1 BNB quoted 2.6% less USDC than the
+  USDT pool gave USDT. The owner slippage cap refuses such an input with
+  `uniswap_price_impact`.
+
+A quote reads `decimals()` of both tokens and the factory's `getPool` of both
+pairs, then verifies every code hash and the USDC proxy implementation. Other
+decimals refuse with `uniswap_bnb_decimals_mismatch`; any other drift refuses
+with `uniswap_code_pin_drift`. Before sending, APN re-checks only the USDC
+proxy implementation. The pair pins must also agree with the reviewed
+Binance-Peg supplement (`src/binance-peg-policy-assets.ts`): the same symbol
+and 18 decimals.
+
+### BNB commands and rules
+
+The six commands and their options are those of `swap ethereum uniswap`.
+`--output-token` is the Binance-Peg USDT or USDC address. `--amount` is in wei
+of BNB.
+
+```sh
+QUOTE=$(apn swap bnb uniswap quote --profile <profile> --account <account-address> --to <recipient-address> --output-token 0x55d398326f99059fF775485246999027B3197955 --amount 10000000000000000 --slippage-bps 50 --owner-slippage-cap-bps 100 --deadline <unix-seconds-within-30-minutes> --max-gas-limit 300000 --max-fee-per-gas 1000000000 --max-priority-fee-per-gas 100000000 | jq -r .data.quoteHash)
+OP=$(apn swap bnb uniswap prepare --profile <profile> --quote $QUOTE --idempotency-key bnb-swap-0001 | jq -r .operation.operationId)
+apn swap bnb uniswap approve --operation $OP
+apn swap bnb uniswap status --operation $OP
+```
+
+- The owner policy must admit native BNB and the output token on
+  `eip155:56` for the `swap` rail with the route that
+  `apn swap bnb uniswap inventory` prints (protocol family `uniswap_bnb`).
+- The calldata is `multicall(deadline, [exactInputSingle(WBNB, output, 500,
+  recipient, amountIn, amountOutMinimum, 0)])` with `value` equal to
+  `amountIn`. The router wraps exactly the input. The decoder refuses any
+  other call, a second call, another fee tier, a price limit or a lower floor.
+- The recipient must be an account. The router sentinels `0x…01` and `0x…02`,
+  the router and WBNB refuse with `APN_INVALID_INPUT`.
+- BNB charges no base fee. A zero priority fee refuses with
+  `uniswap_zero_gas_price`.
+- Blocks come about every 0.45 s. The quote's head drift bound is 256 blocks
+  (the swap quote schema maximum), about two minutes. An approval after that
+  refuses with `uniswap_execution_drift` before signing and releases the
+  reservation; quote again.
+- The receipt proof needs the balances around the swap block. A pruning RPC
+  keeps that state for about 128 blocks, about one minute on BNB. Run `status`
+  soon after sending, or set `APN_BNB_ARCHIVE_RPC_URL`. A late first
+  observation refuses with `uniswap_pre_state_unavailable`.
+- The receipt economics are the mined value, the recipient's `Transfer` credit
+  and gas used × effective gas price. The receipt-facts reader also requires
+  the router's single WBNB `Deposit` of the input.
+- `apn operation status` and `apn operation abandon` route a BNB swap to
+  `apn swap bnb uniswap status`.
 
 ## Compatibility
 

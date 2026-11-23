@@ -2,10 +2,11 @@ import { getAddress } from "viem";
 import { address as solanaAddress } from "@solana/kit";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { loadAllowlistInventory, resolveAllowlistAsset, type CandidateKind } from "../allowlist-inventory.js";
+import type { CandidateKind } from "../allowlist-inventory.js";
 import { CANONICAL_WBTC_POLICY_ASSETS } from "../canonical-wbtc-policy-assets.js";
 import { parseAtomic } from "../money.js";
 import { tronAddress } from "../tron/codec.js";
+import { resolveSwapAsset } from "./asset-identity.js";
 
 export const SWAP_QUOTE_SCHEMA = "apn.swap-quote.v1" as const;
 const DIGEST = /^[a-f0-9]{64}$/u;
@@ -107,10 +108,10 @@ function asset(value: unknown, mode: "input" | "stored"): SwapAssetIdentity {
       (value.kind === "native" ? value.identifier !== null : typeof value.identifier !== "string")) failure(mode, "Swap asset identity is invalid.");
   return value as unknown as SwapAssetIdentity;
 }
+/** The frozen inventory or the reviewed Binance-Peg supplement (asset-identity.ts); the frozen dataset itself is unchanged. */
 function resolveInventory(value: SwapAssetIdentity, mode: "input" | "stored") {
-  try { return resolveAllowlistAsset({ chain: value.chain, kind: value.kind,
-    ...(value.identifier === null ? {} : { identifier: value.identifier }) }, loadAllowlistInventory()); }
-  catch { return failure(mode, "Swap asset is absent from the frozen inventory."); }
+  try { return resolveSwapAsset(value); }
+  catch { return failure(mode, "Swap asset is absent from the frozen inventory and its reviewed supplement."); }
 }
 function canonicalParty(family: string, value: string, mode: "input" | "stored"): string {
   try {

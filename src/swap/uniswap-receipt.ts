@@ -3,7 +3,6 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonica
 import { ApnError } from "../errors.js";
 import type { SwapReceiptProof } from "./model.js";
 import type { UniswapTransactionEnvelope } from "./uniswap-v3/envelope.js";
-import { UNISWAP_ROUTER } from "./uniswap-pin.js";
 
 const TRANSFER = parseAbi(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
 const TRANSFER_TOPIC = encodeEventTopics({ abi: TRANSFER, eventName: "Transfer" })[0];
@@ -15,7 +14,7 @@ export interface UniswapReceiptEvidence { readonly transactionHash: `0x${string}
   readonly afterNative: string; readonly beforeOutput: string; readonly afterOutput: string; readonly finalizedHead: {
   readonly number: string; readonly hash: `0x${string}` }; readonly observedAt: string }
 
-/** Ethereum charges a type-0/2 transaction gasUsed x effectiveGasPrice; both come from the receipt or neither is kept. */
+/** Ethereum and BNB Smart Chain charge a type-0/2 transaction gasUsed x effectiveGasPrice; both come from the receipt or neither is kept. */
 export type UniswapReceiptFee = { readonly gasUsed?: string; readonly effectiveGasPrice?: string };
 export function uniswapReceiptFee(receipt: Readonly<Record<string, unknown>>): UniswapReceiptFee {
   const read = (value: unknown) => typeof value === "string" && /^0x[0-9a-fA-F]{1,64}$/u.test(value) ? BigInt(value).toString() : undefined;
@@ -49,7 +48,7 @@ export function validateUniswapReceipt(evidence: UniswapReceiptEvidence, envelop
     transactionValue = quantity(tx.value), transactionBlock = quantity(tx.blockNumber), receiptBlock = quantity(receipt.blockNumber),
     finalizedBlock = quantity(evidence.finalizedHead.number);
   if (evidence.transactionHash.toLowerCase() !== hash || tx.hash.toLowerCase() !== hash || receipt.transactionHash.toLowerCase() !== hash ||
-      address(tx.from) !== expected.account || address(tx.to) !== UNISWAP_ROUTER || tx.input.toLowerCase() !== envelope.data.toLowerCase() ||
+      address(tx.from) !== expected.account || address(tx.to) !== address(envelope.to) || tx.input.toLowerCase() !== envelope.data.toLowerCase() ||
       transactionValue !== quantity(envelope.value) || transactionBlock !== receiptBlock ||
       tx.blockHash.toLowerCase() !== receipt.blockHash.toLowerCase() || beforeNative < afterNative || beforeNative - afterNative < inputAmount ||
       afterOutput < beforeOutput || afterOutput - beforeOutput < minimumOutput || finalizedBlock < receiptBlock) fail();

@@ -85,6 +85,7 @@ export interface RuntimeFactoryOptions {
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
+  readonly uniswapBnbRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap-bnb.quote" }>>;
   readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly orcaRuntime?: OrcaRuntimeSelector;

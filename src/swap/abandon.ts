@@ -1,5 +1,6 @@
 import { canonicalJson, domainHash } from "../canonical.js";
-import { loadAllowlistInventory, resolveAllowlistAsset } from "../allowlist-inventory.js";
+import { CANONICAL_WBTC_POLICY_ASSETS } from "../canonical-wbtc-policy-assets.js";
+import { resolveSwapAsset } from "./asset-identity.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
 import type { OperationAbandonApprovalPort } from "../operation-abandon-approval.js";
@@ -75,6 +76,7 @@ async function assertNoChainProof(root: string, operation: SwapOperationRecord):
     return provable(operation, "the frozen message records its blockhash lifetime", "apn swap solana jupiter status");
   }
   if (/^eip155:1$/u.test(chain)) return provable(operation, "the router deadline is the quote expiry", "apn swap ethereum uniswap status");
+  if (/^eip155:56$/u.test(chain)) return provable(operation, "the router deadline is the quote expiry", "apn swap bnb uniswap status");
   if (/^tron:/u.test(chain)) return provable(operation, "the transaction expiration is fixed in the prepared material", "apn swap tron sunswap status");
   blocked("Operation abandon does not cover this swap mechanism.", "swap_abandon_mechanism_unknown");
 }
@@ -86,8 +88,9 @@ function provable(operation: SwapOperationRecord, bound: string, status: string)
 
 function abandonIntent(operation: SwapOperationRecord) {
   const quote = operation.quote, source = quote.sourceAsset;
-  const asset = resolveAllowlistAsset({ chain: source.chain, kind: source.kind, ...(source.identifier === null ? {} : { identifier: source.identifier }) },
-    loadAllowlistInventory());
+  // The frozen inventory, the reviewed Binance-Peg supplement, or the exact reviewed WBTC deployment (display only).
+  const asset = (source.kind === "token" ? CANONICAL_WBTC_POLICY_ASSETS.find((row) => row.chain === source.chain && row.identifier === source.identifier)
+    : undefined) ?? resolveSwapAsset(source);
   return { operationId: operation.operationId, fingerprint: operation.integrityHash, profile: quote.profile, providerId: "local_swap",
     walletAddress: quote.account, recipient: quote.recipient, amountAtomic: quote.inputAmountAtomic,
     amountDecimal: decimal(quote.inputAmountAtomic, asset.decimals), chainLabel: source.chain,

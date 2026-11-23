@@ -37,9 +37,9 @@ export class LocalUniswapEthereumSigner implements UniswapExecutionSignerPort {
         const account = privateKeyToAccount(wallet.secret.privateKey), e = binding.envelope;
         if (getAddress(account.address) !== binding.account) throw new ApnError("APN_WALLET_MISMATCH", "Uniswap signer address changed.");
         const raw = e.gasPrice !== undefined
-          ? await account.signTransaction({ type: "legacy", chainId: 1, to: e.to, data: e.data, value: BigInt(e.value),
+          ? await account.signTransaction({ type: "legacy", chainId: binding.chainId, to: e.to, data: e.data, value: BigInt(e.value),
             nonce: Number(nonce), gas: BigInt(e.gasLimit), gasPrice: BigInt(e.gasPrice) })
-          : await account.signTransaction({ type: "eip1559", chainId: 1, to: e.to, data: e.data, value: BigInt(e.value),
+          : await account.signTransaction({ type: "eip1559", chainId: binding.chainId, to: e.to, data: e.data, value: BigInt(e.value),
             nonce: Number(nonce), gas: BigInt(e.gasLimit), maxFeePerGas: BigInt(e.maxFeePerGas!),
             maxPriorityFeePerGas: BigInt(e.maxPriorityFeePerGas!), accessList: [] });
         const transactionHash = await verifySignedUniswapTransaction(raw, binding, operation);
