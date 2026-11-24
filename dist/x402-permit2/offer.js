@@ -98,9 +98,12 @@ function validateOffer(index, offer, listAsset, payer) {
         offerHash: domainHash(OFFER_DOMAIN, canonicalJson(requirement)),
     };
 }
-/** `name`/`version` are optional seller hints; when present they must equal the asset's token domain exactly. */
+/**
+ * `name`/`version` are optional seller hints of the token's EIP-2612 domain; when both are present they must equal the
+ * asset's token domain exactly. One without the other names no domain, so it is carried unchanged and never used.
+ */
 function tokenDomainRefusal(extra, listAsset) {
-    if (extra.name === undefined)
+    if (extra.name === undefined || extra.version === undefined)
         return null;
     const domain = listAsset.tokenDomain;
     if (domain === null || extra.name !== domain.name)

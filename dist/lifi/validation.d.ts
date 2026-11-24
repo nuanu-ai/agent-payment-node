@@ -24,6 +24,13 @@ export declare function bridgeHex(value: unknown, maxBytes?: number, exactBytes?
 export declare function bridgeHash(value: unknown, code?: ErrorCode): string;
 export declare function bridgeOpaque(value: unknown, code?: ErrorCode): string;
 export declare function bridgeIso(value: unknown): string;
+/** The largest LI.FI inventory answer APN reads, except the token catalog. */
+export declare const LIFI_INVENTORY_RESPONSE_BYTES: number;
+/**
+ * The LI.FI token catalog of the bridge chains: 5,486,804 bytes on 2026-11-24 (Ethereum alone 2.6 MB), and growing, so
+ * this bound leaves about three times that room. It is also the largest answer `BridgeHttps` reads for any caller.
+ */
+export declare const LIFI_TOKENS_RESPONSE_BYTES: number;
 export declare function bridgeJson(value: string, maxBytes: number): unknown;
 export declare function bridgeSame(left: unknown, right: unknown): boolean;
 /**

@@ -1,8 +1,9 @@
 import type { Address } from "../model.js";
 import type { BridgeProviderObservation, BridgeRouteRequest } from "./model.js";
 import type { LifiProviderPort, LifiResponse } from "./ports.js";
+import { LIFI_INVENTORY_RESPONSE_BYTES, LIFI_TOKENS_RESPONSE_BYTES } from "./validation.js";
 export declare const LIFI_ROUTE_RESPONSE_BYTES: number;
-export declare const LIFI_INVENTORY_RESPONSE_BYTES: number;
+export { LIFI_INVENTORY_RESPONSE_BYTES, LIFI_TOKENS_RESPONSE_BYTES };
 export interface LifiTransport {
     request(endpoint: string, method: "GET" | "POST", body: string | null, maximumBytes: number, code: "APN_HTTP_CONFIG"): Promise<LifiResponse>;
 }

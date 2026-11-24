@@ -37,8 +37,8 @@ export declare function timeoutRefusal(value: unknown, minimum: number): X402Off
 /** `extra.assetTransferMethod`: absent or `eip3009`, `permit2`, `erc7710`; any other method is refused by its name. */
 export declare function evmOfferMethod(extra: Readonly<Record<string, unknown>>): X402EvmMethod | X402OfferRefusal;
 /**
- * The `extra` keys APN understands, checked strictly: `name`/`version` (bounded text; required for EIP-3009, a pair for
- * Permit2), `decimals` (0..255; the token's own decimals are compared where they are read), `paymentFlow`
+ * The `extra` keys APN understands, checked strictly: `name`/`version` (bounded text; required for EIP-3009; for Permit2
+ * an optional hint of the token's EIP-2612 domain, used only when both are present), `decimals` (0..255; the token's own decimals are compared where they are read), `paymentFlow`
  * (`authorization` outside Permit2), Permit2 `spenderAddress` (exactly the x402 exact Permit2 proxy) and `chainId`
  * (exactly the offer's chain). Every other key is the seller's own: never a reason to refuse, carried unchanged in the
  * `accepted` requirements the payment payload echoes.
