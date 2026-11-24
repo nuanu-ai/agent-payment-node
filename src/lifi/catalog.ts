@@ -3,7 +3,7 @@ import { canonicalProfile } from "../wallet-policy.js";
 import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS, bridgeExecutionDestination } from "./asset-registry.js";
 import { BASE_SOLANA_CIRCLE_V2_CANDIDATE, BASE_SOLANA_USDC_CANDIDATE, BASE_TRON_USDT_CANDIDATE } from "./discovery-candidates.js";
 import type { LifiResponse } from "./ports.js";
-import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, bridgeFailure, bridgeJson, bridgeRecord, LIFI_INVENTORY_RESPONSE_BYTES } from "./validation.js";
+import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, bridgeFailure, bridgeJson, bridgeRecord, LIFI_INVENTORY_RESPONSE_BYTES, LIFI_TOKENS_RESPONSE_BYTES } from "./validation.js";
 
 export function bridgeCapabilities(profile?: string) {
   return { schema_version: "apn.bridge-capabilities.v1", ...(profile === undefined ? {} : { profile: canonicalProfile(profile), profile_binding_inspected: false }),
@@ -71,7 +71,7 @@ export function bridgeCapabilities(profile?: string) {
 export function bridgeInventory(responses: Readonly<Record<"chains" | "tokens" | "tools" | "connections", LifiResponse>>) {
   const projected = Object.fromEntries(Object.entries(responses).map(([kind, response]) => {
     if (response.status !== 200) bridgeFailure("APN_PROVIDER_UNAVAILABLE", `inventory_${kind}_status`);
-    const body = bridgeRecord(bridgeJson(response.body, LIFI_INVENTORY_RESPONSE_BYTES));
+    const body = bridgeRecord(bridgeJson(response.body, kind === "tokens" ? LIFI_TOKENS_RESPONSE_BYTES : LIFI_INVENTORY_RESPONSE_BYTES));
     return [kind, { response_hash: sha256(response.body), provider_inventory: inventoryValue(body, 0), executable_capability: false }];
   }));
   return { schema_version: "apn.bridge-inventory.v1", provider: "LI.FI", origin: "https://li.quest/v1", observed: projected,

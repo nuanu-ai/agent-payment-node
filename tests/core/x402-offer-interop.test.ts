@@ -66,6 +66,8 @@ for (const [label, offer, extra, reason, field, value, expected] of [
   ["another transfer method", {}, { assetTransferMethod: "permit2-exact" }, "x402_offer_method_unsupported", "extra.assetTransferMethod", "permit2-exact",
     "eip3009, permit2 or erc7710"],
   ["decimals that are not USDC's", {}, { decimals: 18 }, "x402_token_decimals_mismatch", "extra.decimals", "18", "6"],
+  ["EIP-3009 and a name without a version", {}, { assetTransferMethod: "eip3009", version: undefined, spenderAddress: undefined }, "x402_offer_extra_invalid",
+    "extra.version", undefined, "the token's EIP-712 domain name and version"],
 ] as const) test(`a local counterfactual of the captured offer with ${label} is refused by name, with the seller's value and what APN accepts`, () => {
   const inspected = inspect(edified(offer, extra));
   assert.deepEqual(inspected.candidates, []);
@@ -74,18 +76,23 @@ for (const [label, offer, extra, reason, field, value, expected] of [
 });
 
 test("a Permit2 offer with a lone extra.name or extra.version is a candidate: the hint names no EIP-2612 domain and is carried unchanged", () => {
-  for (const extra of [{ version: undefined }, { name: undefined }]) {
+  for (const [label, extra] of [["a name without a version", { version: undefined }], ["a version without a name", { name: undefined }]] as const) {
     const changed = edified({}, extra);
     const inspected = inspect(changed);
-    assert.deepEqual(inspected.refused, [], JSON.stringify(extra));
-    assert.equal(inspected.candidates.length, 1);
+    assert.deepEqual(inspected.refused, [], label);
+    assert.equal(inspected.candidates.length, 1, label);
+    // No half domain: the generic fetch lane reads a token's EIP-2612 domain only when both hints are present.
+    const candidate = inspected.candidates[0] as Record<string, unknown> | undefined;
+    assert.equal(candidate?.tokenName, undefined, label);
+    assert.equal(candidate?.tokenVersion, undefined, label);
     const selection = selectPermit2OfferToSign(changed.accepts, PAYER, wirePermit2Asset);
-    assert.equal(selection.listAsset.tokenDomain, null, "no sponsored EIP-2612 permit without both name and version");
-    assert.equal(canonicalJson(selection.requirement), canonicalJson(changed.accepts[0]));
+    assert.equal(selection.listAsset.tokenDomain, null, `${label}: no sponsored EIP-2612 permit without both`);
+    assert.equal(canonicalJson(selection.requirement), canonicalJson(changed.accepts[0]), label);
   }
-  // Both present still bind the token's domain exactly.
-  assert.deepEqual(selectPermit2Offer(CAPTURED.paymentRequired.accepts, PAYER, wirePermit2Asset).listAsset.tokenDomain,
-    { name: (OFFER.extra as { name: string }).name, version: (OFFER.extra as { version: string }).version });
+  // Both present: the inspected candidate carries the pair.
+  const both = inspect(CAPTURED.paymentRequired).candidates[0] as Record<string, unknown> | undefined;
+  assert.equal(both?.tokenName, (OFFER.extra as { name: string }).name);
+  assert.equal(both?.tokenVersion, (OFFER.extra as { version: string }).version);
 });
 
 /** ScraplingData /v1/ping (QA on 0.5.115): BSC USDC and USDT through Permit2, `extra.name` without `version`. */

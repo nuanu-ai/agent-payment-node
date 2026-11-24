@@ -72,7 +72,8 @@ export function inspectOffer(requirements: PaymentRequirements, index: number, s
   };
   if (method === "permit2") {
     return { ...base, assetTransferMethod: "permit2", paymentFlow: "permit2WitnessTransfer",
-      ...(typeof extra.name === "string" ? { tokenName: extra.name, tokenVersion: extra.version as string } : {}) };
+      // The token's EIP-2612 domain only when both hints are present: a lone one names none (0.5.116).
+      ...(typeof extra.name === "string" && typeof extra.version === "string" ? { tokenName: extra.name, tokenVersion: extra.version } : {}) };
   }
   if (method === "erc7710") {
     if (!isBaseUsdc(selected)) return offerRefusal("x402_offer_method_unsupported", "extra.assetTransferMethod", "erc7710", "erc7710 only on Base USDC");
