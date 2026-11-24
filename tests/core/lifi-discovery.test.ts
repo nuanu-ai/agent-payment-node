@@ -7,12 +7,13 @@ import { bindArgv, bindMcpInput } from "../../src/command-binder.js";
 import { renderHelp } from "../../src/command-catalog.js";
 import { runCli } from "../../src/cli.js";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
+import { ApnError } from "../../src/errors.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { createMcpServer } from "../../src/mcp-server.js";
 import { projectMcpTools } from "../../src/mcp-projection.js";
 import { BRIDGE_COMMANDS } from "../../src/lifi/command-catalog.js";
 import { BridgeHttps } from "../../src/lifi/https.js";
-import { LIFI_INVENTORY_RESPONSE_BYTES, LifiProvider, normalizeLifiStatus, type LifiTransport } from "../../src/lifi/provider.js";
+import { LIFI_INVENTORY_RESPONSE_BYTES, LIFI_TOKENS_RESPONSE_BYTES, LifiProvider, normalizeLifiStatus, type LifiTransport } from "../../src/lifi/provider.js";
 import { validateBridgeQuote } from "../../src/lifi/quote-repository.js";
 import { bridgeRpcFactory } from "../../src/lifi/rpc.js";
 import { bridgeCapabilities, bridgeInventory } from "../../src/lifi/catalog.js";
@@ -155,6 +156,14 @@ test("LI.FI public provider API contract uses fixed endpoints, finite tools, one
     sum + BRIDGE_ASSET_REGISTRY[id].tokens.reduce((rows, asset) => rows + asset.peers.length, 0), 0);
   assert.equal(admittedPairs, 16);
   const responses = await provider.inventory(); assert.equal(calls.length, 3 + admittedPairs + 1 + 4);
+  // QA on 0.5.115: the token catalog of the bridge chains is 5.5 MB, so only that /tokens read goes up to 16 MiB; every
+  // other inventory answer (the TRON candidate's one-chain catalog included) keeps 4 MiB.
+  const catalogRead = (endpoint: string) => new URL(endpoint).pathname === "/v1/tokens" && new URL(endpoint).searchParams.get("chains") === BRIDGE_CHAINS.join(",");
+  assert.equal(calls.filter(([endpoint]) => catalogRead(endpoint)).length, 1);
+  for (const [endpoint, , , maximumBytes] of calls) {
+    assert.equal(maximumBytes, catalogRead(endpoint) ? LIFI_TOKENS_RESPONSE_BYTES : LIFI_INVENTORY_RESPONSE_BYTES, endpoint);
+  }
+  assert.equal(LIFI_TOKENS_RESPONSE_BYTES, 16 * 1024 * 1024); assert.equal(LIFI_INVENTORY_RESPONSE_BYTES, 4 * 1024 * 1024);
   const pairs = JSON.parse(responses.connections.body).pairs as Array<Record<string, unknown>>;
   assert.equal(pairs.length, admittedPairs + 2);
   assert.deepEqual(pairs.at(-2), { fromChainId: BASE_SOLANA_USDC_CANDIDATE.fromChainId,
@@ -212,6 +221,18 @@ test("LI.FI public provider API contract uses fixed endpoints, finite tools, one
 
 /** One connection probe per admitted (asset, peer) row on every bridge chain: 16 since BSC's Binance-Peg rows. */
 const ADMITTED_PAIRS = BRIDGE_CHAINS.reduce((sum, id) => sum + BRIDGE_ASSET_REGISTRY[id].tokens.reduce((rows, asset) => rows + asset.peers.length, 0), 0);
+
+test("bridge inventory projects a token catalog above 4 MiB and refuses one above 16 MiB; other answers keep 4 MiB", () => {
+  const ok = { status: 200, body: "{}" };
+  const catalog = (bytes: number) => { const head = '{"tokens":{"1":[{"symbol":"USDC","name":"'; const tail = '"}]}}';
+    return { status: 200, body: head + "x".repeat(bytes - head.length - tail.length) + tail }; };
+  const projected = bridgeInventory({ chains: ok, tokens: catalog(5_486_804), tools: ok, connections: ok }) as any;
+  assert.equal(projected.observed.tokens.provider_inventory.tokens["1"].length, 1);
+  assert.throws(() => bridgeInventory({ chains: ok, tokens: catalog(LIFI_TOKENS_RESPONSE_BYTES + 1), tools: ok, connections: ok }),
+    (error: unknown) => error instanceof ApnError && error.code === "APN_PROVIDER_PROTOCOL");
+  assert.throws(() => bridgeInventory({ chains: catalog(LIFI_INVENTORY_RESPONSE_BYTES + 1), tokens: ok, tools: ok, connections: ok }),
+    (error: unknown) => error instanceof ApnError && error.code === "APN_PROVIDER_PROTOCOL");
+});
 
 test("a failed discovery-only Solana probe remains unavailable while admitted EVM inventory succeeds", async (t) => {
   for (const failure of ["transport", "malformed", "non-200", "combined-size", "deep", "large-array"] as const) await t.test(failure, async () => {

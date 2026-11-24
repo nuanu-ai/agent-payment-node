@@ -129,9 +129,12 @@ function validateOffer(index: number, offer: Record<string, unknown>, listAsset:
   };
 }
 
-/** `name`/`version` are optional seller hints; when present they must equal the asset's token domain exactly. */
+/**
+ * `name`/`version` are optional seller hints of the token's EIP-2612 domain; when both are present they must equal the
+ * asset's token domain exactly. One without the other names no domain, so it is carried unchanged and never used.
+ */
 function tokenDomainRefusal(extra: Readonly<Record<string, unknown>>, listAsset: Permit2ListAsset): X402OfferRefusal | null {
-  if (extra.name === undefined) return null;
+  if (extra.name === undefined || extra.version === undefined) return null;
   const domain = listAsset.tokenDomain;
   if (domain === null || extra.name !== domain.name) return offerRefusal("x402_offer_extra_invalid", "extra.name", extra.name, domain?.name);
   return extra.version === domain.version ? null : offerRefusal("x402_offer_extra_invalid", "extra.version", extra.version, domain.version);

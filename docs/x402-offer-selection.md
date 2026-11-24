@@ -37,7 +37,7 @@ Permit2 `deadline`.
 | Field | Rule | Refusal |
 | --- | --- | --- |
 | `assetTransferMethod` | Absent, `eip3009`, `permit2` or `erc7710`. | `x402_offer_method_unsupported` |
-| `name`, `version` | Required for EIP-3009; a pair for Permit2. | |
+| `name`, `version` | Required for EIP-3009. For Permit2 an optional hint of the token's EIP-2612 domain, used only when both are present (to sign a seller-sponsored permit); a lone `name` or `version` is carried unchanged and not used. | `x402_offer_extra_invalid` |
 | `decimals` | Must equal the token's own decimals, read on chain (USDC's 6 on the Base, Ethereum and Arbitrum USDC pairs). | `x402_token_decimals_mismatch` |
 | `spenderAddress` (Permit2) | Exactly the x402 exact Permit2 proxy `0x402085c248EeA27D92E8b30b2C58ed07f9E20001`. | `x402_offer_spender_mismatch` |
 | `chainId` | Exactly the offer's chain. | `x402_offer_chain_mismatch` |

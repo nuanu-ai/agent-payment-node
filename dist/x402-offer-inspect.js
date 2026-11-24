@@ -66,7 +66,8 @@ export function inspectOffer(requirements, index, selected) {
     };
     if (method === "permit2") {
         return { ...base, assetTransferMethod: "permit2", paymentFlow: "permit2WitnessTransfer",
-            ...(typeof extra.name === "string" ? { tokenName: extra.name, tokenVersion: extra.version } : {}) };
+            // The token's EIP-2612 domain only when both hints are present: a lone one names none (0.5.116).
+            ...(typeof extra.name === "string" && typeof extra.version === "string" ? { tokenName: extra.name, tokenVersion: extra.version } : {}) };
     }
     if (method === "erc7710") {
         if (!isBaseUsdc(selected))
