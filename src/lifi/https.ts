@@ -2,6 +2,7 @@ import { request as httpsRequest } from "node:https";
 import { ApnError, type ErrorCode } from "../errors.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, type PinnedAddress } from "../network-policy.js";
 import type { LifiResponse } from "./ports.js";
+import { LIFI_INVENTORY_RESPONSE_BYTES } from "./validation.js";
 
 /** Fixed LI.FI API base. Credentials are never sent to another origin or path. */
 export const LIFI_API_ORIGIN = "https://li.quest/v1";
@@ -22,7 +23,7 @@ export class BridgeHttps {
     code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", beforeSend?: () => void | Promise<void>): Promise<LifiResponse> {
     const endpoint = parsePublicHttpsUrl(endpointInput, code, "Bridge endpoint", 2048);
     if (body !== null && Buffer.byteLength(body, "utf8") > 256 * 1024) throw failure(code, "request_size");
-    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > 4 * 1024 * 1024) throw failure(code, "response_bound");
+    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > LIFI_INVENTORY_RESPONSE_BYTES) throw failure(code, "response_bound");
     if (this.active >= 2) {
       if (this.waiting.length >= 32) throw failure(code, "concurrency_bound");
       await new Promise<void>((resolve) => this.waiting.push(resolve));

@@ -7,11 +7,11 @@ import { railStatusIdentifier, type RailStatusIdentifier } from "../rail-status-
 import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS, bridgeCrossNativeConversion, bridgePeerToken, validateBridgeRequest } from "./asset-registry.js";
 import { BASE_SOLANA_USDC_CANDIDATE, BASE_TRON_USDT_CANDIDATE } from "./discovery-candidates.js";
 import { validateBridgeInventoryCandidate } from "./catalog.js";
-import { bridgeFailure, bridgeJson, bridgeRecord } from "./validation.js";
+import { bridgeFailure, bridgeJson, bridgeRecord, LIFI_INVENTORY_RESPONSE_BYTES } from "./validation.js";
 
 const ORIGIN = LIFI_API_ORIGIN;
 export const LIFI_ROUTE_RESPONSE_BYTES = 512 * 1024;
-export const LIFI_INVENTORY_RESPONSE_BYTES = 4 * 1024 * 1024;
+export { LIFI_INVENTORY_RESPONSE_BYTES };
 export interface LifiTransport { request(endpoint: string, method: "GET" | "POST", body: string | null,
   maximumBytes: number, code: "APN_HTTP_CONFIG"): Promise<LifiResponse> }
 export const LIFI_ROUTES_ENDPOINT = `${ORIGIN}/advanced/routes`;

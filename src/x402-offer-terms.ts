@@ -81,8 +81,8 @@ export function evmOfferMethod(extra: Readonly<Record<string, unknown>>): X402Ev
 }
 
 /**
- * The `extra` keys APN understands, checked strictly: `name`/`version` (bounded text; required for EIP-3009, a pair for
- * Permit2), `decimals` (0..255; the token's own decimals are compared where they are read), `paymentFlow`
+ * The `extra` keys APN understands, checked strictly: `name`/`version` (bounded text; required for EIP-3009; for Permit2
+ * an optional hint of the token's EIP-2612 domain, used only when both are present), `decimals` (0..255; the token's own decimals are compared where they are read), `paymentFlow`
  * (`authorization` outside Permit2), Permit2 `spenderAddress` (exactly the x402 exact Permit2 proxy) and `chainId`
  * (exactly the offer's chain). Every other key is the seller's own: never a reason to refuse, carried unchanged in the
  * `accepted` requirements the payment payload echoes.
@@ -92,7 +92,9 @@ export function evmExtraRefusal(extra: Readonly<Record<string, unknown>>, method
     const value = extra[key];
     if (value !== undefined && !boundedText(value)) return offerRefusal("x402_offer_extra_invalid", `extra.${key}`, value, "1..128 UTF-8 bytes");
   }
-  if (method === "eip3009" || method === "permit2" && (extra.name === undefined) !== (extra.version === undefined)) {
+  // A Permit2 payment signs the Permit2 domain, never the token's: a lone name or version (Binance-Peg USDT on BNB Smart
+  // Chain, which has no EIP-2612 permit, is offered with a name only) is carried unchanged and never used.
+  if (method === "eip3009") {
     const missing = extra.name === undefined ? "name" : extra.version === undefined ? "version" : null;
     if (missing !== null) return offerRefusal("x402_offer_extra_invalid", `extra.${missing}`, undefined, "the token's EIP-712 domain name and version");
   }

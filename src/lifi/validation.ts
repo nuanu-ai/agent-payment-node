@@ -59,6 +59,11 @@ export function bridgeIso(value: unknown): string {
   if (typeof value !== "string" || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString() !== value) bridgeFailure("APN_STATE_CORRUPT", "timestamp");
   return value;
 }
+/**
+ * The largest LI.FI inventory answer APN reads. The token catalog of the bridge chains was 5,486,804 bytes on
+ * 2026-11-24 (Ethereum alone 2.6 MB) and grows, so the bound leaves about three times that room.
+ */
+export const LIFI_INVENTORY_RESPONSE_BYTES = 16 * 1024 * 1024;
 export function bridgeJson(value: string, maxBytes: number): unknown {
   if (Buffer.byteLength(value, "utf8") > maxBytes) bridgeFailure("APN_PROVIDER_PROTOCOL", "response_size");
   try { return JSON.parse(value) as unknown; } catch { return bridgeFailure("APN_PROVIDER_PROTOCOL", "JSON_shape"); }

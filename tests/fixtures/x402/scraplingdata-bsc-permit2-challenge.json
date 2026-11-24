@@ -1,0 +1,55 @@
+{
+  "note": "Captured unpaid HTTP 402 of a real public x402 seller: GET https://scraplingdata.xyz/v1/ping, unpaid, 2026-11-24; accepts[5] and accepts[6] of its 402 body, unchanged",
+  "paymentRequired": {
+    "x402Version": 2,
+    "resource": {
+      "url": "https://scraplingdata.xyz/v1/ping"
+    },
+    "accepts": [
+      {
+        "scheme": "exact",
+        "network": "eip155:56",
+        "chainName": "BNB Smart Chain",
+        "chainId": 56,
+        "amount": "1000000000000000",
+        "maxAmountRequired": "1000000000000000",
+        "amountUsd": 0.001,
+        "resource": "https://scraplingdata.xyz/v1/ping",
+        "description": "Payment test: the cheapest paid call ($0.001). Returns ok, server time, server name and catalog links so an agent can confirm its x402 payment setup works before buying real data. No parameters",
+        "mimeType": "application/json",
+        "payTo": "0x72C80C01fD89Bac74f47cf604b61ACd119c9BCdb",
+        "maxTimeoutSeconds": 300,
+        "asset": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+        "assetSymbol": "USDC",
+        "assetDecimals": 18,
+        "extra": {
+          "assetTransferMethod": "permit2",
+          "name": "USD Coin",
+          "facilitatorUrl": "https://x402.dexter.cash"
+        }
+      },
+      {
+        "scheme": "exact",
+        "network": "eip155:56",
+        "chainName": "BNB Smart Chain",
+        "chainId": 56,
+        "amount": "1000000000000000",
+        "maxAmountRequired": "1000000000000000",
+        "amountUsd": 0.001,
+        "resource": "https://scraplingdata.xyz/v1/ping",
+        "description": "Payment test: the cheapest paid call ($0.001). Returns ok, server time, server name and catalog links so an agent can confirm its x402 payment setup works before buying real data. No parameters",
+        "mimeType": "application/json",
+        "payTo": "0x72C80C01fD89Bac74f47cf604b61ACd119c9BCdb",
+        "maxTimeoutSeconds": 300,
+        "asset": "0x55d398326f99059fF775485246999027B3197955",
+        "assetSymbol": "USDT",
+        "assetDecimals": 18,
+        "extra": {
+          "assetTransferMethod": "permit2",
+          "name": "Tether USD",
+          "facilitatorUrl": "https://x402.dexter.cash"
+        }
+      }
+    ]
+  }
+}

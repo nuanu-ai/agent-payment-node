@@ -2,6 +2,14 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.116 — 2026-11-24
+
+QA retest of 0.5.115 found two refusals.
+
+- **A Permit2 offer with `extra.name` and no `extra.version` is accepted.** ScraplingData `/v1/ping` offers BSC USDT and USDC through Permit2 with `extra: { assetTransferMethod: "permit2", name: "Tether USD" }` and no `version`. APN required `name` and `version` as a pair for Permit2, so `x402 inspect`, the Permit2 preflight and `x402 permit2 approve` refused it with `APN_X402_UNSUPPORTED_OFFER` / `x402_offer_extra_invalid` on `extra.version`. A Permit2 payment signs the Permit2 domain, not the token's. The token's `name` and `version` are only a hint, used to sign a seller-sponsored EIP-2612 permit. A lone `name` or `version` is now carried unchanged in `accepted` and not used: no sponsored permit is signed for such an offer, so the token needs `x402 permit2 allowance set` first (BSC USDT and USDC have no EIP-2612 permit anyway). When both are present they must still equal the token's domain. EIP-3009 still requires both.
+- **`bridge inventory` reads the whole LI.FI token catalog.** `GET li.quest/v1/tokens` for the bridge chains answered 5,013,468 bytes on 2026-11-24 (5,486,804 a few hours later; Ethereum alone 2.6 MB), above APN's 4 MiB bound, so `bridge inventory` failed with `APN_PROVIDER_UNAVAILABLE` / `response_aborted`. The bound for LI.FI inventory answers is now 16 MiB. Quote and route answers keep their own 512 KiB bound.
+- **Downgrade.** No record format changes. 0.5.115 and earlier refuse such an offer again. An open Permit2 operation that 0.5.116 prepared for one fails its stored offer check there (`APN_STATE_CORRUPT`); finish it on 0.5.116 first.
+
 ## 0.5.115 — 2026-11-24
 
 0.5.114 swapped native BNB into the Binance-Peg USDT and USDC of BNB Smart Chain, but not back: the owner's order of 2026-11-23 covers swap in both directions.
