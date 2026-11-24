@@ -9,6 +9,7 @@ import { Permit2ProductionResults } from "../../src/x402-permit2/production-resu
 import { Permit2HttpObservationStore, permit2HttpLocatorHint, validatePermit2HttpLocatorHint } from "../../src/x402-permit2/production-http-observations.js";
 import { reconstructPermit2ProductionMaterial } from "../../src/x402-permit2/production-material.js";
 import { observePermit2Production } from "../../src/x402-permit2/production-observer.js";
+import { permit2Adapter } from "../../src/operation-index/adapters/permit2.js";
 import { journalFixture } from "./x402-permit2-production-journal-fixture.js";
 import { word } from "./x402-permit2-production-observer-fixture.js";
 
@@ -141,8 +142,44 @@ for (const sponsor of [false, true]) test(`exposure interrupted before its signa
   assert.equal(done.exposureJournal!.terminalIntent!.signedHash, null);
   const before = f.batches.length, again = await service.observe(id, f.input.rpcUrl, "expired_unused");
   assert.equal(again.code, "terminal"); assert.equal(again.status?.state, "expired_no_effect"); assert.equal(f.batches.length, before);
-  // Only the RPC was contacted: no seller request was made.
+  // Only the RPC was contacted: no seller request was made. After the proof no signature can be saved for it.
   assert.ok(f.endpoints.length > 0 && f.endpoints.every(endpoint => endpoint === f.input.rpcUrl));
+  await assert.rejects(f.journal.storeSigned(id, f.signed)); assert.equal((await f.journal.findOperation(id))!.exposureJournal!.signed, null);
+});
+test("operation resume names the unused-expiry exit for an exposure without a saved signature, settlement observe otherwise", async t => {
+  const f = await journalFixture(t), id = f.record.operationId;
+  const commands = (record: Parameters<NonNullable<typeof permit2Adapter.commandsFor>>[0]) => permit2Adapter.commandsFor!(record);
+  assert.equal(commands(f.record).resume, permit2Adapter.commands!.resume);
+  const exposed = await f.journal.markSignatureRisk(id);
+  assert.equal(commands(exposed).resume, permit2Adapter.commands!.exit); assert.match(commands(exposed).resume!, /--expired-unused$/u);
+  assert.equal(commands(await f.journal.storeSigned(id, f.signed)).resume, permit2Adapter.commands!.resume);
+});
+test("a signature saved while unused expiry is observed keeps the hold", async t => {
+  const f = await journalFixture(t), id = f.record.operationId, service = new Permit2ProductionResults(f.state, f.journal);
+  await f.journal.markSignatureRisk(id); (f.input as { mode: string }).mode = "expired_unused";
+  let raced = false;
+  f.wire.beforeBatch = async () => { if (!raced) { raced = true; await f.journal.storeSigned(id, f.signed); } };
+  assert.equal((await service.observe(id, f.input.rpcUrl, "expired_unused")).code, "held"); assert.equal(raced, true);
+  const r = (await f.journal.findOperation(id))!;
+  assert.notEqual(r.exposureJournal!.signed, null); assert.equal(r.exposureJournal!.terminalIntent, null); assert.equal(r.terminal, false);
+  assert.equal((await f.lease()).state, "unknown_finality");
+});
+test("an exposure whose hold confirmation was interrupted is confirmed, then ends expired_no_effect by the unused-expiry proof", async t => {
+  const f = await journalFixture(t), id = f.record.operationId, service = new Permit2ProductionResults(f.state, f.journal);
+  const original = AssetUsageLedger.prototype.transition; let fail = true;
+  const fault = t.mock.method(AssetUsageLedger.prototype, "transition", async function(this: AssetUsageLedger, input: Parameters<typeof original>[0]) {
+    if (fail) { fail = false; throw new Error("synthetic hold confirmation failure"); } return original.call(this, input);
+  });
+  await assert.rejects(f.journal.markSignatureRisk(id)); fault.mock.restore();
+  const exposed = (await f.journal.findOperation(id))!;
+  assert.equal(exposed.state, "exposure_unknown"); assert.equal(exposed.exposureJournal!.holdConfirmed, false); assert.equal((await f.lease()).state, "reserved");
+  // Settlement observation neither confirms nor ends it, and starts no RPC.
+  const before = f.batches.length;
+  assert.equal((await service.observe(id, f.input.rpcUrl)).code, "not_exposed"); assert.equal(f.batches.length, before);
+  assert.equal((await f.journal.findOperation(id))!.exposureJournal!.holdConfirmed, false);
+  (f.input as { mode: string }).mode = "expired_unused";
+  const result = await service.observe(id, f.input.rpcUrl, "expired_unused");
+  assert.equal(result.code, "finalized"); assert.equal(result.status?.state, "expired_no_effect"); assert.equal((await f.lease()).state, "released_unsubmitted");
 });
 test("explicit expired_unused mode uses finalized unused-nonce proof, never HTTP failure/timeout", async t => {
   const f = await ready(t); await f.service.recordHttp(f.id, f.observation([], 500));

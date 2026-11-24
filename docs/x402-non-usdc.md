@@ -168,8 +168,9 @@ An `approve` interrupted after the first exposure and before its signature was s
 slept) leaves `exposure_unknown` with no signature and no request. Nothing was sent to the seller. Only
 `--expired-unused` ends such an operation: once finalized chain time is past the Permit2 deadline (and the EIP-2612
 deadline, when the offer sponsors one) and the nonce is unused, it ends `expired_no_effect` and the usage hold is
-released. Until then, or if the nonce is used, it stays held. Settlement observation of it answers `not_exposed`
-without RPC.
+released. If the hold confirmation itself was interrupted, `--expired-unused` confirms the hold first. Until the
+deadline, or if the nonce is used, it stays held. Settlement observation does not end it, and `operation resume` names
+`--expired-unused` for it.
 
 Omit `--profile` on observe to use the saved owner, or give the same profile as a check. An operation that was never
 exposed does not start RPC, and an operation whose ledger intent is already terminal can reconcile locally.
