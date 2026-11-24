@@ -66,7 +66,22 @@ export class Permit2ProductionResults {
                 return await this.#result(record, "not_exposed");
             }
         }
-        const j = record.exposureJournal;
+        let j = record.exposureJournal;
+        // An exposure whose hold confirmation was interrupted is confirmed first, so the expiry proof releases a hold the
+        // ledger counts. Confirming only moves the usage hold from `reserved` to `unknown_finality`; it never releases it.
+        if (mode === "expired_unused" && j !== undefined && !j.holdConfirmed && !record.terminal) {
+            try {
+                record = await Permit2ProductionJournal.prototype.confirmHold.call(this.#journal, id);
+                j = record.exposureJournal;
+            }
+            catch {
+                try {
+                    record = await Permit2ProductionRepository.findOwnedOperation(this.#records, id) ?? record;
+                }
+                catch { /* Keep the last validated safe status. */ }
+                return await this.#result(record, "not_exposed");
+            }
+        }
         if (j === undefined || !j.holdConfirmed)
             return await this.#result(record, "not_exposed");
         let locator = null;
@@ -102,7 +117,9 @@ export class Permit2ProductionResults {
                 return await this.#result(record, "hint_unavailable");
             }
         }
-        if (record.exposureJournal?.signed == null)
+        // Settlement needs the saved signature: without one APN sent nothing. Unused expiry is proven from finalized chain time
+        // and the nonce bit alone, so an exposure interrupted before its signature was saved still ends by `expired_unused`.
+        if (mode === "settlement" && record.exposureJournal?.signed == null)
             return await this.#result(record, "not_exposed");
         try {
             if (canonicalJson(await permit2WalletBinding(this.#state, record.material.wallet.profile)) !== canonicalJson(record.material.wallet))

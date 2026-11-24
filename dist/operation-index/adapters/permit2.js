@@ -3,6 +3,9 @@ import { PERMIT2_PRODUCTION_TERMINAL_STATES, Permit2ProductionRepository } from 
 import { projectPermit2Production } from "../../x402-permit2/production-delivery.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, standardIdentity } from "../adapter.js";
 const STORE = { directory: "permit2-production", perProfile: false };
+const PERMIT2_COMMANDS = Object.freeze({ status: "apn x402 permit2 status --profile <profile> --operation <operation-id>",
+    resume: "apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc>",
+    exit: "apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc> --expired-unused" });
 /** The account on the owner admission's own chain (immutable in the record); released records name eip155:43114. */
 export function permit2Domains(record) {
     return [evmConflictDomain(permit2ChainId(record.material.owner.chain), record.material.wallet.account)];
@@ -30,8 +33,9 @@ export const permit2Adapter = {
     salvage: raw => salvageRecord(raw, value => [salvageEvm(permit2ChainId(field(value, "material", "owner", "chain")), field(value, "material", "wallet", "account"))]),
     view: async (record, root) => await projectPermit2Production(root, record),
     // Observation, including the proof that an expired authorization was never used, runs on Permit2's own CLI path.
-    commands: { status: "apn x402 permit2 status --profile <profile> --operation <operation-id>",
-        resume: "apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc>",
-        exit: "apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc> --expired-unused" },
+    commands: PERMIT2_COMMANDS,
+    // An exposure whose signature was never saved sent nothing; only the unused-expiry proof ends it, so it resumes by its exit.
+    commandsFor: record => record.exposureAt !== null && record.exposureJournal?.signed == null
+        ? { ...PERMIT2_COMMANDS, resume: PERMIT2_COMMANDS.exit } : PERMIT2_COMMANDS,
 };
 //# sourceMappingURL=permit2.js.map

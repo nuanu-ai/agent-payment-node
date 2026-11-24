@@ -164,8 +164,16 @@ apn x402 permit2 observe --operation <saved-operation-id> --rpc-url <verified-pu
 `--transaction` and `--expired-unused` are mutually exclusive. Expiry alone is not enough: this mode needs finalized
 chain time beyond the saved deadline and evidence that the nonce is still unused.
 
-Omit `--profile` on observe to use the saved owner, or give the same profile as a check. Unsigned operations do not
-start RPC, and an operation whose ledger intent is already terminal can reconcile locally.
+An `approve` interrupted after the first exposure and before its signature was saved (the process stopped or the Mac
+slept) leaves `exposure_unknown` with no signature and no request. Nothing was sent to the seller. Only
+`--expired-unused` ends such an operation: once finalized chain time is past the Permit2 deadline (and the EIP-2612
+deadline, when the offer sponsors one) and the nonce is unused, it ends `expired_no_effect` and the usage hold is
+released. If the hold confirmation itself was interrupted, `--expired-unused` confirms the hold first. Until the
+deadline, or if the nonce is used, it stays held. Settlement observation does not end it, and `operation resume` names
+`--expired-unused` for it.
+
+Omit `--profile` on observe to use the saved owner, or give the same profile as a check. An operation that was never
+exposed does not start RPC, and an operation whose ledger intent is already terminal can reconcile locally.
 
 ## Status
 

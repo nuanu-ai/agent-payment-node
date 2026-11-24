@@ -171,7 +171,8 @@ export function publicPermit2Production(record: Permit2ProductionRecord) {
 /**
  * What can still run for the record, a live view (nothing stores or hashes it). A terminal record (`settled`,
  * `expired_no_effect`, `released_unsubmitted`) is `completed`: nothing runs for it again. An exposed one is `observe_only`:
- * it was signed (and maybe requested) by the foreground CLI approve, and only observe ends it. Only an unsigned record keeps
+ * the foreground CLI approve exposed it (and maybe signed and requested it), and only observe ends it; one whose
+ * signature was never saved ends only by the unused-expiry proof (`--expired-unused`). Only a never-exposed record keeps
  * `execution_blocked` with `permit2_production_execution_not_wired`: no MCP tool and no generic approve executes it, only
  * the foreground CLI `x402 permit2 approve`. Through 0.5.106 every record read `execution_blocked`, a settled payment too.
  */
