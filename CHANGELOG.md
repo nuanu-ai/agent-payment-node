@@ -2,6 +2,13 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.117 — 2026-11-25
+
+QA on 0.5.116 found a Permit2 operation that no command could end.
+
+- **`x402 permit2 observe --expired-unused` ends an exposure whose signature was never saved.** A foreground `x402 permit2 approve` confirmed the usage hold, then the Mac slept before the signature was saved. The operation stayed `exposure_unknown` with no signature and no request, and its 0.001 USDT hold stayed open after the Permit2 deadline. `observe` answered `not_exposed` before it looked at the mode, so `--expired-unused` never read the chain. Now `--expired-unused` reads it for such an operation too. When finalized chain time is past the Permit2 deadline (and the EIP-2612 deadline, when the offer sponsors one) and the nonce is unused, the operation ends `expired_no_effect` and the hold is released (`released_unsubmitted`). A second `observe` answers `terminal` with the same state. Before the deadline, with a used nonce, or without a canonical answer, it stays held. Settlement observation of such an operation still answers `not_exposed` without RPC: without a saved signature APN sent nothing. No branch signs or contacts the seller.
+- **Downgrade.** No record format changes. 0.5.116 reads an operation ended this way; it only cannot end a new one.
+
 ## 0.5.116 — 2026-11-24
 
 QA retest of 0.5.115 found two refusals.

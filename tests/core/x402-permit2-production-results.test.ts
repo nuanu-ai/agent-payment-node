@@ -105,11 +105,44 @@ test("a settlement whose transaction APN cannot attribute finalizes by the consu
   assert.equal(result.code, "finalized"); assert.equal(result.status?.state, "settled");
   assert.equal(result.observation?.transactionHash, null); assert.equal((await f.lease()).state, "finalized");
 });
-test("prepared/reserved and exposed unsigned rows return sanitized status without RPC", async t => {
+test("prepared/reserved rows and settlement of an exposed unsigned row return sanitized status without RPC", async t => {
   const f = await journalFixture(t), service = new Permit2ProductionResults(f.state, f.journal), before = f.batches.length;
   assert.equal((await service.observe(f.record.operationId, f.input.rpcUrl)).code, "not_exposed");
-  await f.journal.markSignatureRisk(f.record.operationId); assert.equal((await service.observe(f.record.operationId, f.input.rpcUrl, "expired_unused")).code, "not_exposed");
+  await f.journal.markSignatureRisk(f.record.operationId); assert.equal((await service.observe(f.record.operationId, f.input.rpcUrl)).code, "not_exposed");
   assert.equal(f.batches.length, before);
+});
+for (const sponsor of [false, true]) test(`exposure interrupted before its signature (sponsor=${sponsor}) ends expired_no_effect only by finalized expiry and unused nonces`, async t => {
+  // QA 0.5.116: approve confirmed the hold, the Mac slept, the signature was never saved; observe --expired-unused left it held.
+  const f = await journalFixture(t, sponsor), id = f.record.operationId, service = new Permit2ProductionResults(f.state, f.journal);
+  const exposed = await f.journal.markSignatureRisk(id), j = exposed.exposureJournal!;
+  assert.equal(exposed.state, "exposure_unknown"); assert.equal(j.holdConfirmed, true); assert.equal(j.signed, null); assert.equal(j.request, null);
+  const p = reconstructPermit2ProductionMaterial(exposed.material), deadlines = [BigInt(p.plan.authorization.deadline)];
+  if (sponsor) { assert.ok(p.plan.eip2612); deadlines.push(BigInt(p.plan.eip2612.info.deadline)); } else assert.equal(p.plan.eip2612, null);
+  const last = deadlines.reduce((a, b) => a > b ? a : b), at = (second: bigint) => { f.wire.finalized.timestamp = `0x${second.toString(16)}`; };
+  const stillHeld = async () => {
+    const r = (await f.journal.findOperation(id))!; assert.equal(r.terminal, false); assert.equal(r.state, "exposure_unknown");
+    assert.equal(r.exposureJournal!.terminalIntent, null); assert.equal((await f.lease()).state, "unknown_finality");
+  };
+  (f.input as { mode: string }).mode = "expired_unused";
+  at(last); assert.equal((await service.observe(id, f.input.rpcUrl, "expired_unused")).code, "observed_hold"); await stillHeld();
+  at(last + 1n); f.wire.bitmap = word(1n << 7n);
+  assert.equal((await service.observe(id, f.input.rpcUrl, "expired_unused")).code, "observed_hold"); await stillHeld();
+  f.wire.bitmap = word(0n);
+  if (sponsor) {
+    f.wire.tokenNonce = word(10n); assert.equal((await service.observe(id, f.input.rpcUrl, "expired_unused")).code, "observed_hold"); await stillHeld();
+    f.wire.tokenNonce = word(9n);
+  }
+  const result = await service.observe(id, f.input.rpcUrl, "expired_unused");
+  assert.equal(result.code, "finalized"); assert.equal(result.status?.state, "expired_no_effect"); assert.equal(result.status?.terminal, true);
+  assert.equal(result.observation?.outcome, "expired_unused"); assert.equal(result.observation?.signedHash, null);
+  assert.equal((await f.lease()).state, "released_unsubmitted");
+  const done = (await f.journal.findOperation(id))!;
+  assert.equal(done.exposureJournal!.signed, null); assert.equal(done.exposureJournal!.request, null);
+  assert.equal(done.exposureJournal!.terminalIntent!.signedHash, null);
+  const before = f.batches.length, again = await service.observe(id, f.input.rpcUrl, "expired_unused");
+  assert.equal(again.code, "terminal"); assert.equal(again.status?.state, "expired_no_effect"); assert.equal(f.batches.length, before);
+  // Only the RPC was contacted: no seller request was made.
+  assert.ok(f.endpoints.length > 0 && f.endpoints.every(endpoint => endpoint === f.input.rpcUrl));
 });
 test("explicit expired_unused mode uses finalized unused-nonce proof, never HTTP failure/timeout", async t => {
   const f = await ready(t); await f.service.recordHttp(f.id, f.observation([], 500));

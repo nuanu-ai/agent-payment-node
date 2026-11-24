@@ -67,7 +67,9 @@ export class Permit2ProductionResults {
     } else if (mode === "settlement" && locator === null) {
       try { locator = (await this.#hints.read(id, record))?.locator ?? null; } catch { return await this.#result(record, "hint_unavailable"); }
     }
-    if (record.exposureJournal?.signed == null) return await this.#result(record, "not_exposed");
+    // Settlement needs the saved signature: without one APN sent nothing. Unused expiry is proven from finalized chain time
+    // and the nonce bit alone, so an exposure interrupted before its signature was saved still ends by `expired_unused`.
+    if (mode === "settlement" && record.exposureJournal?.signed == null) return await this.#result(record, "not_exposed");
     try {
       if (canonicalJson(await permit2WalletBinding(this.#state, record.material.wallet.profile)) !== canonicalJson(record.material.wallet)) return await this.#result(record, "owner_mismatch");
     } catch { return await this.#result(record, "owner_mismatch"); }
