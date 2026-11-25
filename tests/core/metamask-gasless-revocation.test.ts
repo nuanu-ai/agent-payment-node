@@ -136,12 +136,13 @@ test("Sei 7ca4e73c shape: the owner's wallet disables the delegation once, then 
   assert.equal(disabledStatus.ok, true);
   assert.equal((disabledStatus.operation as Json).revocation_requests, undefined, "status lists no revoke request");
   f.revocationReader.answers.set(requestId, { outcome: "verified", status: "AWAITING_MFA", transactionHash: null,
-    mfa: { expiresAt: "2030-01-01T00:10:00.000Z", authMethod: "qr" }, responseHash: "f".repeat(64) });
+    mfa: { expiresAt: "2030-01-01T00:10:00.000Z", authMethod: "qr" }, failure: null, responseHash: "f".repeat(64) });
   const proved = await f.core.execute({ command: "operation.resume", operationId: id });
   assert.equal((proved.operation as Json).state, "revoked_unused");
   // The chain decided the operation; MetaMask's status of the request is reported beside it, read by its sealed id.
   assert.deepEqual((proved.operation as Json).revocation_requests, [{ request_id_hash: hash, outcome: "verified", status: "AWAITING_MFA",
-    transaction_hash: null, mfa: { expires_at: "2030-01-01T00:10:00.000Z", auth_method: "qr" }, response_hash: "f".repeat(64), reason: null, check: null }]);
+    transaction_hash: null, mfa: { expires_at: "2030-01-01T00:10:00.000Z", auth_method: "qr" }, failure: null, response_hash: "f".repeat(64),
+    reason: null, check: null }]);
   assert.deepEqual(f.revocationReader.reads, [{ requestId, projectHash: "c".repeat(64), binding: { sender: f.binding.address, chainId: 1329 } }]);
   const again = await core(new Approval(), new Wallet()).execute({ command: "gasless.transfer.revoke", operationId: id });
   assert.equal(again.error?.code, "APN_OPERATION_BLOCKED"); assert.equal(again.error?.details?.reason, "mm_revoke_not_revocable");

@@ -78,9 +78,22 @@ export interface MetaMaskRevocationReadDependencies {
 }
 
 /**
+ * MetaMask's failure code and description of a disable request's job, as provider-failure.ts keeps them: `code` a closed
+ * token and `description` short plain prose, each `null` when MetaMask gave none or gave it in another form, which the
+ * `*_withheld` flag then says.
+ */
+export interface MetaMaskRevocationRequestFailure {
+  readonly code: string | null;
+  readonly code_withheld: boolean;
+  readonly description: string | null;
+  readonly description_withheld: boolean;
+}
+
+/**
  * One sealed disable request as resume reports it. `verified`: MetaMask's server named this request, kind transaction,
- * the server wallet and the chain, with its job `status`, `transaction_hash` when it has one and, for AWAITING_MFA, the
- * owner's approval window (`mfa`). `not_found`: the server answered 404 for this id in the signed-in session's project,
+ * the server wallet and the chain, with its job `status`, `transaction_hash` when it has one, for AWAITING_MFA the
+ * owner's approval window (`mfa`) and, when the job names one, MetaMask's own failure code and description (`failure`,
+ * for example `POLICY_EVALUATOR_FAILED` on a FAILED job). `not_found`: the server answered 404 for this id in the signed-in session's project,
  * which proves nothing about the request. `refused`: nothing usable was read; `reason` is a closed reason and `check` the
  * answer check that refused. `request_id_hash` is `null` only on the one entry that says the operation's sealed requests
  * could not be listed or read at all. Every field is MetaMask's word, never chain evidence, and nothing of it is written
@@ -92,6 +105,7 @@ export interface MetaMaskRevocationRequestRead {
   readonly status: string | null;
   readonly transaction_hash: Hex | null;
   readonly mfa: { readonly expires_at: string | null; readonly auth_method: string | null } | null;
+  readonly failure: MetaMaskRevocationRequestFailure | null;
   readonly response_hash: string | null;
   readonly reason: string | null;
   readonly check: string | null;
@@ -174,15 +188,19 @@ async function readOne(reading: NonNullable<MetaMaskRevocationRequestsOpened["re
   catch (error) { return refused(hash, closedReason(error, "metamask_server_read_unclassified"), null); }
   if (answer.outcome === "refused") return refused(hash, answer.reason, answer.check);
   if (answer.outcome === "not_found") {
-    return { request_id_hash: hash, outcome: "not_found", status: null, transaction_hash: null, mfa: null, response_hash: null, reason: null, check: null };
+    return { request_id_hash: hash, outcome: "not_found", status: null, transaction_hash: null, mfa: null, failure: null, response_hash: null,
+      reason: null, check: null };
   }
+  const failure = answer.failure;
   return { request_id_hash: hash, outcome: "verified", status: answer.status, transaction_hash: answer.transactionHash,
     mfa: answer.mfa === null ? null : { expires_at: answer.mfa.expiresAt, auth_method: answer.mfa.authMethod },
+    failure: failure === null ? null : { code: failure.code, code_withheld: failure.codeWithheld, description: failure.description,
+      description_withheld: failure.descriptionWithheld },
     response_hash: answer.responseHash, reason: null, check: null };
 }
 
 function refused(hash: string | null, reason: string, check: string | null): MetaMaskRevocationRequestRead {
-  return { request_id_hash: hash, outcome: "refused", status: null, transaction_hash: null, mfa: null, response_hash: null, reason, check };
+  return { request_id_hash: hash, outcome: "refused", status: null, transaction_hash: null, mfa: null, failure: null, response_hash: null, reason, check };
 }
 
 const REASON = /^[a-z][a-z0-9_]{0,63}$/u;

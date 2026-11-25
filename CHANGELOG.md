@@ -2,6 +2,13 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.118 — 2026-11-25
+
+QA's live disable of a Base delegation on 0.5.117 failed at MetaMask, and `operation resume` did not say why.
+
+- **`operation resume` shows MetaMask's failure code and description of a disable request.** MetaMask answered the disable with HTTP 201 and status `FAILED`, and its job names `failureCode: POLICY_EVALUATOR_FAILED` and `failureDescription: "Policy evaluator outflow.limit_usd degraded: unavailable"`. APN's read of the job kept only the identity, `status`, the hash and the MFA window, so resume showed `outcome: verified`, `status: FAILED`, `reason: null`. Each `revocation_requests` entry now adds `failure`: `{ code, code_withheld, description, description_withheld }`, or `null` when the job names neither field. The code is kept only as a token (`[A-Z][A-Z0-9_]{0,63}`). The description is kept only as short plain prose that cannot carry a URL, a credential word, an address, a hash or another opaque value; any other form is withheld, and its flag says so. The sandboxed helper reduces both fields before they leave it, and APN checks that form again. The read is the same single GET: nothing is sent, signed or written to the operation, and MetaMask's word still never decides the operation's state.
+- **Downgrade.** No record format changes. 0.5.117 reads the same records and shows the entry without `failure`.
+
 ## 0.5.117 — 2026-11-25
 
 QA on 0.5.116 found a Permit2 operation that no command could end.

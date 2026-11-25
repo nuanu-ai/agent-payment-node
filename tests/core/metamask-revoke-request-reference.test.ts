@@ -252,7 +252,8 @@ test("resume reports MetaMask's status of each sealed request beside its chain r
   const f = await mmFixture(temporary.root), id = await unresolved(f);
   const [read, lost, damaged] = await sealed(f, id, 3) as [string, string, string];
   const tx = mmTestWord("disable-transaction");
-  f.revocationReader.answers.set(read, { outcome: "verified", status: "BROADCASTED", transactionHash: tx, mfa: null, responseHash: "f".repeat(64) });
+  f.revocationReader.answers.set(read, { outcome: "verified", status: "BROADCASTED", transactionHash: tx, mfa: null, failure: null,
+    responseHash: "f".repeat(64) });
   f.revocationReader.answers.set(lost, new ApnError("APN_PROVIDER_UNAVAILABLE", "synthetic helper failure", { reason: "mm_gasless_provider_unavailable" }));
   await rewrite(join(directory(f, id), `${metaMaskRevocationRequestIdHash(damaged)}.json`),
     v => ({ ...v, cipher: { ...v.cipher, ciphertext: flipped(v.cipher.ciphertext) } }));
@@ -260,10 +261,10 @@ test("resume reports MetaMask's status of each sealed request beside its chain r
   await sealedAt(f, id, [read, lost, damaged]);
   const resumed = await f.core.execute({ ...resume, operationId: id });
   assert.equal(resumed.ok, true, JSON.stringify(resumed.error));
-  const empty = { status: null, transaction_hash: null, mfa: null, response_hash: null, check: null };
+  const empty = { status: null, transaction_hash: null, mfa: null, failure: null, response_hash: null, check: null };
   const expected = new Map([
     [metaMaskRevocationRequestIdHash(read), { outcome: "verified", status: "BROADCASTED", transaction_hash: tx, mfa: null,
-      response_hash: "f".repeat(64), reason: null, check: null }],
+      failure: null, response_hash: "f".repeat(64), reason: null, check: null }],
     [metaMaskRevocationRequestIdHash(lost), { outcome: "refused", ...empty, reason: "mm_gasless_provider_unavailable" }],
     [metaMaskRevocationRequestIdHash(damaged), { outcome: "refused", ...empty, reason: "provider_request_reference_unmatched" }],
   ]);
@@ -285,6 +286,35 @@ test("resume reports MetaMask's status of each sealed request beside its chain r
   assert.equal(f.revocationReader.reads.length, reads);
 });
 
+// 0.5.118, QA on the live Base revoke: MetaMask answered FAILED, failureCode POLICY_EVALUATOR_FAILED, and resume showed
+// the status alone with `reason: null`. Resume now shows the job's own code and description in their closed form.
+test("resume shows MetaMask's failure code and safe description of a FAILED disable request; it sends and writes nothing", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await mmFixture(temporary.root), id = await unresolved(f);
+  const [failed, withheld] = await sealed(f, id, 2) as [string, string];
+  await sealedAt(f, id, [failed, withheld]);
+  const description = "Policy evaluator outflow.limit_usd degraded: unavailable";
+  f.revocationReader.answers.set(failed, { outcome: "verified", status: "FAILED", transactionHash: null, mfa: null,
+    failure: { code: "POLICY_EVALUATOR_FAILED", codeWithheld: false, description, descriptionWithheld: false }, responseHash: "e".repeat(64) });
+  f.revocationReader.answers.set(withheld, { outcome: "verified", status: "FAILED", transactionHash: null, mfa: null,
+    failure: { code: null, codeWithheld: true, description: null, descriptionWithheld: true }, responseHash: "d".repeat(64) });
+  const submissions = f.provider.submissions.length;
+  const resumed = await f.core.execute({ ...resume, operationId: id });
+  assert.equal(resumed.ok, true, JSON.stringify(resumed.error));
+  assert.deepEqual((resumed.operation as Json).revocation_requests, [
+    { request_id_hash: metaMaskRevocationRequestIdHash(withheld), outcome: "verified", status: "FAILED", transaction_hash: null, mfa: null,
+      failure: { code: null, code_withheld: true, description: null, description_withheld: true }, response_hash: "d".repeat(64),
+      reason: null, check: null },
+    { request_id_hash: metaMaskRevocationRequestIdHash(failed), outcome: "verified", status: "FAILED", transaction_hash: null, mfa: null,
+      failure: { code: "POLICY_EVALUATOR_FAILED", code_withheld: false, description, description_withheld: false }, response_hash: "e".repeat(64),
+      reason: null, check: null },
+  ]);
+  assert.equal((resumed.operation as Json).state, "unknown_finality", "MetaMask's word never decides the operation");
+  const record = JSON.stringify(await f.record(id));
+  assert.equal(record.includes("POLICY_EVALUATOR_FAILED") || record.includes("outflow"), false, "nothing of the reads is written");
+  assert.equal(f.provider.submissions.length, submissions); assert.equal(f.rpc.calls.includes("revocation"), false, "nothing is sent again");
+});
+
 test("resume reads the 16 newest requests and reports the older ones; nothing sealed means no field; a dot-file is no request", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = await mmFixture(temporary.root), id = await unresolved(f);
@@ -300,7 +330,7 @@ test("resume reads the 16 newest requests and reports the older ones; nothing se
   assert.deepEqual(entries.slice(0, MM_REVOCATION_REQUEST_READ_LIMIT).map(entry => entry.outcome),
     Array(MM_REVOCATION_REQUEST_READ_LIMIT).fill("not_found"));
   assert.deepEqual(entries.slice(MM_REVOCATION_REQUEST_READ_LIMIT), hashes.slice(MM_REVOCATION_REQUEST_READ_LIMIT).map(hash => ({
-    request_id_hash: hash, outcome: "refused", status: null, transaction_hash: null, mfa: null, response_hash: null,
+    request_id_hash: hash, outcome: "refused", status: null, transaction_hash: null, mfa: null, failure: null, response_hash: null,
     reason: "revocation_request_read_limit", check: null })));
   assert.equal(f.revocationReader.reads.length, MM_REVOCATION_REQUEST_READ_LIMIT, "the requests past the limit are not read");
 });
@@ -335,7 +365,7 @@ test("a lane entry APN never wrote, or no reader, is one refused entry; the chai
   assert.equal(proved.ok, true, JSON.stringify(proved.error));
   assert.equal((proved.operation as Json).state, "revoked_unused", "the listing never blocks the chain proof");
   assert.deepEqual((proved.operation as Json).revocation_requests, [{ request_id_hash: null, outcome: "refused", status: null,
-    transaction_hash: null, mfa: null, response_hash: null, reason: "provider_request_reference_listing_invalid", check: null }]);
+    transaction_hash: null, mfa: null, failure: null, response_hash: null, reason: "provider_request_reference_listing_invalid", check: null }]);
   assert.equal(f.revocationReader.sessionReads, 0);
   const other = await temporaryState(); t.after(other.cleanup);
   const g = await mmFixture(other.root), unwired = await unresolved(g);

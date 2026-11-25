@@ -1096,9 +1096,21 @@ absent when the operation holds no sealed disable request.
 | `status` | MetaMask's job status token (for example `AWAITING_MFA`, `BROADCASTED`, `CONFIRMED`, `FAILED`), for `verified` only. |
 | `transaction_hash` | The transaction hash MetaMask named, or `null`. |
 | `mfa` | For `AWAITING_MFA`: `{ "expires_at", "auth_method" }` of the owner's approval window, each `null` when MetaMask gave none in a closed form. |
+| `failure` | For `verified` only, when MetaMask's job names `failureCode` or `failureDescription` (for example on `FAILED`): `{ "code", "code_withheld", "description", "description_withheld" }`. Otherwise `null`. |
 | `response_hash` | The SHA-256 of MetaMask's answer, for `verified` only. |
 | `reason` | For `refused` only: a closed reason, never provider text. |
 | `check` | For `refused` only: the answer check that refused, or `null`. |
+
+`failure` is MetaMask's own reason for the job's end, as its server gave it. `code` is `failureCode` when it is a token
+of capital letters, digits and `_` (at most 64), for example `POLICY_EVALUATOR_FAILED`. `description` is
+`failureDescription` when it is short plain prose: at most 200 characters of ASCII letters, digits, spaces and
+`. , : ; _ ( ) ' -`, with no word that names a credential or a session (`token`, `session`, `secret`, `bearer`, `key` after
+`api`, and similar), and no run of 8 or more letters and digits that holds a digit or is hex letters alone (an address,
+a hash, a UUID part or a key). Any other form is withheld: the field is `null` and its `*_withheld` flag is `true`. A
+field MetaMask did not give is `null` with the flag `false`. For example, QA's Base disable on 2026-11-25 reads
+`{ "code": "POLICY_EVALUATOR_FAILED", "code_withheld": false, "description": "Policy evaluator outflow.limit_usd degraded: unavailable", "description_withheld": false }`:
+MetaMask could not run its USD outflow limit check, and it names no transaction. `reason` stays `null` on a `verified`
+entry; it describes only a read that refused.
 
 Each entry is MetaMask's word, never chain evidence, and nothing of it is written to the operation. No failure here
 fails the resume. A failure of one request is that entry's own `reason`:
