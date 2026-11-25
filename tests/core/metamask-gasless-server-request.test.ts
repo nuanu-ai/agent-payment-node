@@ -7,6 +7,7 @@ import { sha256 } from "../../src/canonical.js";
 import { executeHelperRequest, MetaMaskGaslessProviderClient, MM_HELPER_VERSION, type MetaMaskGaslessHelperRunner } from
   "../../src/metamask-gasless/client/index.js";
 import type { FetchExchangeRequest, FetchExchangeResponse } from "../../src/metamask-gasless/client/network.js";
+import { isSafeFailureCode, isSafeFailureDescription } from "../../src/metamask-gasless/client/provider-failure.js";
 import { readMetaMaskNativeServerRequest } from "../../src/metamask-native-request-server-read.js";
 import { NOW, OWNER, PROJECT, SdkExchange, syntheticHome } from "./metamask-gasless-client-fixtures/sdk.js";
 
@@ -39,7 +40,7 @@ test("one GET of the request's own status in the session's project, checked and 
     // AWAITING_MFA alone carries the owner's window: the job's exact approval.expiresAt and the session's authMethod.
     const mfa = status === "AWAITING_MFA" ? { expiresAt: "2030-01-01T00:10:00.000Z", authMethod: "qr" } : null;
     assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: true,
-      result: { requestId: RID, found: true, status, txHash, mfa, responseHash: sha256(exchange.bodies[0]!) } });
+      result: { requestId: RID, found: true, status, txHash, mfa, failure: null, responseHash: sha256(exchange.bodies[0]!) } });
     assert.equal(JSON.stringify(result).includes(PRIVATE), false, "no approval detail, link or other metadata leaves the helper");
     assert.equal(exchange.requests.length, 1); assert.equal(exchange.requests[0]!.url, REQUEST_URL); assert.equal(exchange.requests[0]!.method, "GET");
     assert.equal(exchange.requests[0]!.headers.authorization, `Bearer ${home.token}`); assert.equal(exchange.beforeSends, 0);
@@ -89,7 +90,7 @@ test("an answer naming another request, sender or chain, or with another status 
   }
   const missing = new RequestExchange({}, 404);
   assert.deepEqual(await executeHelperRequest(read(), { homeDirectory: home.home, now: () => NOW, exchange: missing }),
-    { version: MM_HELPER_VERSION, ok: true, result: { requestId: RID, found: false, status: null, txHash: null, mfa: null, responseHash: null } });
+    { version: MM_HELPER_VERSION, ok: true, result: { requestId: RID, found: false, status: null, txHash: null, mfa: null, failure: null, responseHash: null } });
   assert.equal(missing.requests.length, 1);
   const denied = new RequestExchange({}, 401);
   assert.deepEqual(await executeHelperRequest(read(), { homeDirectory: home.home, now: () => NOW, exchange: denied }),
@@ -104,14 +105,15 @@ test("the native read runs through the parent client and names every refusal pre
   const client = new MetaMaskGaslessProviderClient({ environment: { HOME: home.home }, clock: { now: () => NOW }, runner });
   const sender = getAddress(OWNER);
   assert.deepEqual(await readMetaMaskNativeServerRequest(RID, sha256(PROJECT), { sender, chainId: 1 }, client),
-    { outcome: "verified", status: "CONFIRMED", transactionHash: `0x${"44".repeat(32)}`, mfa: null, responseHash: sha256(exchange.bodies[0]!) });
+    { outcome: "verified", status: "CONFIRMED", transactionHash: `0x${"44".repeat(32)}`, mfa: null, failure: null, responseHash: sha256(exchange.bodies[0]!) });
   exchange = new RequestExchange({ status: "AWAITING_MFA", txHash: null });
   assert.deepEqual(await readMetaMaskNativeServerRequest(RID, sha256(PROJECT), { sender, chainId: 1 }, client),
     { outcome: "verified", status: "AWAITING_MFA", transactionHash: null, mfa: { expiresAt: "2030-01-01T00:10:00.000Z", authMethod: "qr" },
-      responseHash: sha256(exchange.bodies[0]!) });
+      failure: null, responseHash: sha256(exchange.bodies[0]!) });
   exchange = new RequestExchange({ status: "AWAITING_MFA", txHash: null, approval: { expiresAt: "soon" } });
   assert.deepEqual((await readMetaMaskNativeServerRequest(RID, sha256(PROJECT), { sender, chainId: 1 }, client)) as unknown,
-    { outcome: "verified", status: "AWAITING_MFA", transactionHash: null, mfa: { expiresAt: null, authMethod: "qr" }, responseHash: sha256(exchange.bodies[0]!) },
+    { outcome: "verified", status: "AWAITING_MFA", transactionHash: null, mfa: { expiresAt: null, authMethod: "qr" }, failure: null,
+      responseHash: sha256(exchange.bodies[0]!) },
     "a window not in its exact form is null, never guessed");
   assert.deepEqual(await readMetaMaskNativeServerRequest(RID, sha256("another-project"), { sender, chainId: 1 }, client),
     { outcome: "refused", reason: "metamask_session_project_changed", check: null });
@@ -124,4 +126,89 @@ test("the native read runs through the parent client and names every refusal pre
   for (const id of ["TEST-pending-request", RID.toUpperCase(), ""]) assert.deepEqual(await readMetaMaskNativeServerRequest(id, sha256(PROJECT),
     { sender, chainId: 1 }, client), { outcome: "refused", reason: "provider_request_binding_invalid", check: null });
   assert.equal(runs, before, "an id that is not a canonical UUID never reaches the helper");
+});
+
+// 0.5.118, QA on the live Base revoke: MetaMask answered FAILED with failureCode POLICY_EVALUATOR_FAILED and the
+// description "Policy evaluator outflow.limit_usd degraded: unavailable", and APN showed only the status.
+const POLICY = "Policy evaluator outflow.limit_usd degraded: unavailable";
+const CREDENTIALS = "Bearer PRIVATE https://rpc.invalid/?key=PRIVATE Authorization: PRIVATE";
+
+test("a failed job's own code and description leave the helper only in their closed form", async (t) => {
+  const home = await syntheticHome(); t.after(home.cleanup);
+  const kept = (code: string | null, description: string | null, codeWithheld = false, descriptionWithheld = false) =>
+    ({ code, codeWithheld, description, descriptionWithheld });
+  for (const [patch, failure] of [
+    [{ failureCode: "POLICY_EVALUATOR_FAILED", failureDescription: POLICY }, kept("POLICY_EVALUATOR_FAILED", POLICY)],
+    [{ failureCode: "POLICY_EVALUATOR_FAILED" }, kept("POLICY_EVALUATOR_FAILED", null)],
+    [{ failureCode: "POLICY_EVALUATOR_FAILED", failureDescription: CREDENTIALS }, kept("POLICY_EVALUATOR_FAILED", null, false, true)],
+    [{ failureCode: "policy evaluator failed", failureDescription: "Outflow limit exceeded (daily, USD)" },
+      kept(null, "Outflow limit exceeded (daily, USD)", true, false)],
+    [{ failureCode: 7, failureDescription: { text: PRIVATE } }, kept(null, null, true, true)],
+    [{ failureCode: "JBSWY3DPEHPK3PXP", failureDescription: POLICY }, kept(null, POLICY, true, false)],
+    [{ failureCode: "", failureDescription: "" }, null],
+    [{ failureCode: null, failureDescription: null }, null],
+  ] as const) {
+    const exchange = new RequestExchange({ status: "FAILED", txHash: null, ...patch });
+    const result = await executeHelperRequest(read(), { homeDirectory: home.home, now: () => NOW, exchange });
+    assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: true,
+      result: { requestId: RID, found: true, status: "FAILED", txHash: null, mfa: null, failure, responseHash: sha256(exchange.bodies[0]!) } },
+      JSON.stringify(patch));
+    for (const secret of ["PRIVATE", PRIVATE, "rpc.invalid"]) assert.equal(JSON.stringify(result).includes(secret), false, secret);
+    assert.equal(exchange.requests.length, 1); assert.equal(exchange.requests[0]!.method, "GET"); assert.equal(exchange.beforeSends, 0);
+  }
+});
+
+test("only short plain prose passes as a failure description", () => {
+  for (const text of [POLICY, "Outflow limit exceeded (daily, USD)", "Insufficient funds for gas", "Request expired before approval"]) {
+    assert.equal(isSafeFailureDescription(text), true, text);
+  }
+  for (const text of ["", "x".repeat(201), "see https://status.example", "key=abc", "owner@example.com", "line\nbreak", "tab\there",
+    "Bearer abc", "Session expired", "Invalid token", "API key revoked", "sender 0x1111111111111111111111111111111111111111",
+    "request 8cc50f3c-0000-4000-8000-000000000001", "nonce deadbeef", "id abcdefgh12", "ключ отклонён", 'quoted "text"', "a+b", "100%",
+    "path\\name", "hash #1", "x & y", "connect ECONNREFUSED 10.0.3.17:5432", "upstream mimir.internal.metamask.io unavailable",
+    "recipient 0xAbC1...9fE2 refused", "req-ab12cd-ef34gh", "job 1234567", "Invalid key QwErTyUiOpAsDfGh", "value QwErTyUiOpAsDfGh"]) {
+    assert.equal(isSafeFailureDescription(text), false, text);
+  }
+});
+
+test("only a token with no opaque part passes as a failure code", () => {
+  for (const code of ["POLICY_EVALUATOR_FAILED", "FAILED", "HTTP_503", "OUTFLOW_LIMIT_USD"]) assert.equal(isSafeFailureCode(code), true, code);
+  for (const code of ["", "policy_failed", "_FAILED", "POLICY-FAILED", "A".repeat(65), "JBSWY3DPEHPK3PXP", "A1B2C3D4E5F60718293A4B5C6D7E8F90",
+    "ERROR_DEADBEEF", "REQUEST_8CC50F3C", "ERR_10001"]) {
+    assert.equal(isSafeFailureCode(code), false, code);
+  }
+});
+
+test("the parent refuses a failure the helper did not give in its closed form", async (t) => {
+  const home = await syntheticHome(); t.after(home.cleanup);
+  const sender = getAddress(OWNER);
+  const reading = (status: number, failure: unknown) => {
+    const exchange = new RequestExchange({ status: "FAILED", txHash: null, failureCode: "POLICY_EVALUATOR_FAILED", failureDescription: POLICY }, status);
+    const runner: MetaMaskGaslessHelperRunner = { async run(request) {
+      const response = await executeHelperRequest(request, { homeDirectory: home.home, now: () => NOW, exchange }) as unknown as { result: Record<string, unknown> };
+      return failure === undefined ? response : { ...response, result: { ...response.result, failure } };
+    } };
+    return new MetaMaskGaslessProviderClient({ environment: { HOME: home.home }, clock: { now: () => NOW }, runner });
+  };
+  const verified = await readMetaMaskNativeServerRequest(RID, sha256(PROJECT), { sender, chainId: 1 }, reading(200, undefined));
+  assert.deepEqual(verified.outcome === "verified" && [verified.status, verified.transactionHash, verified.failure],
+    ["FAILED", null, { code: "POLICY_EVALUATOR_FAILED", codeWithheld: false, description: POLICY, descriptionWithheld: false }]);
+  for (const failure of [
+    { code: "policy", codeWithheld: false, description: null, descriptionWithheld: false },
+    { code: "A1B2C3D4E5F60718293A4B5C6D7E8F90", codeWithheld: false, description: null, descriptionWithheld: false },
+    { code: null, codeWithheld: false, description: CREDENTIALS, descriptionWithheld: false },
+    { code: "POLICY_EVALUATOR_FAILED", codeWithheld: true, description: null, descriptionWithheld: false },
+    { code: null, codeWithheld: false, description: POLICY, descriptionWithheld: true },
+    { code: null, codeWithheld: false, description: null, descriptionWithheld: false },
+    { code: null, codeWithheld: "no", description: null, descriptionWithheld: true },
+    { code: "POLICY_EVALUATOR_FAILED", codeWithheld: false, description: null, descriptionWithheld: false, extra: true },
+    "POLICY_EVALUATOR_FAILED",
+  ]) {
+    assert.deepEqual(await readMetaMaskNativeServerRequest(RID, sha256(PROJECT), { sender, chainId: 1 }, reading(200, failure)),
+      { outcome: "refused", reason: "mm_gasless_provider_unavailable", check: null }, JSON.stringify(failure));
+  }
+  // A 404 names no job, so it can name no failure.
+  assert.deepEqual(await readMetaMaskNativeServerRequest(RID, sha256(PROJECT), { sender, chainId: 1 },
+    reading(404, { code: "POLICY_EVALUATOR_FAILED", codeWithheld: false, description: null, descriptionWithheld: false })),
+    { outcome: "refused", reason: "mm_gasless_provider_unavailable", check: null });
 });

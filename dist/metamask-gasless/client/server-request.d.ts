@@ -1,5 +1,6 @@
 import type { Hex } from "../../model.js";
 import { type MetaMaskJobTx } from "./job-tx.js";
+import { type MetaMaskProviderFailure } from "./provider-failure.js";
 import { type MetaMaskApprovalWindow } from "./server-transaction.js";
 import { type SubmitCheck } from "./submit-diagnostic.js";
 /**
@@ -19,8 +20,10 @@ export interface MetaMaskServerRequestQuery {
  * What the server answered, as bound fields only. `found`: the answer named this request, kind transaction, the sender
  * and the chain; `status` is its job status token and `responseHash` the SHA-256 of the answer's bytes. `mfa`, for
  * AWAITING_MFA only, is the owner's approval window: the job's `approval.expiresAt` in its exact form and the session's
- * `authMethod` (server-transaction.ts `approvalWindow`). Not found: the server answered 404 for this id in this project,
- * which proves nothing about the request. No other approval detail, link, signature or metadata leaves the helper.
+ * `authMethod` (server-transaction.ts `approvalWindow`). `failure` is the job's `failureCode` and `failureDescription`
+ * as provider-failure.ts reduces them, or `null` when it names neither. Not found: the server answered 404 for this id in
+ * this project, which proves nothing about the request. No other approval detail, link, signature or metadata leaves
+ * the helper.
  */
 export type MetaMaskServerRequestRead = {
     readonly requestId: string;
@@ -28,6 +31,7 @@ export type MetaMaskServerRequestRead = {
     readonly status: string;
     readonly txHash: Hex | null;
     readonly mfa: MetaMaskApprovalWindow | null;
+    readonly failure: MetaMaskProviderFailure | null;
     readonly responseHash: string;
 } | {
     readonly requestId: string;
@@ -35,6 +39,7 @@ export type MetaMaskServerRequestRead = {
     readonly status: null;
     readonly txHash: null;
     readonly mfa: null;
+    readonly failure: null;
     readonly responseHash: null;
 };
 export declare function serverRequestQuery(value: unknown): MetaMaskServerRequestQuery;

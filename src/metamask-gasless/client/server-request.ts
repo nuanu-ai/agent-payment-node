@@ -3,6 +3,7 @@ import type { Hex } from "../../model.js";
 import { mmFail } from "../reasons.js";
 import { mmCanonicalAddress, mmExact, mmHash, mmHex, mmUuid } from "../validation.js";
 import { jobTx, type MetaMaskJobTx } from "./job-tx.js";
+import { assertProviderFailure, providerFailure, type MetaMaskProviderFailure } from "./provider-failure.js";
 import { approvalWindow, assertApprovalWindow, type MetaMaskApprovalWindow } from "./server-transaction.js";
 import { submitToken, type SubmitCheck } from "./submit-diagnostic.js";
 
@@ -23,14 +24,16 @@ export interface MetaMaskServerRequestQuery {
  * What the server answered, as bound fields only. `found`: the answer named this request, kind transaction, the sender
  * and the chain; `status` is its job status token and `responseHash` the SHA-256 of the answer's bytes. `mfa`, for
  * AWAITING_MFA only, is the owner's approval window: the job's `approval.expiresAt` in its exact form and the session's
- * `authMethod` (server-transaction.ts `approvalWindow`). Not found: the server answered 404 for this id in this project,
- * which proves nothing about the request. No other approval detail, link, signature or metadata leaves the helper.
+ * `authMethod` (server-transaction.ts `approvalWindow`). `failure` is the job's `failureCode` and `failureDescription`
+ * as provider-failure.ts reduces them, or `null` when it names neither. Not found: the server answered 404 for this id in
+ * this project, which proves nothing about the request. No other approval detail, link, signature or metadata leaves
+ * the helper.
  */
 export type MetaMaskServerRequestRead =
   | { readonly requestId: string; readonly found: true; readonly status: string; readonly txHash: Hex | null;
-      readonly mfa: MetaMaskApprovalWindow | null; readonly responseHash: string }
+      readonly mfa: MetaMaskApprovalWindow | null; readonly failure: MetaMaskProviderFailure | null; readonly responseHash: string }
   | { readonly requestId: string; readonly found: false; readonly status: null; readonly txHash: null; readonly mfa: null;
-      readonly responseHash: null };
+      readonly failure: null; readonly responseHash: null };
 
 const REASON = "mm_gasless_provider_unavailable";
 
@@ -44,11 +47,11 @@ export function serverRequestQuery(value: unknown): MetaMaskServerRequestQuery {
 
 /** The helper's answer as the parent accepts it: exactly these fields, for exactly the asked request. */
 export function serverRequestRead(value: unknown, query: MetaMaskServerRequestQuery): MetaMaskServerRequestRead {
-  const r = mmExact(value, ["requestId", "found", "status", "txHash", "mfa", "responseHash"], REASON);
+  const r = mmExact(value, ["requestId", "found", "status", "txHash", "mfa", "failure", "responseHash"], REASON);
   if (r.requestId !== query.requestId || typeof r.found !== "boolean") mmFail(REASON);
   if (r.found ? submitToken(r.status) === null || (r.txHash !== null && mmHex(r.txHash, 32, REASON) !== r.txHash) || mmHash(r.responseHash, REASON) !== r.responseHash
-    : r.status !== null || r.txHash !== null || r.mfa !== null || r.responseHash !== null) mmFail(REASON);
-  if (r.found) assertApprovalWindow(r.mfa, r.status as string, REASON);
+    : r.status !== null || r.txHash !== null || r.mfa !== null || r.failure !== null || r.responseHash !== null) mmFail(REASON);
+  if (r.found) { assertApprovalWindow(r.mfa, r.status as string, REASON); assertProviderFailure(r.failure, REASON); }
   return r as unknown as MetaMaskServerRequestRead;
 }
 
@@ -75,9 +78,10 @@ export function serverRequestAnswer(value: unknown, query: MetaMaskServerRequest
   if (value.txHash !== undefined && value.txHash !== null) seen.check = "response_hash";
   const txHash = value.txHash === undefined || value.txHash === null ? null : mmHex(value.txHash, 32, REASON);
   seen.check = undefined;
-  return { requestId: query.requestId, found: true, status, txHash, mfa: approvalWindow(status, value.approval, sessionAuthMethod), responseHash };
+  return { requestId: query.requestId, found: true, status, txHash, mfa: approvalWindow(status, value.approval, sessionAuthMethod),
+    failure: providerFailure(value.failureCode, value.failureDescription), responseHash };
 }
 
 export function serverRequestNotFound(query: MetaMaskServerRequestQuery): MetaMaskServerRequestRead {
-  return { requestId: query.requestId, found: false, status: null, txHash: null, mfa: null, responseHash: null };
+  return { requestId: query.requestId, found: false, status: null, txHash: null, mfa: null, failure: null, responseHash: null };
 }

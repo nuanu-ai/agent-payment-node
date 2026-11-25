@@ -2,6 +2,7 @@ import { isPlainRecord } from "../../canonical.js";
 import { mmFail } from "../reasons.js";
 import { mmCanonicalAddress, mmExact, mmHash, mmHex, mmUuid } from "../validation.js";
 import { jobTx } from "./job-tx.js";
+import { assertProviderFailure, providerFailure } from "./provider-failure.js";
 import { approvalWindow, assertApprovalWindow } from "./server-transaction.js";
 import { submitToken } from "./submit-diagnostic.js";
 const REASON = "mm_gasless_provider_unavailable";
@@ -17,14 +18,16 @@ export function serverRequestQuery(value) {
 }
 /** The helper's answer as the parent accepts it: exactly these fields, for exactly the asked request. */
 export function serverRequestRead(value, query) {
-    const r = mmExact(value, ["requestId", "found", "status", "txHash", "mfa", "responseHash"], REASON);
+    const r = mmExact(value, ["requestId", "found", "status", "txHash", "mfa", "failure", "responseHash"], REASON);
     if (r.requestId !== query.requestId || typeof r.found !== "boolean")
         mmFail(REASON);
     if (r.found ? submitToken(r.status) === null || (r.txHash !== null && mmHex(r.txHash, 32, REASON) !== r.txHash) || mmHash(r.responseHash, REASON) !== r.responseHash
-        : r.status !== null || r.txHash !== null || r.mfa !== null || r.responseHash !== null)
+        : r.status !== null || r.txHash !== null || r.mfa !== null || r.failure !== null || r.responseHash !== null)
         mmFail(REASON);
-    if (r.found)
+    if (r.found) {
         assertApprovalWindow(r.mfa, r.status, REASON);
+        assertProviderFailure(r.failure, REASON);
+    }
     return r;
 }
 /**
@@ -54,9 +57,10 @@ export function serverRequestAnswer(value, query, responseHash, sessionAuthMetho
         seen.check = "response_hash";
     const txHash = value.txHash === undefined || value.txHash === null ? null : mmHex(value.txHash, 32, REASON);
     seen.check = undefined;
-    return { requestId: query.requestId, found: true, status, txHash, mfa: approvalWindow(status, value.approval, sessionAuthMethod), responseHash };
+    return { requestId: query.requestId, found: true, status, txHash, mfa: approvalWindow(status, value.approval, sessionAuthMethod),
+        failure: providerFailure(value.failureCode, value.failureDescription), responseHash };
 }
 export function serverRequestNotFound(query) {
-    return { requestId: query.requestId, found: false, status: null, txHash: null, mfa: null, responseHash: null };
+    return { requestId: query.requestId, found: false, status: null, txHash: null, mfa: null, failure: null, responseHash: null };
 }
 //# sourceMappingURL=server-request.js.map
