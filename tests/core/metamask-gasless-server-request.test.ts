@@ -7,7 +7,7 @@ import { sha256 } from "../../src/canonical.js";
 import { executeHelperRequest, MetaMaskGaslessProviderClient, MM_HELPER_VERSION, type MetaMaskGaslessHelperRunner } from
   "../../src/metamask-gasless/client/index.js";
 import type { FetchExchangeRequest, FetchExchangeResponse } from "../../src/metamask-gasless/client/network.js";
-import { isSafeFailureDescription } from "../../src/metamask-gasless/client/provider-failure.js";
+import { isSafeFailureCode, isSafeFailureDescription } from "../../src/metamask-gasless/client/provider-failure.js";
 import { readMetaMaskNativeServerRequest } from "../../src/metamask-native-request-server-read.js";
 import { NOW, OWNER, PROJECT, SdkExchange, syntheticHome } from "./metamask-gasless-client-fixtures/sdk.js";
 
@@ -144,7 +144,8 @@ test("a failed job's own code and description leave the helper only in their clo
     [{ failureCode: "policy evaluator failed", failureDescription: "Outflow limit exceeded (daily, USD)" },
       kept(null, "Outflow limit exceeded (daily, USD)", true, false)],
     [{ failureCode: 7, failureDescription: { text: PRIVATE } }, kept(null, null, true, true)],
-    [{ failureCode: "", failureDescription: "" }, kept(null, null, true, true)],
+    [{ failureCode: "JBSWY3DPEHPK3PXP", failureDescription: POLICY }, kept(null, POLICY, true, false)],
+    [{ failureCode: "", failureDescription: "" }, null],
     [{ failureCode: null, failureDescription: null }, null],
   ] as const) {
     const exchange = new RequestExchange({ status: "FAILED", txHash: null, ...patch });
@@ -164,8 +165,17 @@ test("only short plain prose passes as a failure description", () => {
   for (const text of ["", "x".repeat(201), "see https://status.example", "key=abc", "owner@example.com", "line\nbreak", "tab\there",
     "Bearer abc", "Session expired", "Invalid token", "API key revoked", "sender 0x1111111111111111111111111111111111111111",
     "request 8cc50f3c-0000-4000-8000-000000000001", "nonce deadbeef", "id abcdefgh12", "ключ отклонён", 'quoted "text"', "a+b", "100%",
-    "path\\name", "hash #1", "x & y"]) {
+    "path\\name", "hash #1", "x & y", "connect ECONNREFUSED 10.0.3.17:5432", "upstream mimir.internal.metamask.io unavailable",
+    "recipient 0xAbC1...9fE2 refused", "req-ab12cd-ef34gh", "job 1234567", "Invalid key QwErTyUiOpAsDfGh", "value QwErTyUiOpAsDfGh"]) {
     assert.equal(isSafeFailureDescription(text), false, text);
+  }
+});
+
+test("only a token with no opaque part passes as a failure code", () => {
+  for (const code of ["POLICY_EVALUATOR_FAILED", "FAILED", "HTTP_503", "OUTFLOW_LIMIT_USD"]) assert.equal(isSafeFailureCode(code), true, code);
+  for (const code of ["", "policy_failed", "_FAILED", "POLICY-FAILED", "A".repeat(65), "JBSWY3DPEHPK3PXP", "A1B2C3D4E5F60718293A4B5C6D7E8F90",
+    "ERROR_DEADBEEF", "REQUEST_8CC50F3C", "ERR_10001"]) {
+    assert.equal(isSafeFailureCode(code), false, code);
   }
 });
 
@@ -185,6 +195,7 @@ test("the parent refuses a failure the helper did not give in its closed form", 
     ["FAILED", null, { code: "POLICY_EVALUATOR_FAILED", codeWithheld: false, description: POLICY, descriptionWithheld: false }]);
   for (const failure of [
     { code: "policy", codeWithheld: false, description: null, descriptionWithheld: false },
+    { code: "A1B2C3D4E5F60718293A4B5C6D7E8F90", codeWithheld: false, description: null, descriptionWithheld: false },
     { code: null, codeWithheld: false, description: CREDENTIALS, descriptionWithheld: false },
     { code: "POLICY_EVALUATOR_FAILED", codeWithheld: true, description: null, descriptionWithheld: false },
     { code: null, codeWithheld: false, description: POLICY, descriptionWithheld: true },

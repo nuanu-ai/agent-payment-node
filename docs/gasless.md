@@ -1101,13 +1101,21 @@ absent when the operation holds no sealed disable request.
 | `reason` | For `refused` only: a closed reason, never provider text. |
 | `check` | For `refused` only: the answer check that refused, or `null`. |
 
-`failure` is MetaMask's own reason for the job's end, as its server gave it. `code` is `failureCode` when it is a token
-of capital letters, digits and `_` (at most 64), for example `POLICY_EVALUATOR_FAILED`. `description` is
-`failureDescription` when it is short plain prose: at most 200 characters of ASCII letters, digits, spaces and
-`. , : ; _ ( ) ' -`, with no word that names a credential or a session (`token`, `session`, `secret`, `bearer`, `key` after
-`api`, and similar), and no run of 8 or more letters and digits that holds a digit or is hex letters alone (an address,
-a hash, a UUID part or a key). Any other form is withheld: the field is `null` and its `*_withheld` flag is `true`. A
-field MetaMask did not give is `null` with the flag `false`. For example, QA's Base disable on 2026-11-25 reads
+`failure` is MetaMask's own reason for the job's end, as its server gave it. A run below is a run of letters and
+digits; it is opaque when it has 5 or more characters with a digit, 8 or more hex letters alone, or 8 or more letters
+whose case turns from lower to upper three times or more.
+
+- `code` is `failureCode` when it is a token of capital letters, digits and `_` (at most 64, starting with a letter) and
+  no part between `_` is opaque, for example `POLICY_EVALUATOR_FAILED`.
+- `description` is `failureDescription` when it is short plain prose: at most 200 characters of ASCII letters, digits,
+  spaces and `. , : ; _ ( ) ' -`; no word that names a credential or a session (`token`, `key`, `session`, `secret`,
+  `bearer`, `password`, `signature`, and similar); no host, IP address or other three dot-joined parts; no `0x` value;
+  and no opaque run.
+- Any other form is withheld: the field is `null` and its `*_withheld` flag is `true`. A field MetaMask did not give,
+  or gave empty, is `null` with the flag `false`; `failure` is `null` when it gave neither.
+
+These rules keep out the forms a credential, a URL, an address or an identifier takes. They also withhold some plain
+descriptions, such as one that names a session or a token balance. For example, QA's Base disable on 2026-11-25 reads
 `{ "code": "POLICY_EVALUATOR_FAILED", "code_withheld": false, "description": "Policy evaluator outflow.limit_usd degraded: unavailable", "description_withheld": false }`:
 MetaMask could not run its USD outflow limit check, and it names no transaction. `reason` stays `null` on a `verified`
 entry; it describes only a read that refused.
