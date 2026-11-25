@@ -138,14 +138,18 @@ async function readOne(reading, hash, requestId, project) {
     if (answer.outcome === "refused")
         return refused(hash, answer.reason, answer.check);
     if (answer.outcome === "not_found") {
-        return { request_id_hash: hash, outcome: "not_found", status: null, transaction_hash: null, mfa: null, response_hash: null, reason: null, check: null };
+        return { request_id_hash: hash, outcome: "not_found", status: null, transaction_hash: null, mfa: null, failure: null, response_hash: null,
+            reason: null, check: null };
     }
+    const failure = answer.failure;
     return { request_id_hash: hash, outcome: "verified", status: answer.status, transaction_hash: answer.transactionHash,
         mfa: answer.mfa === null ? null : { expires_at: answer.mfa.expiresAt, auth_method: answer.mfa.authMethod },
+        failure: failure === null ? null : { code: failure.code, code_withheld: failure.codeWithheld, description: failure.description,
+            description_withheld: failure.descriptionWithheld },
         response_hash: answer.responseHash, reason: null, check: null };
 }
 function refused(hash, reason, check) {
-    return { request_id_hash: hash, outcome: "refused", status: null, transaction_hash: null, mfa: null, response_hash: null, reason, check };
+    return { request_id_hash: hash, outcome: "refused", status: null, transaction_hash: null, mfa: null, failure: null, response_hash: null, reason, check };
 }
 const REASON = /^[a-z][a-z0-9_]{0,63}$/u;
 /** An APN refusal's own closed reason, else its error code; any other failure is `unclassified`. Never error text. */

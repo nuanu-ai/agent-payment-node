@@ -43,9 +43,21 @@ export interface MetaMaskRevocationReadDependencies {
     readonly reader: MetaMaskRevocationReadPort;
 }
 /**
+ * MetaMask's failure code and description of a disable request's job, as provider-failure.ts keeps them: `code` a closed
+ * token and `description` short plain prose, each `null` when MetaMask gave none or gave it in another form, which the
+ * `*_withheld` flag then says.
+ */
+export interface MetaMaskRevocationRequestFailure {
+    readonly code: string | null;
+    readonly code_withheld: boolean;
+    readonly description: string | null;
+    readonly description_withheld: boolean;
+}
+/**
  * One sealed disable request as resume reports it. `verified`: MetaMask's server named this request, kind transaction,
- * the server wallet and the chain, with its job `status`, `transaction_hash` when it has one and, for AWAITING_MFA, the
- * owner's approval window (`mfa`). `not_found`: the server answered 404 for this id in the signed-in session's project,
+ * the server wallet and the chain, with its job `status`, `transaction_hash` when it has one, for AWAITING_MFA the
+ * owner's approval window (`mfa`) and, when the job names one, MetaMask's own failure code and description (`failure`,
+ * for example `POLICY_EVALUATOR_FAILED` on a FAILED job). `not_found`: the server answered 404 for this id in the signed-in session's project,
  * which proves nothing about the request. `refused`: nothing usable was read; `reason` is a closed reason and `check` the
  * answer check that refused. `request_id_hash` is `null` only on the one entry that says the operation's sealed requests
  * could not be listed or read at all. Every field is MetaMask's word, never chain evidence, and nothing of it is written
@@ -60,6 +72,7 @@ export interface MetaMaskRevocationRequestRead {
         readonly expires_at: string | null;
         readonly auth_method: string | null;
     } | null;
+    readonly failure: MetaMaskRevocationRequestFailure | null;
     readonly response_hash: string | null;
     readonly reason: string | null;
     readonly check: string | null;
